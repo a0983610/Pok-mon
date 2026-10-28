@@ -1,0 +1,1166 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>寶可夢冠軍屬性表</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f5f6fa;
+  --surface: #ffffff;
+  --surface-2: #eceef4;
+  --text: #1c2030;
+  --muted: #5f6680;
+  --border: #dde1ea;
+  --accent: #e3350d;
+  --accent-fg: #ffffff;
+  --focus: #2f6fed;
+  --se: #2b8a3e;
+  --se-2: #1b6e2f;
+  --nve: #d9363e;
+  --nve-2: #9c1f25;
+  --imm: #23262f;
+  --imm-fg: #ffffff;
+  --hl: #e4ecff;
+  --zebra: #f8f9fc;
+  --good-bg: #e6f5e9;
+  --bad-bg: #fdeced;
+  --neutral: #c5cad6;
+  --shadow: 0 1px 2px rgba(20, 24, 40, .05), 0 6px 20px rgba(20, 24, 40, .06);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #11131a;
+    --surface: #1a1d26;
+    --surface-2: #252935;
+    --text: #e7e9f0;
+    --muted: #9aa1b6;
+    --border: #2f3445;
+    --accent: #ff5b3a;
+    --focus: #7aa2ff;
+    --imm: #e7e9f0;
+    --imm-fg: #11131a;
+    --hl: #263049;
+    --zebra: #1d2029;
+    --good-bg: #17301f;
+    --bad-bg: #3a1b1f;
+    --neutral: #4a5064;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.6 system-ui, -apple-system, "Segoe UI", "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif;
+}
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.wrap { max-width: 1080px; margin: 0 auto; padding: 20px 16px 48px; }
+
+/* ---------- 頁首 / 分頁 ---------- */
+header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+header svg { flex: none; }
+h1 { font-size: 22px; margin: 0; line-height: 1.3; }
+.sub { color: var(--muted); font-size: 13px; }
+.tabs { display: flex; gap: 4px; background: var(--surface-2); padding: 4px; border-radius: 12px; margin-bottom: 16px; width: fit-content; max-width: 100%; }
+.tabs button {
+  border: 0; background: transparent; padding: 8px 16px; border-radius: 9px; cursor: pointer;
+  font-weight: 600; color: var(--muted); white-space: nowrap;
+}
+.tabs button[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px; box-shadow: var(--shadow); }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+h2 { font-size: 18px; margin: 0 0 4px; }
+h3 { font-size: 16px; margin: 20px 0 8px; }
+
+/* ---------- 屬性標籤 ---------- */
+.chip {
+  display: inline-flex; align-items: center; justify-content: center; gap: 3px;
+  background: var(--c); color: var(--fg); border-radius: 999px; padding: 2px 10px;
+  font-weight: 700; font-size: 14px; line-height: 1.5; white-space: nowrap; border: 0;
+}
+.chip small { font-size: 12px; font-weight: 700; opacity: .85; }
+.duo { display: inline-flex; gap: 4px; vertical-align: middle; }
+.mtag {
+  display: inline-block; min-width: 34px; text-align: center; padding: 1px 7px; border-radius: 6px;
+  font-weight: 800; font-size: 14px; font-variant-numeric: tabular-nums;
+}
+.m4 { background: var(--se-2); color: #fff; }
+.m2 { background: var(--se); color: #fff; }
+.mh { background: var(--nve); color: #fff; }
+.mq { background: var(--nve-2); color: #fff; }
+.m0 { background: var(--imm); color: var(--imm-fg); }
+.mtag.m1 { background: var(--surface-2); color: var(--muted); }
+
+/* ---------- 克制表 ---------- */
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; margin-bottom: 10px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.minfo {
+  min-height: 44px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  padding: 8px 12px; margin-bottom: 10px; border-radius: 10px; background: var(--surface-2); font-size: 14px;
+}
+.mwrap { overflow: auto; max-height: 78vh; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+table.matrix { border-collapse: separate; border-spacing: 0; margin: 0 auto; }
+.matrix th, .matrix td { padding: 0; }
+.matrix thead th {
+  position: sticky; top: 0; z-index: 2; background: var(--surface);
+  vertical-align: bottom; padding: 6px 2px; border-bottom: 1px solid var(--border);
+}
+.matrix tbody th {
+  position: sticky; left: 0; z-index: 1; background: var(--surface);
+  padding: 2px 6px; text-align: right; border-right: 1px solid var(--border);
+}
+.matrix thead th.corner { left: 0; z-index: 3; border-right: 1px solid var(--border); font-size: 12px; color: var(--muted); font-weight: 600; line-height: 1.4; text-align: right; padding: 6px; }
+.matrix td {
+  width: 34px; min-width: 34px; height: 32px; text-align: center; font-weight: 800; font-size: 15px;
+  font-variant-numeric: tabular-nums; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  cursor: default;
+}
+.matrix td.m1 { background: transparent; }
+.matrix tbody tr:nth-child(even) td.m1 { background: var(--zebra); }
+.matrix tbody tr td.m1.hl { background: var(--hl); }
+.matrix td.hl-cell { outline: 3px solid var(--focus); outline-offset: -3px; }
+.vchip {
+  writing-mode: vertical-rl; text-orientation: upright; letter-spacing: 1px;
+  background: var(--c); color: var(--fg); border: 0; border-radius: 6px; padding: 6px 2px; width: 26px;
+  font-weight: 700; font-size: 13px; line-height: 1; cursor: pointer;
+}
+.rchip { cursor: pointer; min-width: 60px; }
+.matrix th.hl .vchip, .matrix th.hl .rchip { outline: 2px solid var(--text); outline-offset: 1px; }
+.note { margin-top: 10px; font-size: 13px; color: var(--muted); }
+
+/* ---------- 快速查詢 ---------- */
+.seg { display: inline-flex; background: var(--surface-2); border-radius: 999px; padding: 4px; gap: 2px; flex-wrap: wrap; }
+.seg button { border: 0; background: transparent; border-radius: 999px; padding: 6px 14px; cursor: pointer; font-weight: 600; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.look-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 8px; }
+.tbtn {
+  display: flex; flex-direction: column; align-items: center; gap: 0; padding: 8px 4px;
+  background: var(--c); color: var(--fg); border: 3px solid transparent; border-radius: 12px; cursor: pointer;
+  transition: transform .08s, opacity .12s;
+}
+.tbtn b { font-size: 16px; line-height: 1.3; }
+.tbtn small { font-size: 11px; opacity: .8; }
+.tbtn:hover { transform: translateY(-1px); }
+.pick.has-sel .tbtn[aria-pressed="false"] { opacity: .45; }
+.tbtn[aria-pressed="true"] { border-color: var(--text); transform: translateY(-2px); }
+.btn {
+  border: 1px solid var(--border); background: var(--surface); padding: 8px 16px; border-radius: 10px;
+  cursor: pointer; font-weight: 600;
+}
+.btn:hover { background: var(--surface-2); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.btn.primary:hover { filter: brightness(1.06); }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+.result { margin-top: 16px; }
+.res-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-weight: 700; font-size: 16px; margin-bottom: 4px; }
+.rg { display: grid; grid-template-columns: 130px 1fr; gap: 10px; align-items: start; padding: 10px 0; border-top: 1px solid var(--border); }
+.rg-l { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
+.rg-c { display: flex; flex-wrap: wrap; gap: 6px; }
+.none, .empty { color: var(--muted); }
+.empty { padding: 24px 0; text-align: center; }
+
+/* ---------- 配招分析 ---------- */
+.b-intro { margin: 0; }
+.b-label { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; font-weight: 700; margin: 14px 0 8px; }
+.pick.sm { grid-template-columns: repeat(auto-fill, minmax(60px, 1fr)); gap: 6px; }
+.pick.sm .tbtn { padding: 6px 2px; }
+.b-card { margin-top: 16px; }
+.b-sum { margin: 2px 0 0; font-size: 14px; color: var(--muted); }
+.b-sum b { color: var(--text); }
+.cover { margin-bottom: 6px; }
+.cover .vchip, .cover .rchip { cursor: default; }
+.matrix tr.best th, .matrix tr.best td { border-top: 2px solid var(--muted); }
+.matrix tr.best th { font-size: 13px; }
+.b-bar { display: flex; gap: 2px; height: 14px; border-radius: 4px; overflow: hidden; margin: 4px 0 6px; }
+.b-bar .m1 { background: var(--neutral); }
+.duo.pair { gap: 2px; padding: 2px; border-radius: 999px; background: var(--surface-2); }
+.pair .chip { font-size: 13px; padding: 0 8px; }
+.b-more summary { cursor: pointer; font-size: 14px; color: var(--muted); }
+.b-more[open] summary { margin-bottom: 6px; }
+.top-actions { display: flex; gap: 4px; }
+.sel {
+  font: inherit; font-size: 14px; color: var(--text); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 10px; padding: 6px 10px; max-width: 100%;
+}
+.b-rec { display: grid; gap: 6px; margin-top: 8px; }
+.b-rec button {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px; text-align: left; padding: 6px 10px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface); cursor: pointer; font-size: 14px;
+}
+.b-rec button:hover { background: var(--surface-2); }
+.b-rec .rank { font-weight: 800; color: var(--muted); min-width: 1.2em; }
+.b-rec b { font-variant-numeric: tabular-nums; }
+
+/* ---------- 隊伍分析 ---------- */
+.slots { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 12px; }
+.slot {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 64px; padding: 6px 4px;
+  border: 2px solid var(--border); border-radius: 12px; background: var(--surface); cursor: pointer;
+}
+.slot[aria-pressed="true"] { border-color: var(--accent); background: var(--good-bg); }
+.slot-n { font-size: 12px; font-weight: 700; color: var(--muted); }
+.slot .duo { flex-wrap: wrap; justify-content: center; }
+.slot .chip { font-size: 13px; padding: 0 8px; }
+.matrix.team td { width: 46px; min-width: 46px; }
+.tcol { display: inline-flex; flex-direction: column; align-items: center; gap: 3px; }
+.tcol .duo { gap: 2px; }
+.tcol .vchip { width: 20px; font-size: 12px; padding: 4px 1px; }
+.matrix.team th.cnt { font-size: 13px; color: var(--muted); }
+.matrix.team td.cnt { font-size: 14px; }
+.matrix.team td.warn { background: var(--bad-bg); color: var(--nve); }
+@media (prefers-color-scheme: dark) { .matrix.team td.warn { color: #ff7a7f; } }
+
+/* ---------- 考試 ---------- */
+.field { margin-top: 16px; }
+.field-label { font-weight: 700; margin-bottom: 8px; }
+.pills { display: flex; flex-wrap: wrap; gap: 8px; }
+.pill { position: relative; }
+.pill input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.pill span {
+  display: flex; flex-direction: column; padding: 8px 14px; border: 2px solid var(--border); border-radius: 12px;
+  background: var(--surface); font-weight: 700; min-width: 72px; text-align: center;
+}
+.pill span small { font-weight: 500; color: var(--muted); font-size: 12px; }
+.pill input:checked + span { border-color: var(--accent); background: var(--good-bg); }
+@media (prefers-color-scheme: dark) { .pill input:checked + span { background: var(--surface-2); } }
+.pill input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 2px; }
+.check { display: inline-flex; align-items: center; gap: 8px; margin-top: 16px; cursor: pointer; }
+.check input { width: 18px; height: 18px; accent-color: var(--accent); }
+.setup-actions { margin-top: 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.err { color: var(--nve); font-weight: 600; }
+.q-top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 14px; color: var(--muted); }
+.q-top b { color: var(--text); }
+.q-top .btn { margin-left: auto; padding: 4px 12px; }
+.progress { height: 6px; background: var(--surface-2); border-radius: 99px; margin: 10px 0 4px; overflow: hidden; }
+.progress div { height: 100%; width: 0; background: var(--accent); transition: width .25s; }
+.q-kind { display: inline-block; margin-top: 12px; font-size: 12px; font-weight: 700; color: var(--muted); background: var(--surface-2); padding: 2px 10px; border-radius: 99px; }
+.q-prompt { text-align: center; padding: 18px 4px 20px; font-size: 19px; line-height: 2.1; }
+.q-prompt .chip { font-size: 18px; padding: 3px 14px; }
+.q-flow { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; }
+.q-arrow { color: var(--muted); font-size: 22px; }
+.q-ask { font-weight: 700; }
+.q-ask em, .rv-q em { font-style: normal; color: var(--accent); }
+.opts { display: grid; gap: 10px; }
+.opts.n4 { grid-template-columns: repeat(4, 1fr); }
+.opts.n6 { grid-template-columns: repeat(6, 1fr); }
+.opt {
+  position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  min-height: 72px; padding: 10px 6px; border: 2px solid var(--border); border-radius: 12px; background: var(--surface); cursor: pointer;
+}
+.opt:hover:not(:disabled) { border-color: var(--muted); }
+.opt:disabled { cursor: default; }
+.opt .k { position: absolute; top: 4px; left: 8px; font-size: 11px; color: var(--muted); font-weight: 700; }
+.opt .v { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.opt .s { font-size: 12px; color: var(--muted); }
+.opt .chip { font-size: 17px; padding: 4px 16px; }
+.opt.correct { border-color: var(--se); background: var(--good-bg); }
+.opt.wrong { border-color: var(--nve); background: var(--bad-bg); }
+.opt.dim { opacity: .5; }
+.q-fb { min-height: 28px; margin-top: 14px; }
+.fb-title { font-weight: 800; font-size: 17px; }
+.fb-ok { color: var(--se); }
+.fb-ng { color: var(--nve); }
+@media (prefers-color-scheme: dark) { .fb-ok { color: #51c26b; } .fb-ng { color: #ff7a7f; } }
+.x-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 6px; font-size: 14px; }
+.x-msg { color: var(--muted); }
+.q-actions { margin-top: 14px; display: flex; justify-content: flex-end; }
+.score-big { font-size: 40px; font-weight: 800; line-height: 1.2; }
+.r-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.rlist { padding-left: 22px; margin: 0; }
+.rlist li { padding: 10px 0; border-top: 1px solid var(--border); }
+.rlist .rv-q { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-weight: 600; }
+.rlist .rv-a { font-size: 13px; color: var(--muted); margin-top: 2px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+
+footer { margin-top: 28px; font-size: 12px; color: var(--muted); line-height: 1.8; }
+footer a { color: inherit; }
+
+@media (max-width: 640px) {
+  h1 { font-size: 19px; }
+  .card { padding: 14px; }
+  .tabs { width: 100%; overflow-x: auto; }
+  .tabs button { flex: 1; padding: 8px 2px; font-size: 13px; }
+  .slots { grid-template-columns: repeat(3, 1fr); }
+  .rg { grid-template-columns: 1fr; gap: 6px; }
+  .opts.n4 { grid-template-columns: repeat(2, 1fr); }
+  .opts.n6 { grid-template-columns: repeat(3, 1fr); }
+  .q-prompt { font-size: 17px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <svg viewBox="0 0 32 32" width="34" height="34" aria-hidden="true">
+      <circle cx="16" cy="16" r="14" fill="#fff" stroke="currentColor" stroke-width="2.5"/>
+      <path d="M2 16a14 14 0 0 1 28 0z" fill="var(--accent)" stroke="currentColor" stroke-width="2.5"/>
+      <circle cx="16" cy="16" r="4.5" fill="#fff" stroke="currentColor" stroke-width="2.5"/>
+    </svg>
+    <div>
+      <h1>寶可夢冠軍 屬性克制表</h1>
+      <div class="sub">Pokémon Champions · 18 種屬性相剋 · 快速查詢 · 配招分析 · 隊伍分析 · 隨機考試</div>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="table" aria-selected="true">克制表</button>
+    <button role="tab" data-tab="lookup" aria-selected="false">快速查詢</button>
+    <button role="tab" data-tab="build" aria-selected="false">配招分析</button>
+    <button role="tab" data-tab="team" aria-selected="false">隊伍分析</button>
+    <button role="tab" data-tab="quiz" aria-selected="false">屬性考試</button>
+  </nav>
+
+  <!-- 克制表 -->
+  <section id="p-table" role="tabpanel">
+    <div class="legend">
+      <span><span class="mtag m2">2</span>效果絕佳 ×2</span>
+      <span><span class="mtag mh">½</span>效果不好 ×½</span>
+      <span><span class="mtag m0">0</span>沒有效果 ×0</span>
+      <span><span class="mtag m1">&nbsp;</span>空白 = ×1</span>
+      <span>直列＝攻擊方（招式屬性），橫排＝防守方（寶可夢屬性）</span>
+    </div>
+    <div class="minfo" id="mInfo">滑過或點格子看說明；點<b>列標題</b>看該屬性的攻擊相性，點<b>欄標題</b>看防守相性。</div>
+    <div class="mwrap"><table class="matrix" id="matrix"></table></div>
+    <p class="note">※ 只計算屬性相剋，不含特性（如飄浮、引火）、道具、天氣、場地等影響。雙屬性寶可夢的倍率＝兩個屬性的倍率相乘。</p>
+  </section>
+
+  <!-- 快速查詢 -->
+  <section id="p-lookup" role="tabpanel" hidden>
+    <div class="card">
+      <div class="look-top">
+        <div class="seg" id="lookMode">
+          <button data-mode="def" aria-pressed="true">🛡 防守：對手是什麼屬性？</button>
+          <button data-mode="atk" aria-pressed="false">⚔ 攻擊：我用什麼屬性招式？</button>
+        </div>
+        <button class="btn ghost" id="lookClear">清除</button>
+      </div>
+      <p class="muted small" id="lookHint"></p>
+      <div class="pick" id="pick"></div>
+      <div class="result" id="result"></div>
+    </div>
+  </section>
+
+  <!-- 配招分析 -->
+  <section id="p-build" role="tabpanel" hidden>
+    <div class="card">
+      <div class="look-top">
+        <p class="muted small b-intro">選自己寶可夢的招式屬性和本身屬性，看打點涵蓋、怕被什麼剋。</p>
+        <div class="top-actions"><button class="btn ghost" data-copy>複製連結</button><button class="btn ghost" id="bClear">清除</button></div>
+      </div>
+      <div class="b-label">招式屬性<span class="muted small">選 1～4 個（選第 5 個會換掉最早選的）</span></div>
+      <div class="pick sm" id="bMoves"></div>
+      <div class="b-label">我的屬性<span class="muted small">選 1～2 個（選第 3 個會換掉最早選的）</span></div>
+      <div class="pick sm" id="bTypes"></div>
+      <label class="b-label" for="bAb">特性<span class="muted small">只列讓某屬性無效或傷害減半的特性</span></label>
+      <select class="sel" id="bAb"></select>
+    </div>
+    <div class="card b-card" id="bCover"></div>
+    <div class="card b-card" id="bDef"></div>
+  </section>
+
+  <!-- 隊伍分析 -->
+  <section id="p-team" role="tabpanel" hidden>
+    <div class="card">
+      <div class="look-top">
+        <p class="muted small b-intro">先點隊伍格子，再選這隻的屬性（1～2 個；選滿兩個會自動跳到下一個空格）。</p>
+        <div class="top-actions"><button class="btn ghost" data-copy>複製連結</button><button class="btn ghost" id="tClear">清除</button></div>
+      </div>
+      <div class="slots" id="tSlots"></div>
+      <div class="pick sm" id="tPick"></div>
+    </div>
+    <div class="card b-card" id="tResult"></div>
+  </section>
+
+  <!-- 屬性考試 -->
+  <section id="p-quiz" role="tabpanel" hidden>
+    <div class="card" id="qSetup">
+      <h2>屬性考試</h2>
+      <p class="muted small">隨機出題，練到一看到屬性就反射出倍率。</p>
+      <div class="field">
+        <div class="field-label">題型（可複選）</div>
+        <div class="pills" id="qKinds"></div>
+      </div>
+      <div class="field">
+        <div class="field-label">題數</div>
+        <div class="pills" id="qCounts"></div>
+      </div>
+      <label class="check"><input type="checkbox" id="qAuto" checked> 答對後自動跳下一題</label>
+      <div class="setup-actions">
+        <button class="btn primary" id="qStart">開始考試</button>
+        <span class="err" id="qErr" hidden>請至少選一種題型</span>
+        <span class="muted small">快捷鍵：數字鍵 1–6 作答、Enter 下一題</span>
+      </div>
+    </div>
+
+    <div class="card" id="qPlay" hidden>
+      <div class="q-top">
+        <span id="qCount"></span>
+        <span>答對 <b id="qScore">0</b></span>
+        <span>連對 <b id="qStreak">0</b></span>
+        <button class="btn" id="qQuit">結束</button>
+      </div>
+      <div class="progress"><div id="qBar"></div></div>
+      <span class="q-kind" id="qKind"></span>
+      <div class="q-prompt" id="qPrompt"></div>
+      <div class="opts" id="qOpts"></div>
+      <div class="q-fb" id="qFb" aria-live="polite"></div>
+      <div class="q-actions"><button class="btn primary" id="qNext" hidden>下一題 ⏎</button></div>
+    </div>
+
+    <div class="card" id="qResult" hidden>
+      <div class="score-big" id="rScore"></div>
+      <div class="muted" id="rMeta"></div>
+      <div class="r-actions">
+        <button class="btn primary" id="rAgain">再考一次</button>
+        <button class="btn" id="rWrong">只練錯題</button>
+        <button class="btn ghost" id="rSetup">回到設定</button>
+      </div>
+      <div id="rReview"></div>
+    </div>
+  </section>
+
+  <footer>
+    資料：Pokémon Champions 使用與主系列第六世代（《X／Y》）起相同的 18 屬性相剋倍率；
+    已對照 <a href="https://pokesynergy.app/type-chart" target="_blank" rel="noopener">PokeSynergy · Pokémon Champions Type Chart</a>、
+    <a href="https://gamewith.jp/pokemon-champions/546446" target="_blank" rel="noopener">GameWith · ポケモンチャンピオンズ タイプ相性表</a>，
+    中文屬性名稱依 <a href="https://wiki.52poke.com/zh-hant/%E5%B1%AC%E6%80%A7%E7%9B%B8%E5%89%8B%E8%A1%A8" target="_blank" rel="noopener">神奇寶貝百科 屬性相剋表</a>。
+  </footer>
+</div>
+
+<script>
+// ===== LOGIC START =====（資料與純邏輯，不碰 DOM）
+const TYPES = [
+  { id: 'normal',   zh: '一般',   en: 'Normal',   color: '#9FA19F' },
+  { id: 'fire',     zh: '火',     en: 'Fire',     color: '#E62829' },
+  { id: 'water',    zh: '水',     en: 'Water',    color: '#2980EF' },
+  { id: 'electric', zh: '電',     en: 'Electric', color: '#FAC000' },
+  { id: 'grass',    zh: '草',     en: 'Grass',    color: '#3FA129' },
+  { id: 'ice',      zh: '冰',     en: 'Ice',      color: '#3DCEF3' },
+  { id: 'fighting', zh: '格鬥',   en: 'Fighting', color: '#FF8000' },
+  { id: 'poison',   zh: '毒',     en: 'Poison',   color: '#9141CB' },
+  { id: 'ground',   zh: '地面',   en: 'Ground',   color: '#915121' },
+  { id: 'flying',   zh: '飛行',   en: 'Flying',   color: '#81B9EF' },
+  { id: 'psychic',  zh: '超能力', en: 'Psychic',  color: '#EF4179' },
+  { id: 'bug',      zh: '蟲',     en: 'Bug',      color: '#91A119' },
+  { id: 'rock',     zh: '岩石',   en: 'Rock',     color: '#AFA981' },
+  { id: 'ghost',    zh: '幽靈',   en: 'Ghost',    color: '#704170' },
+  { id: 'dragon',   zh: '龍',     en: 'Dragon',   color: '#5060E1' },
+  { id: 'dark',     zh: '惡',     en: 'Dark',     color: '#624D4E' },
+  { id: 'steel',    zh: '鋼',     en: 'Steel',    color: '#60A1B8' },
+  { id: 'fairy',    zh: '妖精',   en: 'Fairy',    color: '#EF70EF' },
+];
+
+// 攻擊方 → 2：效果絕佳(×2)、h：效果不好(×½)、0：沒有效果(×0)；沒列到的都是 ×1
+const CHART = {
+  normal:   { 2: [],                                              h: ['rock', 'steel'],                                                   0: ['ghost'] },
+  fire:     { 2: ['grass', 'ice', 'bug', 'steel'],                h: ['fire', 'water', 'rock', 'dragon'],                                 0: [] },
+  water:    { 2: ['fire', 'ground', 'rock'],                      h: ['water', 'grass', 'dragon'],                                        0: [] },
+  electric: { 2: ['water', 'flying'],                             h: ['electric', 'grass', 'dragon'],                                     0: ['ground'] },
+  grass:    { 2: ['water', 'ground', 'rock'],                     h: ['fire', 'grass', 'poison', 'flying', 'bug', 'dragon', 'steel'],      0: [] },
+  ice:      { 2: ['grass', 'ground', 'flying', 'dragon'],         h: ['fire', 'water', 'ice', 'steel'],                                   0: [] },
+  fighting: { 2: ['normal', 'ice', 'rock', 'dark', 'steel'],      h: ['poison', 'flying', 'psychic', 'bug', 'fairy'],                     0: ['ghost'] },
+  poison:   { 2: ['grass', 'fairy'],                              h: ['poison', 'ground', 'rock', 'ghost'],                               0: ['steel'] },
+  ground:   { 2: ['fire', 'electric', 'poison', 'rock', 'steel'], h: ['grass', 'bug'],                                                    0: ['flying'] },
+  flying:   { 2: ['grass', 'fighting', 'bug'],                    h: ['electric', 'rock', 'steel'],                                       0: [] },
+  psychic:  { 2: ['fighting', 'poison'],                          h: ['psychic', 'steel'],                                                0: ['dark'] },
+  bug:      { 2: ['grass', 'psychic', 'dark'],                    h: ['fire', 'fighting', 'poison', 'flying', 'ghost', 'steel', 'fairy'],  0: [] },
+  rock:     { 2: ['fire', 'ice', 'flying', 'bug'],                h: ['fighting', 'ground', 'steel'],                                     0: [] },
+  ghost:    { 2: ['psychic', 'ghost'],                            h: ['dark'],                                                            0: ['normal'] },
+  dragon:   { 2: ['dragon'],                                      h: ['steel'],                                                           0: ['fairy'] },
+  dark:     { 2: ['psychic', 'ghost'],                            h: ['fighting', 'dark', 'fairy'],                                       0: [] },
+  steel:    { 2: ['ice', 'rock', 'fairy'],                        h: ['fire', 'water', 'electric', 'steel'],                              0: [] },
+  fairy:    { 2: ['fighting', 'dragon', 'dark'],                  h: ['fire', 'poison', 'steel'],                                         0: [] },
+};
+
+const IDS = TYPES.map(t => t.id);
+const IDX = Object.fromEntries(IDS.map((id, i) => [id, i]));
+const T = Object.fromEntries(TYPES.map(t => [t.id, t]));
+const M = IDS.map(a => IDS.map(d => {
+  const c = CHART[a];
+  if (c[2].includes(d)) return 2;
+  if (c.h.includes(d)) return 0.5;
+  if (c[0].includes(d)) return 0;
+  return 1;
+}));
+const DUALS = [];
+for (let i = 0; i < IDS.length; i++) for (let j = i + 1; j < IDS.length; j++) DUALS.push([IDS[i], IDS[j]]);
+
+// 攻擊屬性 atk 打防守屬性 defs（1～2 個）的倍率
+function eff(atk, defs) { return defs.reduce((m, d) => m * M[IDX[atk]][IDX[d]], 1); }
+const FMT = { 0: '0', 0.125: '⅛', 0.25: '¼', 0.5: '½', 1: '1', 2: '2', 4: '4' };
+const fmt = m => '×' + FMT[m];
+const MSG = m => m === 0 ? '沒有效果' : m < 1 ? '效果不好' : m > 1 ? '效果絕佳' : '普通';
+
+// 特性：只收「某屬性無效／傷害減半」這類純屬性倍率的（依神奇寶貝百科的特性說明）
+const ABILITIES = [
+  { id: 'levitate',       zh: '飄浮',     mod: { ground: 0 } },
+  { id: 'earth-eater',    zh: '食土',     mod: { ground: 0 } },
+  { id: 'flash-fire',     zh: '引火',     mod: { fire: 0 } },
+  { id: 'well-baked',     zh: '焦香之軀', mod: { fire: 0 } },
+  { id: 'water-absorb',   zh: '儲水',     mod: { water: 0 } },
+  { id: 'storm-drain',    zh: '引水',     mod: { water: 0 } },
+  { id: 'volt-absorb',    zh: '蓄電',     mod: { electric: 0 } },
+  { id: 'lightning-rod',  zh: '避雷針',   mod: { electric: 0 } },
+  { id: 'motor-drive',    zh: '電氣引擎', mod: { electric: 0 } },
+  { id: 'sap-sipper',     zh: '食草',     mod: { grass: 0 } },
+  { id: 'thick-fat',      zh: '厚脂肪',   mod: { fire: 0.5, ice: 0.5 } },
+  { id: 'heatproof',      zh: '耐熱',     mod: { fire: 0.5 } },
+  { id: 'water-bubble',   zh: '水泡',     mod: { fire: 0.5 } },
+  { id: 'purifying-salt', zh: '潔淨之鹽', mod: { ghost: 0.5 } },
+];
+const AB = Object.fromEntries(ABILITIES.map(a => [a.id, a]));
+
+// 防守方 defs（可帶特性 ab）被各屬性打的倍率分組
+function defenseProfile(defs, ab) {
+  const p = { 4: [], 2: [], 1: [], 0.5: [], 0.25: [], 0.125: [], 0: [] };
+  IDS.forEach(a => p[eff(a, defs) * (AB[ab]?.mod[a] ?? 1)].push(a));
+  return p;
+}
+function attackProfile(atk) {
+  const p = { 2: [], 1: [], 0.5: [], 0: [] };
+  IDS.forEach(d => p[eff(atk, [d])].push(d));
+  return p;
+}
+// 招式組合 moves 打防守屬性 defs 的最佳倍率（挑最痛的那招）
+function bestEff(moves, defs) { return Math.max(...moves.map(a => eff(a, defs))); }
+// 依最佳倍率把防守方 targets（每個是 1～2 個屬性）分桶
+function coverage(moves, targets) {
+  const p = { 4: [], 2: [], 1: [], 0.5: [], 0.25: [], 0: [] };
+  targets.forEach(defs => p[bestEff(moves, defs)].push(defs));
+  return p;
+}
+// 從沒選的屬性裡挑下一招：依加入後雙屬性（次看單屬性）能打出效果絕佳的數量排序
+function recommendMove(moves) {
+  const se = (ms, targets) => targets.filter(defs => bestEff(ms, defs) >= 2).length;
+  return IDS.filter(c => !moves.includes(c)).map(c => {
+    const ms = [...moves, c];
+    return { id: c, dual: se(ms, DUALS), single: se(ms, IDS.map(d => [d])) };
+  }).sort((x, y) => y.dual - x.dual || y.single - x.single);
+}
+// 隊伍 members（每隻 1～2 個屬性）被各攻擊屬性打：怕（×2 以上）幾隻、抗（×½ 以下含無效）幾隻
+function teamProfile(members) {
+  return IDS.map(a => {
+    const ms = members.map(defs => eff(a, defs));
+    const weak = ms.filter(m => m >= 2).length, resist = ms.filter(m => m < 1).length;
+    return { atk: a, ms, weak, resist, warn: weak >= 3 || (weak >= 2 && resist === 0) };
+  });
+}
+
+const pick = (arr, rng) => arr[Math.floor(rng() * arr.length)];
+function shuffle(arr, rng = Math.random) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+function weighted(entries, rng) {
+  let r = rng() * entries.reduce((s, e) => s + e[1], 0);
+  for (const [v, w] of entries) if ((r -= w) < 0) return v;
+  return entries[entries.length - 1][0];
+}
+
+// 依倍率分桶，出題時先抽倍率再抽組合，避免一堆 ×1
+const POOL1 = {}, POOL2 = {};
+IDS.forEach(a => {
+  IDS.forEach(d => (POOL1[eff(a, [d])] ||= []).push([a, d]));
+  DUALS.forEach(([d1, d2]) => (POOL2[eff(a, [d1, d2])] ||= []).push([a, d1, d2]));
+});
+const W1 = [[0, 12], [0.5, 30], [1, 23], [2, 35]];
+const W2 = [[0, 10], [0.25, 12], [0.5, 22], [1, 18], [2, 22], [4, 16]];
+
+const KINDS = {
+  mult1:  { label: '單屬性倍率', eg: '火 → 草 = ?' },
+  mult2:  { label: '雙屬性倍率', eg: '火 → 草/鋼 = ?' },
+  weak:   { label: '找弱點',     eg: '誰打牠效果絕佳' },
+  hit:    { label: '攻擊克制',   eg: '火 剋誰' },
+  resist: { label: '找抵抗',     eg: '誰打牠不痛' },
+  cover:  { label: '配招缺口',   eg: '這組招式打不動誰' },
+  count:  { label: '弱點數量',   eg: '牠怕幾種屬性' },
+};
+
+function makeQuestion(kind, rng = Math.random) {
+  if (kind === 'mult1') {
+    const m = weighted(W1, rng), [a, d] = pick(POOL1[m], rng);
+    return { kind, key: `${kind}:${a}>${d}`, atk: a, defs: [d], answer: m, options: [0, 0.5, 1, 2] };
+  }
+  if (kind === 'mult2') {
+    const m = weighted(W2, rng), [a, d1, d2] = pick(POOL2[m], rng);
+    return { kind, key: `${kind}:${a}>${d1}/${d2}`, atk: a, defs: [d1, d2], answer: m, options: [0, 0.25, 0.5, 1, 2, 4] };
+  }
+  if (kind === 'weak' || kind === 'resist') {
+    const defs = rng() < 0.5 ? [pick(IDS, rng)] : pick(DUALS, rng).slice();
+    const ok = kind === 'weak' ? id => eff(id, defs) >= 2 : id => eff(id, defs) < 1;
+    const right = IDS.filter(ok), wrong = IDS.filter(id => !ok(id));
+    if (!right.length || wrong.length < 3) return null;
+    const ans = pick(right, rng);
+    return { kind, key: `${kind}:${defs.join('/')}`, defs, answer: ans, options: shuffle([ans, ...shuffle(wrong, rng).slice(0, 3)], rng) };
+  }
+  if (kind === 'hit') {
+    const a = pick(IDS, rng);
+    const right = IDS.filter(d => eff(a, [d]) >= 2), wrong = IDS.filter(d => eff(a, [d]) < 2);
+    if (!right.length) return null;
+    const ans = pick(right, rng);
+    return { kind, key: `${kind}:${a}`, atk: a, answer: ans, options: shuffle([ans, ...shuffle(wrong, rng).slice(0, 3)], rng) };
+  }
+  if (kind === 'cover') {
+    const moves = shuffle(IDS, rng).slice(0, rng() < 0.5 ? 3 : 4);
+    const ok = d => bestEff(moves, [d]) < 2;
+    const right = IDS.filter(ok), wrong = IDS.filter(d => !ok(d));
+    if (!right.length || wrong.length < 3) return null;
+    const ans = pick(right, rng);
+    return { kind, key: `${kind}:${moves.join('/')}`, moves, answer: ans, options: shuffle([ans, ...shuffle(wrong, rng).slice(0, 3)], rng) };
+  }
+  if (kind === 'count') {
+    const defs = rng() < 0.5 ? [pick(IDS, rng)] : pick(DUALS, rng).slice();
+    const n = IDS.filter(a => eff(a, defs) >= 2).length;
+    const opts = new Set([n]);
+    while (opts.size < 4) { const v = n + Math.floor(rng() * 7) - 3; if (v >= 0) opts.add(v); }
+    return { kind, key: `${kind}:${defs.join('/')}`, defs, answer: n, options: [...opts].sort((x, y) => x - y) };
+  }
+  return null;
+}
+
+// 隨機抽題型出題，盡量避開最近出過的題目
+function nextQuestion(kinds, recent = [], rng = Math.random) {
+  let q = null;
+  for (let i = 0; i < 50; i++) {
+    const c = makeQuestion(pick(kinds, rng), rng);
+    if (!c) continue;
+    q = c;
+    if (!recent.includes(c.key)) break;
+  }
+  return q;
+}
+// ===== LOGIC END =====
+
+// ===== 畫面 =====
+const $ = s => document.querySelector(s);
+
+// 依底色挑對比較高的字色
+function lum(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const [r, g, b] = [n >> 16 & 255, n >> 8 & 255, n & 255].map(v => {
+    v /= 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+TYPES.forEach(t => {
+  const L = lum(t.color);
+  t.fg = 1.05 / (L + 0.05) >= (L + 0.05) / 0.06 ? '#ffffff' : '#1a1a1a';
+});
+
+const style = id => `--c:${T[id].color};--fg:${T[id].fg}`;
+const chip = (id, sub = '') => `<span class="chip" style="${style(id)}">${T[id].zh}${sub ? `<small>${sub}</small>` : ''}</span>`;
+const chips = ids => `<span class="duo">${ids.map(id => chip(id)).join('')}</span>`;
+const MCLS = { 4: 'm4', 2: 'm2', 1: 'm1', 0.5: 'mh', 0.25: 'mq', 0.125: 'mq', 0: 'm0' };
+const mtag = m => `<span class="mtag ${MCLS[m]}">${fmt(m)}</span>`;
+
+// ---------- 分頁 ----------
+const TABS = ['table', 'lookup', 'build', 'team', 'quiz'];
+let curTab = 'table';
+function showTab(name) {
+  curTab = name;
+  document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === name));
+  TABS.forEach(n => { $('#p-' + n).hidden = n !== name; });
+  saveState();
+}
+$('.tabs').addEventListener('click', e => {
+  const b = e.target.closest('button[data-tab]');
+  if (b) showTab(b.dataset.tab);
+});
+
+// ---------- 克制表 ----------
+const tbl = $('#matrix');
+(function buildMatrix() {
+  const sym = { 2: '2', 0.5: '½', 0: '0', 1: '' };
+  let h = '<thead><tr><th class="corner">攻擊 ↓<br>防守 →</th>';
+  TYPES.forEach((t, j) => { h += `<th class="colh" data-col="${j}" scope="col"><button class="vchip" style="${style(t.id)}" title="${t.zh}（防守）">${t.zh}</button></th>`; });
+  h += '</tr></thead><tbody>';
+  TYPES.forEach((a, i) => {
+    h += `<tr><th class="rowh" data-row="${i}" scope="row"><button class="chip rchip" style="${style(a.id)}" title="${a.zh}（攻擊）">${a.zh}</button></th>`;
+    TYPES.forEach((d, j) => { h += `<td class="${MCLS[M[i][j]]}" data-r="${i}" data-c="${j}">${sym[M[i][j]]}</td>`; });
+    h += '</tr>';
+  });
+  tbl.innerHTML = h + '</tbody>';
+})();
+
+function clearHL() { tbl.querySelectorAll('.hl, .hl-cell').forEach(el => el.classList.remove('hl', 'hl-cell')); }
+function setHL(r, c) {
+  clearHL();
+  const rows = tbl.tBodies[0].rows;
+  if (r != null) for (const cell of rows[r].cells) cell.classList.add('hl');
+  if (c != null) {
+    for (const row of rows) row.cells[c + 1].classList.add('hl');
+    tbl.tHead.rows[0].cells[c + 1].classList.add('hl');
+  }
+  if (r != null && c != null) rows[r].cells[c + 1].classList.add('hl-cell');
+}
+function matrixInfo(el) {
+  if (el.matches('td')) {
+    const r = +el.dataset.r, c = +el.dataset.c, a = IDS[r], d = IDS[c], m = M[r][c];
+    setHL(r, c);
+    $('#mInfo').innerHTML = `${chip(a)} 招式 → ${chip(d)} 寶可夢：${mtag(m)} <b>${MSG(m)}</b>`;
+  } else if (el.matches('th.rowh')) {
+    const r = +el.dataset.row, p = attackProfile(IDS[r]);
+    setHL(r, null);
+    $('#mInfo').innerHTML = `${chip(IDS[r])} 招式：效果絕佳 ${p[2].length} 種、效果不好 ${p[0.5].length} 種、沒有效果 ${p[0].length} 種（點擊看詳細）`;
+  } else if (el.matches('th.colh')) {
+    const c = +el.dataset.col, p = defenseProfile([IDS[c]]);
+    setHL(null, c);
+    $('#mInfo').innerHTML = `${chip(IDS[c])} 寶可夢：弱點 ${p[2].length} 種、抵抗 ${p[0.5].length} 種、免疫 ${p[0].length} 種（點擊看詳細）`;
+  }
+}
+tbl.addEventListener('mouseover', e => { const el = e.target.closest('td, th.rowh, th.colh'); if (el) matrixInfo(el); });
+tbl.addEventListener('mouseleave', clearHL);
+tbl.addEventListener('click', e => {
+  const el = e.target.closest('td, th.rowh, th.colh');
+  if (!el) return;
+  if (el.matches('td')) return matrixInfo(el);
+  if (el.matches('th.rowh')) { look.mode = 'atk'; look.atk = IDS[+el.dataset.row]; }
+  else { look.mode = 'def'; look.def = [IDS[+el.dataset.col]]; }
+  renderLookup();
+  showTab('lookup');
+});
+
+// ---------- 快速查詢 ----------
+const look = { mode: 'def', def: [], atk: null };
+const DEF_GROUPS = [[4, '雙重弱點'], [2, '弱點'], [1, '普通'], [0.5, '抵抗'], [0.25, '雙重抵抗'], [0, '免疫']];
+const ATK_GROUPS = [[2, '效果絕佳'], [1, '普通'], [0.5, '效果不好'], [0, '沒有效果']];
+const groupRow = (m, label, ids, sub = () => '') => `<div class="rg"><div class="rg-l">${mtag(m)}<span>${label}</span></div>`
+  + `<div class="rg-c">${ids.length ? ids.map(id => chip(id, sub(id))).join('') : '<span class="none">（無）</span>'}</div></div>`;
+
+function renderLookup() {
+  const def = look.mode === 'def';
+  document.querySelectorAll('#lookMode button').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === look.mode));
+  $('#lookHint').textContent = def
+    ? '選 1～2 個屬性（雙屬性寶可夢選兩個；選第 3 個會換掉最早選的），看什麼屬性的招式打牠最痛。'
+    : '選 1 個招式屬性，看它打各屬性寶可夢的效果。';
+  const sel = def ? look.def : (look.atk ? [look.atk] : []);
+  $('#pick').classList.toggle('has-sel', sel.length > 0);
+  $('#pick').innerHTML = TYPES.map(t => `<button class="tbtn" data-id="${t.id}" aria-pressed="${sel.includes(t.id)}" style="${style(t.id)}"><b>${t.zh}</b><small>${t.en}</small></button>`).join('');
+
+  const box = $('#result');
+  if (!sel.length) {
+    box.innerHTML = `<p class="empty">${def ? '點選上方屬性，看對手怕什麼、不怕什麼。' : '點選上方屬性，看這個招式剋誰、被誰擋。'}</p>`;
+  } else if (def) {
+    const p = defenseProfile(look.def);
+    const groups = look.def.length === 2 ? DEF_GROUPS : DEF_GROUPS.filter(([m]) => m !== 4 && m !== 0.25);
+    box.innerHTML = `<div class="res-head">${chips(look.def)}<span>寶可夢 被各屬性招式攻擊時</span></div>`
+      + groups.map(([m, label]) => groupRow(m, label, p[m])).join('');
+  } else {
+    const p = attackProfile(look.atk);
+    box.innerHTML = `<div class="res-head">${chip(look.atk)}<span>招式 攻擊各屬性寶可夢時</span></div>`
+      + ATK_GROUPS.map(([m, label]) => groupRow(m, label, p[m])).join('');
+  }
+}
+$('#pick').addEventListener('click', e => {
+  const b = e.target.closest('.tbtn');
+  if (!b) return;
+  const id = b.dataset.id;
+  if (look.mode === 'def') {
+    const i = look.def.indexOf(id);
+    if (i >= 0) look.def.splice(i, 1);
+    else { look.def.push(id); if (look.def.length > 2) look.def.shift(); }
+  } else {
+    look.atk = look.atk === id ? null : id;
+  }
+  renderLookup();
+});
+$('#lookMode').addEventListener('click', e => {
+  const b = e.target.closest('button[data-mode]');
+  if (b) { look.mode = b.dataset.mode; renderLookup(); }
+});
+$('#lookClear').addEventListener('click', () => { look.def = []; look.atk = null; renderLookup(); });
+
+// ---------- 配招分析 ----------
+const build = { moves: [], types: [], ab: '' };
+const BEST_GROUPS = [4, 2, 1, 0.5, 0.25, 0];
+// 點選切換；超過上限就換掉最早選的
+function toggleSel(list, id, max) {
+  const i = list.indexOf(id);
+  if (i >= 0) list.splice(i, 1);
+  else { list.push(id); if (list.length > max) list.shift(); }
+}
+function renderPick(el, sel) {
+  el.classList.toggle('has-sel', sel.length > 0);
+  el.innerHTML = TYPES.map(t => `<button class="tbtn" data-id="${t.id}" aria-pressed="${sel.includes(t.id)}" style="${style(t.id)}"><b>${t.zh}</b></button>`).join('');
+}
+// 每招打 18 個單屬性的倍率小表，最後一列是每欄的最佳倍率（最佳那招是本系時乘上 ×1.5 顯示）
+function coverTable(moves, types) {
+  const sym = { 2: '2', 0.5: '½', 0: '0', 1: '' }, stabSym = { 2: '3', 1: '1.5', 0.5: '¾', 0: '0' };
+  const td = (m, stab) => `<td class="${MCLS[m]}" title="${fmt(m)} ${MSG(m)}${stab && m ? '＋本系 ×1.5' : ''}">${(stab ? stabSym : sym)[m]}</td>`;
+  let h = '<thead><tr><th class="corner">招式 ↓<br>對手 →</th>'
+    + IDS.map(d => `<th><span class="vchip" style="${style(d)}">${T[d].zh}</span></th>`).join('') + '</tr></thead><tbody>';
+  moves.forEach(a => {
+    h += `<tr><th><span class="chip rchip" style="${style(a)}">${T[a].zh}${types.includes(a) ? '<small>本系</small>' : ''}</span></th>`
+      + `${IDS.map(d => td(eff(a, [d]))).join('')}</tr>`;
+  });
+  h += `<tr class="best"><th>最佳</th>${IDS.map(d => {
+    const m = bestEff(moves, [d]);
+    return td(m, moves.some(a => types.includes(a) && eff(a, [d]) === m));
+  }).join('')}</tr>`;
+  return `<div class="mwrap cover"><table class="matrix">${h}</tbody></table></div>`;
+}
+// 下一招推薦前 5 名，點了直接加入
+function recHTML(mv, base2, base1) {
+  return `<h3>第 ${mv.length + 1} 招推薦</h3><p class="muted small b-intro">依加入後雙屬性能打出效果絕佳的組合數排序，點一下直接加入。</p><div class="b-rec">`
+    + recommendMove(mv).slice(0, 5).map((r, i) => `<button data-add="${r.id}"><span class="rank">${i + 1}</span>${chip(r.id, build.types.includes(r.id) ? '本系' : '')}`
+      + `<span>雙屬性 <b>+${r.dual - base2}</b> 種（→ ${Math.round(r.dual / DUALS.length * 100)}%）・單屬性 <b>+${r.single - base1}</b> 種</span></button>`).join('')
+    + '</div>';
+}
+// 特性說明由 mod 組出來，例如「火、冰減半」
+const abDesc = a => [[0, '無效'], [0.5, '減半']].map(([v, w]) => {
+  const ts = Object.keys(a.mod).filter(t => a.mod[t] === v);
+  return ts.length ? ts.map(t => T[t].zh).join('、') + w : '';
+}).filter(Boolean).join('，');
+$('#bAb').innerHTML = '<option value="">無（不影響屬性倍率）</option>'
+  + ABILITIES.map(a => `<option value="${a.id}">${a.zh}（${abDesc(a)}）</option>`).join('');
+
+function renderBuild() {
+  renderPick($('#bMoves'), build.moves);
+  renderPick($('#bTypes'), build.types);
+  $('#bAb').value = build.ab;
+
+  const mv = build.moves;
+  if (!mv.length) {
+    $('#bCover').innerHTML = '<p class="empty">點選上方「招式屬性」（1～4 個），看這組招式打得到哪些屬性。</p>';
+  } else {
+    const one = coverage(mv, IDS.map(d => [d])), two = coverage(mv, DUALS);
+    const se2 = two[4].length + two[2].length;
+    const used = BEST_GROUPS.filter(m => two[m].length);
+    const bar = used.map(m => `<span class="${MCLS[m]}" style="flex:${two[m].length}" title="${fmt(m)} ${MSG(m)}：${two[m].length} 種"></span>`).join('');
+    // 已能打出效果絕佳的預設收合，打不痛的（涵蓋缺口）預設展開
+    const dualRow = m => {
+      const list = two[m];
+      const body = list.length
+        ? `<details class="b-more"${m < 2 ? ' open' : ''}><summary>${list.length} 種</summary><div class="rg-c">`
+          + list.map(p => `<span class="duo pair">${p.map(id => chip(id)).join('')}</span>`).join('') + '</div></details>'
+        : '<span class="none">（無）</span>';
+      return `<div class="rg"><div class="rg-l">${mtag(m)}<span>${MSG(m)}</span></div><div>${body}</div></div>`;
+    };
+    $('#bCover').innerHTML = `<div class="res-head">${chips(mv)}<span>招式組合的打點涵蓋</span></div>`
+      + `<p class="b-sum">單屬性 18 種中 <b>${one[2].length}</b> 種打得出效果絕佳；雙屬性 ${DUALS.length} 種組合中 <b>${se2}</b> 種（${Math.round(se2 / DUALS.length * 100)}%）。</p>`
+      + (mv.length < 4 ? recHTML(mv, se2, one[2].length) : '')
+      + `<h3>單屬性對手</h3>${coverTable(mv, build.types)}`
+      + ATK_GROUPS.map(([m, label]) => groupRow(m, label, one[m].map(([d]) => d))).join('')
+      + `<h3>雙屬性對手（${DUALS.length} 種組合）</h3>`
+      + `<div class="b-bar" role="img" aria-label="最佳倍率分布：${used.map(m => `${fmt(m)} ${two[m].length} 種`).join('、')}">${bar}</div>`
+      + BEST_GROUPS.map(dualRow).join('')
+      + '<p class="note">※ 每個對手取這組招式裡倍率最高的那招；「最佳」列遇到本系招式（與自己屬性相同）會顯示乘上 ×1.5 後的倍率。'
+      + '雙屬性分布只看屬性倍率，且是理論上的全部組合，實際不一定都有對應寶可夢；不含特性、道具等影響。</p>';
+  }
+
+  const ty = build.types, ab = AB[build.ab];
+  if (!ty.length) {
+    $('#bDef').innerHTML = '<p class="empty">點選上方「我的屬性」（1～2 個），看自己怕被什麼屬性剋。</p>';
+  } else {
+    const p = defenseProfile(ty, build.ab);
+    const std = ty.length === 2 ? DEF_GROUPS : DEF_GROUPS.filter(([m]) => m !== 4 && m !== 0.25);
+    // 特性減半可能多出 ×¼、×⅛，有東西才顯示
+    const groups = [...DEF_GROUPS, [0.125, '三重抵抗']].filter(g => std.includes(g) || p[g[0]].length).sort((x, y) => y[0] - x[0]);
+    $('#bDef').innerHTML = `<div class="res-head">${chips(ty)}<span>我的寶可夢${ab ? `（特性：${ab.zh}）` : ''} 被各屬性招式攻擊時</span></div>`
+      + groups.map(([m, label]) => groupRow(m, label, p[m], id => ab && id in ab.mod ? '特性' : '')).join('');
+  }
+  saveState();
+}
+$('#bMoves').addEventListener('click', e => {
+  const b = e.target.closest('.tbtn');
+  if (b) { toggleSel(build.moves, b.dataset.id, 4); renderBuild(); }
+});
+$('#bTypes').addEventListener('click', e => {
+  const b = e.target.closest('.tbtn');
+  if (b) { toggleSel(build.types, b.dataset.id, 2); renderBuild(); }
+});
+$('#bAb').addEventListener('change', e => { build.ab = e.target.value; renderBuild(); });
+$('#bCover').addEventListener('click', e => {
+  const b = e.target.closest('[data-add]');
+  if (b) { toggleSel(build.moves, b.dataset.add, 4); renderBuild(); }
+});
+$('#bClear').addEventListener('click', () => { build.moves = []; build.types = []; build.ab = ''; renderBuild(); });
+
+// ---------- 隊伍分析 ----------
+const team = { slots: [[], [], [], [], [], []], cur: 0 };
+function renderTeam() {
+  $('#tSlots').innerHTML = team.slots.map((s, i) => `<button class="slot" data-i="${i}" aria-pressed="${i === team.cur}">`
+    + `<span class="slot-n">第 ${i + 1} 隻</span>${s.length ? chips(s) : '<span class="muted small">空</span>'}</button>`).join('');
+  renderPick($('#tPick'), team.slots[team.cur]);
+
+  const members = team.slots.map((s, i) => [s, i]).filter(([s]) => s.length);
+  if (!members.length) {
+    $('#tResult').innerHTML = '<p class="empty">選好隊員的屬性後，這裡會列出整隊被各屬性打的倍率，標出共同弱點。</p>';
+  } else {
+    const rows = teamProfile(members.map(([s]) => s)), warn = rows.filter(r => r.warn);
+    const sym = { 4: '4', 2: '2', 1: '', 0.5: '½', 0.25: '¼', 0: '0' };
+    let h = '<thead><tr><th class="corner">攻擊 ↓<br>隊員 →</th>'
+      + members.map(([s, i]) => `<th><span class="tcol"><span class="slot-n">${i + 1}</span><span class="duo">`
+        + `${s.map(id => `<span class="vchip" style="${style(id)}">${T[id].zh}</span>`).join('')}</span></span></th>`).join('')
+      + '<th class="cnt">怕</th><th class="cnt">抗</th></tr></thead><tbody>';
+    rows.forEach(r => {
+      h += `<tr><th><span class="chip rchip" style="${style(r.atk)}">${T[r.atk].zh}</span></th>`
+        + r.ms.map(m => `<td class="${MCLS[m]}" title="${fmt(m)} ${MSG(m)}">${sym[m]}</td>`).join('')
+        + `<td class="cnt${r.warn ? ' warn' : ''}">${r.warn ? '⚠' : ''}${r.weak}</td><td class="cnt">${r.resist}</td></tr>`;
+    });
+    $('#tResult').innerHTML = `<div class="res-head">隊伍弱點總表<span class="muted small">（${members.length} 隻）</span></div>`
+      + (warn.length
+        ? `<div class="x-line"><span class="x-msg">要注意：</span>${warn.map(r => chip(r.atk, `${r.weak}怕/${r.resist}抗`)).join('')}</div>`
+        : '<p class="muted small b-intro">沒有 3 隻以上都怕、或 2 隻以上怕又沒人抗的屬性。</p>')
+      + `<div class="mwrap cover" style="margin-top:10px"><table class="matrix team">${h}</tbody></table></div>`
+      + '<p class="note">※ 怕＝受到 ×2 以上；抗＝×½ 以下（含沒有效果）。⚠ 標示 3 隻以上都怕，或 2 隻以上怕又沒人抗的屬性。只算屬性，不含特性。</p>';
+  }
+  saveState();
+}
+$('#tSlots').addEventListener('click', e => {
+  const b = e.target.closest('.slot');
+  if (b) { team.cur = +b.dataset.i; renderTeam(); }
+});
+$('#tPick').addEventListener('click', e => {
+  const b = e.target.closest('.tbtn');
+  if (!b) return;
+  const s = team.slots[team.cur], before = s.length;
+  toggleSel(s, b.dataset.id, 2);
+  // 這隻剛選滿兩個屬性就跳到後面的空格
+  if (before === 1 && s.length === 2) {
+    const n = team.slots.findIndex((x, i) => i > team.cur && !x.length);
+    if (n >= 0) team.cur = n;
+  }
+  renderTeam();
+});
+$('#tClear').addEventListener('click', () => { team.slots = team.slots.map(() => []); team.cur = 0; renderTeam(); });
+
+// ---------- 狀態存網址＋本機（可存書籤、重新整理不清空） ----------
+// 格式：#分頁?m=招式,招式&t=屬性,屬性&a=特性&p=隊員1屬性.屬性,隊員2屬性...
+const STATE_KEY = 'pkmn-champions-state';
+function stateQuery() {
+  const q = [];
+  if (build.moves.length) q.push('m=' + build.moves.join(','));
+  if (build.types.length) q.push('t=' + build.types.join(','));
+  if (build.ab) q.push('a=' + build.ab);
+  const p = team.slots.map(s => s.join('.'));
+  while (p.length && !p[p.length - 1]) p.pop();
+  if (p.length) q.push('p=' + p.join(','));
+  return q.join('&');
+}
+const stateHash = () => { const q = stateQuery(); return '#' + curTab + (q ? '?' + q : ''); };
+function saveState() {
+  try { history.replaceState(null, '', stateHash()); } catch (e) { /* file:// 某些瀏覽器不允許 */ }
+  try { localStorage.setItem(STATE_KEY, stateQuery()); } catch (e) { /* 無痕或封鎖儲存時略過 */ }
+}
+function loadState(q) {
+  const kv = Object.fromEntries(q.split('&').map(s => s.split('=')));
+  const ids = (s, sep, max) => [...new Set((s || '').split(sep).filter(id => IDS.includes(id)))].slice(0, max);
+  build.moves = ids(kv.m, ',', 4);
+  build.types = ids(kv.t, ',', 2);
+  build.ab = Object.hasOwn(AB, kv.a || '') ? kv.a : '';
+  (kv.p || '').split(',').slice(0, 6).forEach((s, i) => { team.slots[i] = ids(s, '.', 2); });
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-copy]');
+  if (!b) return;
+  try { await navigator.clipboard.writeText(location.href.split('#')[0] + stateHash()); b.textContent = '已複製 ✓'; }
+  catch (err) { b.textContent = '請直接複製網址列'; }
+  setTimeout(() => { b.textContent = '複製連結'; }, 1500);
+});
+
+// ---------- 考試 ----------
+const COUNTS = [[10, '10 題'], [20, '20 題'], [30, '30 題'], [0, '無限']];
+const SAVE_KEY = 'pkmn-champions-quiz';
+let saved = {};
+try { saved = JSON.parse(localStorage.getItem(SAVE_KEY)) || {}; } catch (e) { saved = {}; }
+const savedKinds = Array.isArray(saved.kinds) ? saved.kinds : Object.keys(KINDS);
+$('#qKinds').innerHTML = Object.entries(KINDS).map(([k, v]) =>
+  `<label class="pill"><input type="checkbox" value="${k}" ${savedKinds.includes(k) ? 'checked' : ''}><span>${v.label}<small>${v.eg}</small></span></label>`).join('');
+$('#qCounts').innerHTML = COUNTS.map(([n, label]) =>
+  `<label class="pill"><input type="radio" name="qcount" value="${n}" ${n === (saved.count ?? 10) ? 'checked' : ''}><span>${label}</span></label>`).join('');
+if (saved.auto === false) $('#qAuto').checked = false;
+
+const quiz = {};
+function showQuiz(view) { ['qSetup', 'qPlay', 'qResult'].forEach(id => { $('#' + id).hidden = id !== view; }); }
+
+function startQuiz(list) {
+  const kinds = [...document.querySelectorAll('#qKinds input:checked')].map(i => i.value);
+  const count = +document.querySelector('input[name="qcount"]:checked').value;
+  const auto = $('#qAuto').checked;
+  if (!list && !kinds.length) { $('#qErr').hidden = false; return; }
+  $('#qErr').hidden = true;
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ kinds, count, auto })); } catch (e) { /* 無痕或封鎖儲存時略過 */ }
+  Object.assign(quiz, {
+    kinds, auto, list: list || null,
+    total: list ? list.length : (count || Infinity),
+    idx: 0, done: 0, score: 0, streak: 0, best: 0,
+    wrong: [], recent: [], current: null, answered: false, timer: 0, t0: Date.now(),
+  });
+  showQuiz('qPlay');
+  nextQ();
+}
+
+function nextQ() {
+  clearTimeout(quiz.timer);
+  if (quiz.idx >= quiz.total) return showResult();
+  let q;
+  if (quiz.list) {
+    q = quiz.list[quiz.idx];
+    if (!isNum(q)) q = { ...q, options: shuffle(q.options) };
+  } else {
+    q = nextQuestion(quiz.kinds, quiz.recent);
+    quiz.recent.push(q.key);
+    if (quiz.recent.length > 15) quiz.recent.shift();
+  }
+  quiz.current = q;
+  quiz.answered = false;
+  quiz.idx++;
+  renderQ();
+}
+function advance() { if (quiz.answered) nextQ(); }
+
+function promptHTML(q) {
+  const kind = q.kind;
+  if (kind === 'mult1' || kind === 'mult2') {
+    return `<div class="q-flow">${chip(q.atk)}<span>招式</span><span class="q-arrow">➜</span>${chips(q.defs)}<span>寶可夢</span></div>`
+      + `<div class="q-ask">傷害倍率是？</div>`;
+  }
+  if (kind === 'weak') return `<div class="q-ask">下列哪個屬性的招式，對 ${chips(q.defs)} 寶可夢<em>效果絕佳</em>？</div>`;
+  if (kind === 'resist') return `<div class="q-ask">下列哪個屬性的招式，對 ${chips(q.defs)} 寶可夢<em>效果不好或沒有效果</em>？</div>`;
+  if (kind === 'cover') return `<div class="q-ask">招式組合 ${chips(q.moves)}，對下列哪個屬性的寶可夢<em>打不出效果絕佳</em>？</div>`;
+  if (kind === 'count') return `<div class="q-ask">有<em>幾種</em>屬性的招式，對 ${chips(q.defs)} 寶可夢效果絕佳？</div>`;
+  return `<div class="q-ask">${chip(q.atk)} 招式，對下列哪個屬性的寶可夢<em>效果絕佳</em>？</div>`;
+}
+const isMult = q => q.kind === 'mult1' || q.kind === 'mult2';
+const isNum = q => isMult(q) || q.kind === 'count';
+const ansLabel = (q, v) => isMult(q) ? mtag(v) : q.kind === 'count' ? `<b>${v} 種</b>` : chip(v);
+
+function renderQ() {
+  const q = quiz.current;
+  $('#qCount').innerHTML = quiz.total === Infinity ? `第 <b>${quiz.idx}</b> 題` : `第 <b>${quiz.idx}</b> / ${quiz.total} 題`;
+  $('#qScore').textContent = quiz.score;
+  $('#qStreak').textContent = quiz.streak;
+  $('#qBar').style.width = quiz.total === Infinity ? '100%' : `${(quiz.idx - 1) / quiz.total * 100}%`;
+  $('#qKind').textContent = KINDS[q.kind].label;
+  $('#qPrompt').innerHTML = promptHTML(q);
+  const opts = $('#qOpts');
+  opts.className = `opts n${q.options.length}`;
+  opts.innerHTML = q.options.map((v, i) => `<button class="opt" data-i="${i}"><span class="k">${i + 1}</span>`
+    + (isMult(q) ? `<span class="v">${fmt(v)}</span><span class="s">${MSG(v)}</span>`
+      : q.kind === 'count' ? `<span class="v">${v}</span><span class="s">種</span>` : chip(v)) + '</button>').join('');
+  $('#qFb').innerHTML = '';
+  $('#qNext').hidden = true;
+}
+
+// 解說：列出算法或完整清單；答錯時補上「你選的那個實際是多少」
+function explain(q, chosen) {
+  let s;
+  if (isMult(q)) {
+    const parts = q.defs.map(d => `${chip(q.atk)}→${chip(d)} ${mtag(eff(q.atk, [d]))}`);
+    s = parts.join('<span class="x-msg">，</span>');
+    if (q.defs.length === 2) s += `<span class="x-msg">相乘 ＝</span>${mtag(q.answer)}`;
+    s += `<span class="x-msg">${MSG(q.answer)}</span>`;
+    return `<div class="x-line">${s}</div>`;
+  }
+  const sortBy = (ids, f, desc) => ids.slice().sort((x, y) => desc ? f(y) - f(x) : f(x) - f(y));
+  if (q.kind === 'hit') {
+    const list = IDS.filter(d => eff(q.atk, [d]) >= 2);
+    s = `<div class="x-line">${chip(q.atk)}<span class="x-msg">效果絕佳：</span>${list.map(d => chip(d)).join('')}</div>`;
+    if (chosen != null && chosen !== q.answer) s += `<div class="x-line"><span class="x-msg">你選的</span>${chip(q.atk)}→${chip(chosen)} ${mtag(eff(q.atk, [chosen]))}</div>`;
+    return s;
+  }
+  if (q.kind === 'cover') {
+    const f = d => bestEff(q.moves, [d]);
+    s = `<div class="x-line">${chips(q.moves)}<span class="x-msg">打不出效果絕佳：</span>${IDS.filter(d => f(d) < 2).map(d => chip(d, fmt(f(d)))).join('')}</div>`;
+    if (chosen != null && chosen !== q.answer) {
+      const a = q.moves.find(m => eff(m, [chosen]) >= 2);
+      s += `<div class="x-line"><span class="x-msg">你選的</span>${chip(chosen)}<span class="x-msg">可以用</span>${chip(a)}${mtag(eff(a, [chosen]))}</div>`;
+    }
+    return s;
+  }
+  if (q.kind === 'count') {
+    const f = id => eff(id, q.defs), list = sortBy(IDS.filter(id => f(id) >= 2), f, true);
+    return `<div class="x-line"><span class="x-msg">對</span>${chips(q.defs)}<span class="x-msg">效果絕佳 ${list.length} 種：</span>`
+      + `${list.length ? list.map(id => chip(id, fmt(f(id)))).join('') : '<span class="x-msg">（無）</span>'}</div>`;
+  }
+  const f = id => eff(id, q.defs);
+  const list = q.kind === 'weak' ? sortBy(IDS.filter(id => f(id) >= 2), f, true) : sortBy(IDS.filter(id => f(id) < 1), f, false);
+  const label = q.kind === 'weak' ? '效果絕佳：' : '效果不好／沒有效果：';
+  s = `<div class="x-line"><span class="x-msg">對</span>${chips(q.defs)}<span class="x-msg">${label}</span>${list.map(id => chip(id, fmt(f(id)))).join('')}</div>`;
+  if (chosen != null && chosen !== q.answer) s += `<div class="x-line"><span class="x-msg">你選的</span>${chip(chosen)}→${chips(q.defs)} ${mtag(f(chosen))}</div>`;
+  return s;
+}
+
+function answer(i) {
+  if (quiz.answered) return;
+  const q = quiz.current, chosen = q.options[i], ok = chosen === q.answer;
+  quiz.answered = true;
+  quiz.done++;
+  if (ok) { quiz.score++; quiz.streak++; quiz.best = Math.max(quiz.best, quiz.streak); }
+  else { quiz.streak = 0; quiz.wrong.push({ q, chosen }); }
+  document.querySelectorAll('#qOpts .opt').forEach((b, j) => {
+    b.disabled = true;
+    if (q.options[j] === q.answer) b.classList.add('correct');
+    else if (j === i) b.classList.add('wrong');
+    else b.classList.add('dim');
+  });
+  $('#qScore').textContent = quiz.score;
+  $('#qStreak').textContent = quiz.streak;
+  $('#qBar').style.width = quiz.total === Infinity ? '100%' : `${quiz.idx / quiz.total * 100}%`;
+  $('#qFb').innerHTML = (ok ? `<div class="fb-title fb-ok">✔ 答對了！</div>` : `<div class="fb-title fb-ng">✘ 答錯了，正確答案是 ${ansLabel(q, q.answer)}</div>`)
+    + explain(q, chosen);
+  const next = $('#qNext');
+  next.textContent = quiz.idx >= quiz.total ? '看結果 ⏎' : '下一題 ⏎';
+  next.hidden = false;
+  next.focus({ preventScroll: true });
+  if (ok && quiz.auto) quiz.timer = setTimeout(advance, 1100);
+}
+
+function showResult() {
+  clearTimeout(quiz.timer);
+  const pct = quiz.done ? Math.round(quiz.score / quiz.done * 100) : 0;
+  const sec = Math.round((Date.now() - quiz.t0) / 1000);
+  const grade = !quiz.done ? '還沒作答喔' : pct === 100 ? '完美！屬性大師 🏆' : pct >= 80 ? '很強！差一點就滿分' : pct >= 60 ? '不錯，再練練錯題' : '多看幾次克制表再來挑戰';
+  $('#rScore').textContent = `${quiz.score} / ${quiz.done}`;
+  $('#rMeta').textContent = `正確率 ${pct}% ・ 最高連對 ${quiz.best} ・ 用時 ${Math.floor(sec / 60)} 分 ${sec % 60} 秒 ・ ${grade}`;
+  $('#rWrong').hidden = !quiz.wrong.length;
+  $('#rReview').innerHTML = quiz.wrong.length
+    ? `<h3>錯題回顧（${quiz.wrong.length}）</h3><ol class="rlist">${quiz.wrong.map(({ q, chosen }) =>
+        `<li><div class="rv-q"><span class="q-kind" style="margin:0">${KINDS[q.kind].label}</span>${promptHTML(q).replace(/<\/?div[^>]*>/g, ' ')}</div>`
+        + `<div class="rv-a">你的答案 ${ansLabel(q, chosen)} ・ 正解 ${ansLabel(q, q.answer)}</div>${explain(q, null)}</li>`).join('')}</ol>`
+    : (quiz.done ? '<p class="muted">全部答對，沒有錯題！</p>' : '');
+  showQuiz('qResult');
+}
+
+$('#qStart').addEventListener('click', () => startQuiz());
+$('#qOpts').addEventListener('click', e => { const b = e.target.closest('.opt'); if (b) answer(+b.dataset.i); });
+$('#qNext').addEventListener('click', advance);
+$('#qQuit').addEventListener('click', showResult);
+$('#rAgain').addEventListener('click', () => quiz.list ? startQuiz(shuffle(quiz.list)) : startQuiz());
+$('#rWrong').addEventListener('click', () => startQuiz(shuffle(quiz.wrong.map(w => w.q))));
+$('#rSetup').addEventListener('click', () => showQuiz('qSetup'));
+document.addEventListener('keydown', e => {
+  if (curTab !== 'quiz' || $('#qPlay').hidden || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (/^[1-6]$/.test(e.key)) {
+    const i = +e.key - 1;
+    if (!quiz.answered && i < quiz.current.options.length) { e.preventDefault(); answer(i); }
+  } else if ((e.key === 'Enter' || e.key === ' ') && quiz.answered) {
+    e.preventDefault();
+    advance();
+  }
+});
+
+// ---------- 初始化 ----------
+// 網址有帶狀態就用網址的，沒有就用本機上次的
+const [startTab, startQ] = location.hash.slice(1).split('?');
+let initQ = startQ;
+if (initQ == null) { try { initQ = localStorage.getItem(STATE_KEY) || ''; } catch (e) { initQ = ''; } }
+loadState(initQ);
+renderLookup();
+renderBuild();
+renderTeam();
+showTab(TABS.includes(startTab) ? startTab : 'table');
+</script>
+</body>
+</html>
