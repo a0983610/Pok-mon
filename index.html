@@ -218,6 +218,20 @@ table.matrix { border-collapse: separate; border-spacing: 0; margin: 0 auto; }
 .matrix.team td.cnt { font-size: 14px; }
 .matrix.team td.warn { background: var(--bad-bg); color: var(--nve); }
 @media (prefers-color-scheme: dark) { .matrix.team td.warn { color: #ff7a7f; } }
+.slot-name { font-size: 13px; font-weight: 700; line-height: 1.2; text-align: center; }
+.t-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; }
+.t-row .sel { flex: 1 1 220px; }
+.meta { color: var(--muted); font-size: 13px; }
+.threat { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; padding: 8px 0; border-top: 1px solid var(--border); font-size: 14px; }
+.threat .lv { font-weight: 800; min-width: 3.2em; }
+.threat .who { flex-basis: 100%; color: var(--muted); font-size: 13px; }
+.lv0 .lv { color: var(--nve); }
+.lv1 .lv { color: var(--muted); }
+.lv2 .lv { color: var(--se); }
+@media (prefers-color-scheme: dark) { .lv0 .lv { color: #ff7a7f; } .lv2 .lv { color: #51c26b; } }
+.spd { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; padding: 6px 8px; border-top: 1px solid var(--border); font-size: 14px; }
+.spd .v { min-width: 2.2em; text-align: right; font-size: 16px; font-variant-numeric: tabular-nums; }
+.spd.me { background: var(--good-bg); border-radius: 8px; }
 
 /* ---------- 考試 ---------- */
 .field { margin-top: 16px; }
@@ -370,13 +384,23 @@ footer a { color: inherit; }
   <section id="p-team" role="tabpanel" hidden>
     <div class="card">
       <div class="look-top">
-        <p class="muted small b-intro">先點隊伍格子，再選這隻的屬性（1～2 個；選滿兩個會自動跳到下一個空格）。</p>
+        <p class="muted small b-intro">先點隊伍格子，再輸入寶可夢名字，或直接選這隻的屬性（1～2 個；選滿會自動跳到下一個空格）。</p>
         <div class="top-actions"><button class="btn ghost" data-copy>複製連結</button><button class="btn ghost" id="tClear">清除</button></div>
       </div>
       <div class="slots" id="tSlots"></div>
+      <div class="t-row">
+        <input class="sel" id="tName" list="tMons" placeholder="輸入寶可夢名字，例如 烈咬陸鯊" autocomplete="off" aria-label="用名字選寶可夢">
+        <datalist id="tMons"></datalist>
+        <div class="seg" id="tFmt" aria-label="排名依據">
+          <button data-fmt="s" aria-pressed="true">單打排名</button>
+          <button data-fmt="d" aria-pressed="false">雙打排名</button>
+        </div>
+      </div>
       <div class="pick sm" id="tPick"></div>
     </div>
     <div class="card b-card" id="tResult"></div>
+    <div class="card b-card" id="tThreat"></div>
+    <div class="card b-card" id="tSpeed"></div>
   </section>
 
   <!-- 屬性考試 -->
@@ -431,7 +455,8 @@ footer a { color: inherit; }
     資料：Pokémon Champions 使用與主系列第六世代（《X／Y》）起相同的 18 屬性相剋倍率；
     已對照 <a href="https://pokesynergy.app/type-chart" target="_blank" rel="noopener">PokeSynergy · Pokémon Champions Type Chart</a>、
     <a href="https://gamewith.jp/pokemon-champions/546446" target="_blank" rel="noopener">GameWith · ポケモンチャンピオンズ タイプ相性表</a>，
-    中文屬性名稱依 <a href="https://wiki.52poke.com/zh-hant/%E5%B1%AC%E6%80%A7%E7%9B%B8%E5%89%8B%E8%A1%A8" target="_blank" rel="noopener">神奇寶貝百科 屬性相剋表</a>。
+    中文屬性名稱依 <a href="https://wiki.52poke.com/zh-hant/%E5%B1%AC%E6%80%A7%E7%9B%B8%E5%89%8B%E8%A1%A8" target="_blank" rel="noopener">神奇寶貝百科 屬性相剋表</a>。<br>
+    隊伍分析的寶可夢名單與單打／雙打排名擷取自 <a href="https://op.gg/zh-tw/pokemon-champions/pokedex" target="_blank" rel="noopener">OP.GG 寶可夢冠軍圖鑑</a>（<span id="monsDate"></span>）。
   </footer>
 </div>
 
@@ -518,6 +543,366 @@ const ABILITIES = [
 ];
 const AB = Object.fromEntries(ABILITIES.map(a => [a.id, a]));
 
+// ----- MONS START -----
+// 寶可夢名單：2026-10-29 擷取自 OP.GG 寶可夢冠軍圖鑑（含超級進化）；這段由 tools/update_mons.py 產生，勿手改
+const MONS_DATE = '2026-10-29';
+// [key, 中文名, 屬性（. 分隔）, 單打排名, 雙打排名（0＝沒有排名）, 超級進化的原型 key, 速度種族值]
+const MONS_RAW = [
+["venusaur","妙蛙花","grass.poison",51,21,"",80],
+["mega-venusaur","超級妙蛙花","grass.poison",51,21,"venusaur",80],
+["charizard","噴火龍","fire.flying",6,6,"",100],
+["mega-charizard-x","超級噴火龍Ｘ","fire.dragon",6,6,"charizard",100],
+["mega-charizard-y","超級噴火龍Ｙ","fire.flying",6,6,"charizard",100],
+["blastoise","水箭龜","water",34,47,"",78],
+["mega-blastoise","超級水箭龜","water",34,47,"blastoise",78],
+["beedrill","大針蜂","bug.poison",161,171,"",75],
+["mega-beedrill","超級大針蜂","bug.poison",161,171,"beedrill",145],
+["pidgeot","大比鳥","normal.flying",174,197,"",101],
+["mega-pidgeot","超級大比鳥","normal.flying",174,197,"pidgeot",121],
+["arbok","阿柏怪","poison",221,243,"",80],
+["pikachu","皮卡丘","electric",180,192,"",90],
+["raichu","雷丘","electric",22,7,"",110],
+["raichu-alolan","阿羅拉雷丘","electric.psychic",215,158,"",110],
+["mega-raichu-x","超級雷丘Ｘ","electric",22,7,"raichu",110],
+["mega-raichu-y","超級雷丘Ｙ","electric",22,7,"raichu",130],
+["clefable","皮可西","fairy",45,91,"",60],
+["mega-clefable","超級皮可西","fairy.flying",45,91,"clefable",70],
+["ninetales","九尾","fire",175,97,"",100],
+["ninetales-alolan","阿羅拉九尾","ice.fairy",30,45,"",109],
+["wigglytuff","胖可丁","normal.fairy",203,201,"",45],
+["vileplume","霸王花","grass.poison",138,162,"",50],
+["vileplume-female","霸王花 (雌性)","grass.poison",0,0,"",50],
+["persian","貓老大","normal",245,241,"",115],
+["persian-alolan","阿羅拉貓老大","dark",143,182,"",115],
+["arcanine","風速狗","fire",133,133,"",95],
+["arcanine-hisui","洗翠風速狗","fire.rock",84,37,"",90],
+["alakazam","胡地","psychic",114,79,"",120],
+["mega-alakazam","超級胡地","psychic",114,79,"alakazam",150],
+["machamp","怪力","fighting",186,172,"",55],
+["victreebel","大食花","grass.poison",78,196,"",70],
+["mega-victreebel","超級大食花","grass.poison",78,196,"victreebel",70],
+["slowbro","呆殼獸","water.psychic",102,137,"",30],
+["slowbro-galarian","伽勒爾呆殼獸","poison.psychic",98,149,"",30],
+["mega-slowbro","超級呆殼獸","water.psychic",102,137,"slowbro",30],
+["farfetchd","大蔥鴨","normal.flying",250,228,"",60],
+["gengar","耿鬼","ghost.poison",23,39,"",110],
+["mega-gengar","超級耿鬼","ghost.poison",23,39,"gengar",130],
+["kangaskhan","袋獸","normal",75,77,"",90],
+["mega-kangaskhan","超級袋獸","normal",75,77,"kangaskhan",100],
+["starmie","寶石海星","water.psychic",58,108,"",115],
+["mega-starmie","超級寶石海星","water.psychic",58,108,"starmie",120],
+["mr-mime","魔牆人偶","psychic.fairy",237,168,"",90],
+["pinsir","凱羅斯","bug",169,220,"",85],
+["mega-pinsir","超級凱羅斯","bug.flying",169,220,"pinsir",105],
+["tauros","肯泰羅","normal",240,252,"",110],
+["tauros-paldean-combat","帕底亞肯泰羅 (鬥戰種)","fighting",261,260,"",100],
+["tauros-paldean-blaze","帕底亞肯泰羅 (火熾種)","fighting.fire",131,179,"",100],
+["tauros-paldean-aqua","帕底亞肯泰羅 (水瀾種)","fighting.water",220,185,"",100],
+["gyarados","暴鯉龍","water.flying",21,96,"",81],
+["mega-gyarados","超級暴鯉龍","water.dark",21,96,"gyarados",81],
+["ditto","百變怪","normal",63,142,"",48],
+["vaporeon","水伊布","water",120,169,"",65],
+["jolteon","雷伊布","electric",160,120,"",130],
+["flareon","火伊布","fire",211,223,"",65],
+["aerodactyl","化石翼龍","rock.flying",146,46,"",130],
+["mega-aerodactyl","超級化石翼龍","rock.flying",146,46,"aerodactyl",150],
+["snorlax","卡比獸","normal",70,89,"",30],
+["dragonite","快龍","dragon.flying",12,33,"",80],
+["mega-dragonite","超級快龍","dragon.flying",12,33,"dragonite",100],
+["meganium","大竺葵","grass",61,82,"",80],
+["mega-meganium","超級大竺葵","grass.fairy",61,82,"meganium",80],
+["typhlosion","火爆獸","fire",194,175,"",100],
+["typhlosion-hisui","洗翠火爆獸","fire.ghost",149,65,"",95],
+["feraligatr","大力鱷","water",141,146,"",78],
+["mega-feraligatr","超級大力鱷","water.dragon",141,146,"feraligatr",78],
+["ariados","阿利多斯","bug.poison",195,237,"",40],
+["ampharos","電龍","electric",147,135,"",55],
+["mega-ampharos","超級電龍","electric.dragon",147,135,"ampharos",45],
+["azumarill","瑪力露麗","water.fairy",90,122,"",50],
+["politoed","蚊香蛙皇","water",109,31,"",70],
+["espeon","太陽伊布","psychic",93,152,"",110],
+["umbreon","月亮伊布","dark",25,113,"",65],
+["slowking","呆呆王","water.psychic",148,189,"",30],
+["slowking-galarian","伽勒爾呆呆王","poison.psychic",72,119,"",30],
+["forretress","佛烈托斯","bug.steel",170,242,"",40],
+["steelix","大鋼蛇","steel.ground",171,138,"",30],
+["mega-steelix","超級大鋼蛇","steel.ground",171,138,"steelix",30],
+["qwilfish","千針魚","water.poison",232,249,"",85],
+["scizor","巨鉗螳螂","bug.steel",37,85,"",65],
+["mega-scizor","超級巨鉗螳螂","bug.steel",37,85,"scizor",75],
+["heracross","赫拉克羅斯","bug.fighting",103,155,"",85],
+["mega-heracross","超級赫拉克羅斯","bug.fighting",103,155,"heracross",75],
+["skarmory","盔甲鳥","steel.flying",73,125,"",70],
+["mega-skarmory","超級盔甲鳥","steel.flying",73,125,"skarmory",110],
+["houndoom","黑魯加","dark.fire",176,127,"",95],
+["mega-houndoom","超級黑魯加","dark.fire",176,127,"houndoom",115],
+["tyranitar","班基拉斯","rock.dark",43,17,"",61],
+["mega-tyranitar","超級班基拉斯","rock.dark",43,17,"tyranitar",71],
+["sceptile","蜥蜴王","grass",100,55,"",120],
+["mega-sceptile","超級蜥蜴王","grass.dragon",100,55,"sceptile",145],
+["blaziken","火焰雞","fire.fighting",40,51,"",80],
+["blaziken-female","火焰雞 (雌性)","fire.fighting",0,0,"",80],
+["mega-blaziken","超級火焰雞","fire.fighting",40,51,"blaziken",100],
+["swampert","巨沼怪","water.ground",33,34,"",60],
+["mega-swampert","超級巨沼怪","water.ground",33,34,"swampert",70],
+["pelipper","大嘴鷗","water.flying",48,8,"",65],
+["gardevoir","沙奈朵","psychic.fairy",71,26,"",80],
+["mega-gardevoir","超級沙奈朵","psychic.fairy",71,26,"gardevoir",100],
+["sableye","勾魂眼","dark.ghost",81,44,"",50],
+["mega-sableye","超級勾魂眼","dark.ghost",81,44,"sableye",20],
+["mawile","大嘴娃","steel.fairy",55,62,"",50],
+["mega-mawile","超級大嘴娃","steel.fairy",55,62,"mawile",50],
+["aggron","波士可多拉","steel.rock",99,128,"",50],
+["mega-aggron","超級波士可多拉","steel",99,128,"aggron",50],
+["medicham","恰雷姆","fighting.psychic",158,160,"",80],
+["mega-medicham","超級恰雷姆","fighting.psychic",158,160,"medicham",100],
+["manectric","雷電獸","electric",185,141,"",105],
+["mega-manectric","超級雷電獸","electric",185,141,"manectric",135],
+["swalot","吞食獸","poison",200,239,"",55],
+["sharpedo","巨牙鯊","water.dark",128,188,"",95],
+["mega-sharpedo","超級巨牙鯊","water.dark",128,188,"sharpedo",105],
+["camerupt","噴火駝","fire.ground",208,50,"",40],
+["mega-camerupt","超級噴火駝","fire.ground",208,50,"camerupt",20],
+["torkoal","煤炭龜","fire",119,35,"",20],
+["altaria","七夕青鳥","dragon.flying",126,100,"",80],
+["mega-altaria","超級七夕青鳥","dragon.fairy",126,100,"altaria",80],
+["milotic","美納斯","water",56,20,"",81],
+["castform","飄浮泡泡","normal",249,248,"",70],
+["banette","詛咒娃娃","ghost",60,174,"",65],
+["mega-banette","超級詛咒娃娃","ghost",60,174,"banette",75],
+["chimecho","風鈴鈴","psychic",142,198,"",65],
+["mega-chimecho","超級風鈴鈴","psychic.steel",142,198,"chimecho",65],
+["absol","阿勃梭魯","dark",64,57,"",75],
+["mega-absol","超級阿勃梭魯","dark",64,57,"absol",115],
+["mega-absol-z","超級阿勃梭魯Z","dark.ghost",64,57,"absol",151],
+["glalie","冰鬼護","ice",144,176,"",80],
+["mega-glalie","超級冰鬼護","ice",144,176,"glalie",100],
+["salamence","暴飛龍","dragon.flying",15,16,"",100],
+["mega-salamence","超級暴飛龍","dragon.flying",15,16,"salamence",120],
+["metagross","巨金怪","steel.psychic",14,28,"",70],
+["mega-metagross","超級巨金怪","steel.psychic",14,28,"metagross",110],
+["torterra","土台龜","grass.ground",166,165,"",56],
+["infernape","烈焰猴","fire.fighting",121,148,"",108],
+["empoleon","帝王拿波","water.steel",44,94,"",60],
+["staraptor","姆克鷹","normal.flying",46,18,"",100],
+["staraptor-female","姆克鷹 (雌性)","normal.flying",0,0,"",100],
+["mega-staraptor","超級姆克鷹","fighting.flying",46,18,"staraptor",110],
+["luxray","倫琴貓","electric",202,222,"",70],
+["roserade","羅絲雷朵","grass.poison",155,219,"",90],
+["rampardos","戰槌龍","rock",225,200,"",58],
+["bastiodon","護城龍","rock.steel",189,215,"",30],
+["lopunny","長耳兔","normal",67,111,"",105],
+["mega-lopunny","超級長耳兔","normal.fighting",67,111,"lopunny",135],
+["spiritomb","花岩怪","ghost.dark",162,121,"",35],
+["garchomp","烈咬陸鯊","dragon.ground",1,3,"",102],
+["mega-garchomp","超級烈咬陸鯊","dragon.ground",1,3,"garchomp",92],
+["mega-garchomp-z","超級烈咬陸鯊Z","dragon",1,3,"garchomp",151],
+["lucario","路卡利歐","fighting.steel",7,48,"",90],
+["mega-lucario","超級路卡利歐","fighting.steel",7,48,"lucario",112],
+["mega-lucario-z","超級路卡利歐Z","fighting.steel",7,48,"lucario",151],
+["hippowdon","河馬獸","ground",4,109,"",47],
+["toxicroak","毒骷蛙","poison.fighting",223,208,"",85],
+["abomasnow","暴雪王","grass.ice",178,130,"",60],
+["mega-abomasnow","超級暴雪王","grass.ice",178,130,"abomasnow",30],
+["weavile","瑪狃拉","dark.ice",127,86,"",125],
+["rhyperior","超甲狂犀","ground.rock",183,163,"",40],
+["leafeon","葉伊布","grass",216,193,"",95],
+["glaceon","冰伊布","ice",145,147,"",65],
+["gliscor","天蠍王","ground.flying",118,71,"",95],
+["mamoswine","象牙豬","ice.ground",69,105,"",80],
+["gallade","艾路雷朵","psychic.fighting",82,63,"",80],
+["mega-gallade","超級艾路雷朵","psychic.fighting",82,63,"gallade",110],
+["froslass","雪妖女","ice.ghost",83,40,"",110],
+["mega-froslass","超級雪妖女","ice.ghost",83,40,"froslass",120],
+["rotom","洛托姆","electric.ghost",256,245,"",91],
+["rotom-heat","加熱洛托姆","electric.fire",26,58,"",86],
+["rotom-wash","清洗洛托姆","electric.water",27,72,"",86],
+["rotom-frost","結冰洛托姆","electric.ice",219,202,"",86],
+["rotom-fan","旋轉洛托姆","electric.flying",238,235,"",86],
+["rotom-mow","割草洛托姆","electric.grass",188,231,"",86],
+["serperior","君主蛇","grass",97,136,"",113],
+["emboar","炎武王","fire.fighting",172,194,"",65],
+["mega-emboar","超級炎武王","fire.fighting",172,194,"emboar",75],
+["samurott","大劍鬼","water",241,262,"",70],
+["samurott-hisui","洗翠大劍鬼","water.dark",41,110,"",85],
+["watchog","步哨鼠","normal",247,261,"",77],
+["liepard","酷豹","dark",199,173,"",106],
+["simisage","花椰猿","grass",255,258,"",101],
+["simisear","爆香猿","fire",254,257,"",101],
+["simipour","冷水猿","water",248,255,"",101],
+["musharna","夢夢蝕","psychic",214,210,"",29],
+["excadrill","龍頭地鼠","ground.steel",68,27,"",88],
+["mega-excadrill","超級龍頭地鼠","ground.steel",68,27,"excadrill",103],
+["audino","差不多娃娃","normal",197,124,"",50],
+["mega-audino","超級差不多娃娃","normal.fairy",197,124,"audino",50],
+["conkeldurr","修建老匠","fighting",122,161,"",45],
+["scolipede","蜈蚣王","bug.poison",87,181,"",112],
+["mega-scolipede","超級蜈蚣王","bug.poison",87,181,"scolipede",62],
+["whimsicott","風妖精","grass.fairy",85,11,"",116],
+["krookodile","流氓鱷","ground.dark",159,144,"",92],
+["scrafty","頭巾混混","dark.fighting",140,112,"",58],
+["mega-scrafty","超級頭巾混混","dark.fighting",140,112,"scrafty",68],
+["cofagrigus","死神棺","ghost",152,164,"",30],
+["garbodor","灰塵山","poison",233,254,"",75],
+["zoroark","索羅亞克","dark",173,170,"",105],
+["zoroark-hisui","洗翠索羅亞克","normal.ghost",74,66,"",110],
+["reuniclus","人造細胞卵","psychic",107,180,"",30],
+["vanilluxe","雙倍多多冰","ice",57,117,"",79],
+["emolga","電飛鼠","electric.flying",213,233,"",103],
+["eelektross","麻麻鰻魚王","electric",113,131,"",50],
+["mega-eelektross","超級麻麻鰻魚王","electric",113,131,"eelektross",80],
+["chandelure","水晶燈火靈","ghost.fire",101,84,"",80],
+["mega-chandelure","超級水晶燈火靈","ghost.fire",101,84,"chandelure",90],
+["beartic","凍原熊","ice",212,191,"",50],
+["stunfisk","泥巴魚","ground.electric",209,240,"",32],
+["stunfisk-galarian","伽勒爾泥巴魚","ground.steel",222,253,"",32],
+["golurk","泥偶巨人","ground.ghost",190,123,"",55],
+["mega-golurk","超級泥偶巨人","ground.ghost",190,123,"golurk",55],
+["hydreigon","三首惡龍","dark.dragon",29,61,"",98],
+["volcarona","火神蛾","bug.fire",35,22,"",100],
+["chesnaught","布里卡隆","grass.fighting",163,134,"",64],
+["mega-chesnaught","超級布里卡隆","grass.fighting",163,134,"chesnaught",44],
+["delphox","妖火紅狐","fire.psychic",47,42,"",104],
+["mega-delphox","超級妖火紅狐","fire.psychic",47,42,"delphox",134],
+["greninja","甲賀忍蛙","water.dark",28,81,"",122],
+["mega-greninja","超級甲賀忍蛙","water.dark",28,81,"greninja",142],
+["diggersby","掘地兔","normal.ground",124,218,"",78],
+["talonflame","烈箭鷹","fire.flying",154,49,"",126],
+["vivillon","彩粉蝶","bug.flying",108,64,"",89],
+["pyroar","火炎獅","fire.normal",123,95,"",106],
+["pyroar-female","火炎獅 (雌性)","fire.normal",0,0,"",106],
+["mega-pyroar","超級火炎獅","fire.normal",123,95,"pyroar",126],
+["floette-eternal-flower","花葉蒂","fairy",36,30,"",92],
+["mega-floette","超級花葉蒂","fairy",36,30,"floette-eternal-flower",102],
+["florges","花潔夫人","fairy",196,195,"",75],
+["gogoat","坐騎山羊","grass",244,230,"",68],
+["pangoro","流氓熊貓","fighting.dark",210,209,"",58],
+["furfrou","多麗米亞","normal",226,251,"",102],
+["meowstic-male","超能妙喵 (雄性的樣子)","psychic",206,118,"",104],
+["meowstic-female","超能妙喵 (雌性的樣子)","psychic",234,98,"",104],
+["mega-meowstic","超級超能妙喵","psychic",206,118,"meowstic-male",124],
+["aegislash","堅盾劍怪 (盾牌形態)","steel.ghost",31,103,"",60],
+["aegislash-blade","堅盾劍怪 (刀劍形態)","steel.ghost",0,0,"",60],
+["aromatisse","芳香精","fairy",253,186,"",29],
+["slurpuff","胖甜妮","fairy",110,190,"",72],
+["malamar","烏賊王","dark.psychic",157,88,"",73],
+["mega-malamar","超級烏賊王","dark.psychic",157,88,"malamar",88],
+["barbaracle","龜足巨鎧","rock.water",156,225,"",68],
+["mega-barbaracle","超級龜足巨鎧","rock.fighting",156,225,"barbaracle",88],
+["dragalge","毒藻龍","poison.dragon",88,153,"",44],
+["mega-dragalge","超級毒藻龍","poison.dragon",88,153,"dragalge",44],
+["clawitzer","鋼炮臂蝦","water",182,140,"",59],
+["heliolisk","光電傘蜥","electric.normal",136,132,"",109],
+["tyrantrum","怪顎龍","rock.dragon",218,211,"",71],
+["aurorus","冰雪巨龍","rock.ice",177,167,"",58],
+["sylveon","仙子伊布","fairy",50,19,"",60],
+["hawlucha","摔角鷹人","fighting.flying",132,107,"",118],
+["mega-hawlucha","超級摔角鷹人","fighting.flying",132,107,"hawlucha",118],
+["dedenne","咚咚鼠","electric.fairy",235,232,"",101],
+["goodra","黏美龍","dragon",184,207,"",80],
+["goodra-hisui","洗翠黏美龍","steel.dragon",52,87,"",60],
+["klefki","鑰圈兒","steel.fairy",164,116,"",75],
+["trevenant","朽木妖","ghost.grass",201,204,"",56],
+["gourgeist-small","南瓜怪人 (小尺寸)","ghost.grass",259,250,"",99],
+["gourgeist-average","南瓜怪人 (普通尺寸)","ghost.grass",258,256,"",84],
+["gourgeist-large","南瓜怪人 (大尺寸)","ghost.grass",262,259,"",69],
+["gourgeist-super","南瓜怪人 (特大尺寸)","ghost.grass",229,229,"",54],
+["avalugg","冰岩怪","ice",198,247,"",28],
+["avalugg-hisui","洗翠冰岩怪","ice.rock",207,214,"",38],
+["noivern","音波龍","flying.dragon",168,151,"",123],
+["decidueye","狙射樹梟","grass.ghost",228,224,"",70],
+["decidueye-hisui","洗翠狙射樹梟","grass.fighting",151,156,"",60],
+["incineroar","熾焰咆哮虎","fire.dark",92,4,"",60],
+["primarina","西獅海壬","water.fairy",2,36,"",60],
+["toucannon","銃嘴大鳥","normal.flying",94,221,"",60],
+["crabominable","好勝毛蟹","fighting.ice",179,157,"",43],
+["mega-crabominable","超級好勝毛蟹","fighting.ice",179,157,"crabominable",33],
+["lycanroc","鬃岩狼人","rock",251,205,"",112],
+["lycanroc-midnight","鬃岩狼人 (黑夜的樣子)","rock",252,238,"",82],
+["lycanroc-dusk","鬃岩狼人 (黃昏的樣子)","rock",139,126,"",110],
+["toxapex","超壞星","poison.water",32,76,"",35],
+["mudsdale","重泥挽馬","ground",167,154,"",35],
+["araquanid","滴蛛霸","water.bug",79,106,"",42],
+["salazzle","焰后蜥","poison.fire",129,159,"",117],
+["tsareena","甜冷美后","grass",192,70,"",72],
+["oranguru","智揮猩","normal.psychic",257,92,"",60],
+["passimian","投擲猴","fighting",260,226,"",80],
+["golisopod","具甲武者","bug.water",5,13,"",40],
+["mega-golisopod","超級具甲武者","bug.steel",5,13,"golisopod",40],
+["mimikyu","謎擬Ｑ","ghost.fairy",3,78,"",96],
+["drampa","老翁龍","normal.dragon",191,75,"",36],
+["mega-drampa","超級老翁龍","normal.dragon",191,75,"drampa",36],
+["kommo-o","杖尾鱗甲龍","dragon.fighting",137,41,"",85],
+["rillaboom","轟擂金剛猩","grass",19,2,"",85],
+["cinderace","閃焰王牌","fire",20,74,"",119],
+["inteleon","千面避役","water",116,83,"",120],
+["corviknight","鋼鎧鴉","flying.steel",11,52,"",67],
+["thievul","狐大盜","dark",242,227,"",90],
+["flapple","蘋裹龍","grass.dragon",243,236,"",70],
+["appletun","豐蜜龍","grass.dragon",239,246,"",30],
+["sandaconda","沙螺蟒","ground",204,244,"",71],
+["toxtricity-amped","顫弦蠑螈 (高調的樣子)","electric.poison",106,114,"",75],
+["toxtricity-low-key","顫弦蠑螈 (低調的樣子)","electric.poison",130,143,"",75],
+["grapploct","八爪武師","fighting",125,80,"",42],
+["polteageist","怖思壺","ghost",86,217,"",70],
+["hatterene","布莉姆溫","psychic.fairy",49,59,"",29],
+["grimmsnarl","長毛巨魔","dark.fairy",53,24,"",60],
+["perrserker","喵頭目","steel",246,203,"",50],
+["sirfetchd","蔥遊兵","fighting",104,104,"",65],
+["mr.-rime","踏冰人偶","ice.psychic",224,177,"",70],
+["runerigus","死神板","ground.ghost",153,184,"",30],
+["alcremie","霜奶仙","fairy",187,99,"",64],
+["falinks","列陣兵","fighting",230,216,"",75],
+["mega-falinks","超級列陣兵","fighting",230,216,"falinks",100],
+["pincurchin","啪嚓海膽","electric",150,101,"",15],
+["indeedee-male","愛管侍 (雄性的樣子)","psychic.normal",16,23,"",95],
+["indeedee-female","愛管侍 (雌性的樣子)","psychic.normal",117,9,"",85],
+["morpeko","莫魯貝可","electric.dark",165,178,"",97],
+["dragapult","多龍巴魯托","dragon.ghost",62,53,"",142],
+["wyrdeer","詭角鹿","normal.psychic",227,129,"",65],
+["kleavor","劈斧螳螂","bug.rock",76,73,"",85],
+["basculegion-male","幽尾玄魚 (雄性的樣子)","water.ghost",10,12,"",78],
+["basculegion-female","幽尾玄魚 (雌性的樣子)","water.ghost",115,32,"",78],
+["sneasler","大狃拉","fighting.poison",24,1,"",120],
+["overqwil","萬針魚","dark.poison",96,93,"",85],
+["meowscarada","魔幻假面喵","grass.dark",17,68,"",123],
+["skeledirge","骨紋巨聲鱷","fire.ghost",42,139,"",66],
+["quaquaval","狂歡浪舞鴨","water.fighting",135,183,"",85],
+["pawmot","巴布土撥","electric.fighting",38,69,"",105],
+["maushold-family-of-four","一家鼠 (四隻家庭)","normal",0,0,"",111],
+["maushold-family-of-three","一家鼠 (三隻家庭)","normal",95,54,"",111],
+["arboliva","奧利瓦","grass.normal",91,166,"",39],
+["squawkabilly-green-plumage","怒鸚哥 (綠羽毛)","normal.flying",231,213,"",92],
+["squawkabilly-blue-plumage","怒鸚哥 (藍羽毛)","normal.flying",0,0,"",92],
+["squawkabilly-yellow-plumage","怒鸚哥 (黃羽毛)","normal.flying",236,212,"",92],
+["squawkabilly-white-plumage","怒鸚哥 (白羽毛)","normal.flying",0,0,"",92],
+["garganacl","鹽石巨靈","rock",181,206,"",35],
+["armarouge","紅蓮鎧騎","fire.psychic",77,29,"",75],
+["ceruledge","蒼炎刃鬼","fire.ghost",59,67,"",85],
+["bellibolt","電肚蛙","electric",54,102,"",45],
+["mabosstiff","獒教父","dark",217,234,"",85],
+["scovillain","狠辣椒","grass.fire",65,90,"",75],
+["mega-scovillain","超級狠辣椒","grass.fire",65,90,"scovillain",75],
+["espathra","超能豔鴕","psychic",66,56,"",105],
+["tinkaton","巨鍛匠","fairy.steel",89,115,"",94],
+["palafin","海豚俠","water",134,150,"",100],
+["palafin-hero","海豚俠 (全能形態)","water",0,0,"",100],
+["orthworm","拖拖蚓","steel",105,199,"",65],
+["glimmora","晶光花","rock.poison",18,38,"",86],
+["mega-glimmora","超級晶光花","rock.poison",18,38,"glimmora",101],
+["houndstone","墓揚犬","ghost",112,145,"",68],
+["annihilape","棄世猴","fighting.ghost",80,43,"",90],
+["farigiraf","奇麒麟","normal.psychic",205,14,"",60],
+["kingambit","仆斬將軍","dark.steel",39,10,"",50],
+["baxcalibur","戟脊龍","dragon.ice",13,60,"",87],
+["mega-baxcalibur","超級戟脊龍","dragon.ice",13,60,"baxcalibur",87],
+["gholdengo","賽富豪","steel.ghost",9,15,"",84],
+["sinistcha","來悲粗茶","grass.ghost",111,25,"",70],
+["archaludon","鋁鋼橋龍","steel.dragon",8,5,"",85],
+["hydrapple","蜜集大蛇","grass.dragon",193,187,"",44],
+];
+// ----- MONS END -----
+
 // 防守方 defs（可帶特性 ab）被各屬性打的倍率分組
 function defenseProfile(defs, ab) {
   const p = { 4: [], 2: [], 1: [], 0.5: [], 0.25: [], 0.125: [], 0: [] };
@@ -551,6 +936,56 @@ function teamProfile(members) {
     const ms = members.map(defs => eff(a, defs));
     const weak = ms.filter(m => m >= 2).length, resist = ms.filter(m => m < 1).length;
     return { atk: a, ms, weak, resist, warn: weak >= 3 || (weak >= 2 && resist === 0) };
+  });
+}
+// 隊伍缺口：有人怕、沒人抗的攻擊屬性
+const teamGaps = rows => rows.filter(r => r.weak && !r.resist).map(r => r.atk);
+// 其他隊員 others 加入屬性 defs 這隻後：隊伍缺口、⚠ 數，以及這隻自己的弱點數、抵抗數
+function memberScore(others, defs) {
+  const rows = teamProfile([...others, defs]);
+  return {
+    gaps: teamGaps(rows), warn: rows.filter(r => r.warn).length,
+    weak: IDS.filter(a => eff(a, defs) >= 2).length, resist: IDS.filter(a => eff(a, defs) < 1).length,
+  };
+}
+// 這隻（已選 base，0～1 個屬性）再補哪個屬性：others 是其他隊員；
+// 依加入後的 ⚠ 數、缺口數由少到多排序，同分再比這隻自己弱點少、抵抗多
+function recommendMember(others, base) {
+  return IDS.filter(c => !base.includes(c)).map(c => ({ id: c, defs: [...base, c], ...memberScore(others, [...base, c]) }))
+    .sort((x, y) => x.warn - y.warn || x.gaps.length - y.gaps.length || x.weak - y.weak || y.resist - x.resist);
+}
+
+const MONS = MONS_RAW.map(([key, zh, ty, s, d, base, spe]) => ({ key, zh, types: ty.split('.'), rank: { s, d }, base, spe }));
+const MON = Object.fromEntries(MONS.map(m => [m.key, m]));
+const family = m => m.base || m.key;
+const sameTypes = (a, b) => [...a].sort().join() === [...b].sort().join();
+// 從名單挑補位的寶可夢（屬性要包含 base；同家族已在隊上的不列）：評分同 recommendMember，
+// 同分看排名（fmt：s 單打、d 雙打，沒排名的排最後）；超級進化和原型屬性一樣時只留原型
+function recommendMon(others, base, fmt, onTeam = []) {
+  const rk = m => m.rank[fmt] || Infinity, fams = onTeam.map(k => family(MON[k]));
+  return MONS.filter(m => base.every(t => m.types.includes(t)) && !fams.includes(family(m))
+      && !(m.base && sameTypes(m.types, MON[m.base].types)))
+    .map(m => ({ mon: m, ...memberScore(others, m.types) }))
+    .sort((x, y) => x.warn - y.warn || x.gaps.length - y.gaps.length || rk(x.mon) - rk(y.mon));
+}
+// 全隊本系（隊員屬性）都打不出效果絕佳的單屬性對手
+function stabGaps(members) {
+  const stab = [...new Set(members.flat())];
+  return IDS.filter(d => bestEff(stab, [d]) < 2);
+}
+// 排名前 n 的熱門寶可夢（不含超級進化，超級進化沿用原型排名），依排名排序
+const topMons = (fmt, n) => MONS.filter(m => !m.base && m.rank[fmt] && m.rank[fmt] <= n).sort((x, y) => x.rank[fmt] - y.rank[fmt]);
+// 熱門寶可夢逐隻檢查隊員 members：
+// safe＝牠的本系打這隻都 ×1 以下、hit＝這隻的本系能剋牠；同一隻兩者兼具＝有解(2)，只有其一＝半解(1)，都沒有＝沒解(0)
+function threatCheck(members, fmt, n) {
+  return topMons(fmt, n).map(m => {
+    const safe = [], hit = [];
+    members.forEach((defs, i) => {
+      if (bestEff(m.types, defs) <= 1) safe.push(i);
+      if (bestEff(defs, m.types) >= 2) hit.push(i);
+    });
+    const level = safe.some(i => hit.includes(i)) ? 2 : safe.length || hit.length ? 1 : 0;
+    return { mon: m, safe, hit, level };
   });
 }
 
@@ -887,17 +1322,79 @@ $('#bCover').addEventListener('click', e => {
 $('#bClear').addEventListener('click', () => { build.moves = []; build.types = []; build.ab = ''; renderBuild(); });
 
 // ---------- 隊伍分析 ----------
-const team = { slots: [[], [], [], [], [], []], cur: 0 };
+// mons：每格選的寶可夢 key（只選屬性時為空字串）；fmt：排名依據 s 單打、d 雙打
+const team = { slots: [[], [], [], [], [], []], mons: ['', '', '', '', '', ''], cur: 0, fmt: 's' };
+const FMT_ZH = { s: '單打', d: '雙打' };
+const THREAT_N = 20;
+const slotName = i => team.mons[i] ? MON[team.mons[i]].zh : team.slots[i].map(id => T[id].zh).join('/');
+const rankText = m => `${FMT_ZH[team.fmt]}${m.rank[team.fmt] ? ' #' + m.rank[team.fmt] : '無排名'}`;
+// 目前格子的推薦，點了直接放進這格：屬性推薦前 5 名（空格推第一個屬性、已選一個就推第二個），再加推薦寶可夢前 5 名
+function teamRecHTML(gaps, warnNow) {
+  const base = team.slots[team.cur];
+  if (base.length === 2 || team.mons[team.cur]) {
+    return team.slots.some((s, i) => s.length < 2 && !team.mons[i]) ? '<p class="muted small">點還沒選滿的格子，看建議補什麼。</p>' : '';
+  }
+  const others = team.slots.filter((s, i) => i !== team.cur && s.length);
+  const names = ids => ids.map(id => T[id].zh).join('、');
+  const delta = r => {
+    const fixed = gaps.filter(g => !r.gaps.includes(g)), added = r.gaps.filter(g => !gaps.includes(g));
+    return `<span>缺口 <b>${gaps.length} → ${r.gaps.length}</b>` + (fixed.length ? `・補上 ${names(fixed)}` : '')
+      + (added.length ? `・新增 ${names(added)}` : '') + (warnNow || r.warn ? `・⚠ <b>${warnNow} → ${r.warn}</b>` : '') + '</span>';
+  };
+  return `<h3>第 ${team.cur + 1} 隻${base.length ? '的第二屬性' : ''}推薦</h3>`
+    + `<p class="muted small b-intro">依加入後隊伍的 ⚠ 數、缺口數由少到多排序，同分再比這隻自己弱點少、抵抗多；點一下直接加入${base.length ? '（這隻是單屬性就不用選，直接點下一格）' : ''}。</p><div class="b-rec">`
+    + recommendMember(others, base).slice(0, 5).map((r, i) => `<button data-add="${r.id}"><span class="rank">${i + 1}</span>${chips(r.defs)}${delta(r)}</button>`).join('')
+    + `</div><h3>第 ${team.cur + 1} 隻推薦寶可夢</h3>`
+    + `<p class="muted small b-intro">從名單${base.length ? `裡有${T[base[0]].zh}屬性的` : ''}寶可夢挑，依加入後隊伍的 ⚠ 數、缺口數排序，同分時${FMT_ZH[team.fmt]}排名高的在前；點一下直接放進這格。</p><div class="b-rec">`
+    + recommendMon(others, base, team.fmt, team.mons.filter(Boolean)).slice(0, 5).map((r, i) => `<button data-mon="${r.mon.key}"><span class="rank">${i + 1}</span>`
+      + `<b>${r.mon.zh}</b>${chips(r.mon.types)}${delta(r)}<span class="meta">${rankText(r.mon)}</span></button>`).join('')
+    + '</div>';
+}
+// 熱門威脅：沒解的排前面，同一級再依排名
+function threatHTML(members) {
+  const list = threatCheck(members.map(([s]) => s), team.fmt, THREAT_N)
+    .sort((x, y) => x.level - y.level || x.mon.rank[team.fmt] - y.mon.rank[team.fmt]);
+  const who = idx => idx.length ? idx.map(j => `${members[j][1] + 1} ${slotName(members[j][1])}`).join('、') : '（無）';
+  const LV = ['✘ 沒解', '△ 半解', '✔ 有解'], cnt = [0, 1, 2].map(l => list.filter(t => t.level === l).length);
+  return `<div class="res-head">熱門威脅檢查<span class="muted small">（${FMT_ZH[team.fmt]}排名前 ${THREAT_N}）</span></div>`
+    + `<p class="b-sum">沒解 <b>${cnt[0]}</b> 隻、半解 <b>${cnt[1]}</b> 隻、有解 <b>${cnt[2]}</b> 隻。</p>`
+    + list.map(t => `<div class="threat lv${t.level}"><span class="lv">${LV[t.level]}</span><span class="meta">#${t.mon.rank[team.fmt]}</span>`
+      + `<b>${t.mon.zh}</b>${chips(t.mon.types)}<span class="who">不怕牠本系：${who(t.safe)}・本系剋牠：${who(t.hit)}</span></div>`).join('')
+    + `<p class="note">※ 只看屬性：「不怕牠本系」＝牠的本系屬性打這隻都 ×1 以下；「本系剋牠」＝這隻的屬性招式能對牠效果絕佳。`
+    + `有解＝同一隻兩者兼具，半解＝只有其中一種。不含特性、道具、能力值與實際配招；排名為 OP.GG 統計（${MONS_DATE} 擷取）。</p>`;
+}
+// 速度線：我方（用名字選的才有速度）和熱門寶可夢依速度種族值由快到慢排，同速時我方排前面
+function speedHTML(members) {
+  const top = topMons(team.fmt, THREAT_N);
+  const mine = members.filter(([, i]) => team.mons[i]).map(([, i]) => ({ i, mon: MON[team.mons[i]] }));
+  const rows = [...mine, ...top.map(mon => ({ mon }))]
+    .sort((x, y) => y.mon.spe - x.mon.spe || (y.i != null) - (x.i != null) || x.mon.rank[team.fmt] - y.mon.rank[team.fmt]);
+  return `<div class="res-head">速度線<span class="muted small">（速度種族值：我方＋${FMT_ZH[team.fmt]}排名前 ${THREAT_N}）</span></div>`
+    + mine.map(({ i, mon }) => {
+      const n = f => top.filter(t => f(t.spe, mon.spe)).length;
+      return `<div class="x-line"><b>${i + 1} ${mon.zh}</b><span class="x-msg">速度 ${mon.spe}：比 ${n((t, m) => t < m)} 隻快、`
+        + `同速 ${n((t, m) => t === m)} 隻、比 ${n((t, m) => t > m)} 隻慢</span></div>`;
+    }).join('')
+    + (members.some(([, i]) => !team.mons[i]) ? '<p class="muted small b-intro">只選屬性的格子沒有速度資料，用名字選寶可夢才會列進速度線。</p>' : '')
+    + `<div style="margin-top:8px">${rows.map(x => `<div class="spd${x.i != null ? ' me' : ''}"><b class="v">${x.mon.spe}</b><b>${x.mon.zh}</b>${chips(x.mon.types)}`
+      + `<span class="meta">${x.i != null ? `我方第 ${x.i + 1} 隻` : `#${x.mon.rank[team.fmt]}`}</span></div>`).join('')}</div>`
+    + '<p class="note">※ 只比速度種族值，不含性格、能力投資、道具（如講究圍巾）、特性與場地（如順風、戲法空間）；'
+    + '種族值相同時實際誰快要看投資，所以算同速。我方超級進化看超級進化後的速度，熱門寶可夢以原型計。</p>';
+}
 function renderTeam() {
-  $('#tSlots').innerHTML = team.slots.map((s, i) => `<button class="slot" data-i="${i}" aria-pressed="${i === team.cur}">`
-    + `<span class="slot-n">第 ${i + 1} 隻</span>${s.length ? chips(s) : '<span class="muted small">空</span>'}</button>`).join('');
+  $('#tSlots').innerHTML = team.slots.map((s, i) => `<button class="slot" data-i="${i}" aria-pressed="${i === team.cur}"><span class="slot-n">第 ${i + 1} 隻</span>`
+    + `${team.mons[i] ? `<span class="slot-name">${MON[team.mons[i]].zh}</span>` : ''}${s.length ? chips(s) : '<span class="muted small">空</span>'}</button>`).join('');
   renderPick($('#tPick'), team.slots[team.cur]);
+  document.querySelectorAll('#tFmt button').forEach(b => b.setAttribute('aria-pressed', b.dataset.fmt === team.fmt));
 
   const members = team.slots.map((s, i) => [s, i]).filter(([s]) => s.length);
   if (!members.length) {
-    $('#tResult').innerHTML = '<p class="empty">選好隊員的屬性後，這裡會列出整隊被各屬性打的倍率，標出共同弱點。</p>';
+    $('#tResult').innerHTML = '<p class="empty">選好隊員後，這裡會列出整隊被各屬性打的倍率，標出共同弱點與缺口，並建議下一隻補什麼屬性、哪隻寶可夢。</p>';
+    $('#tThreat').innerHTML = `<p class="empty">選好隊員後，這裡會檢查${FMT_ZH[team.fmt]}排名前 ${THREAT_N} 的熱門寶可夢，看隊伍有沒有人能應付。</p>`;
   } else {
-    const rows = teamProfile(members.map(([s]) => s)), warn = rows.filter(r => r.warn);
+    const sg = stabGaps(members.map(([s]) => s));
+    $('#tThreat').innerHTML = threatHTML(members);
+    const rows = teamProfile(members.map(([s]) => s)), warn = rows.filter(r => r.warn), gaps = teamGaps(rows);
     const sym = { 4: '4', 2: '2', 1: '', 0.5: '½', 0.25: '¼', 0: '0' };
     let h = '<thead><tr><th class="corner">攻擊 ↓<br>隊員 →</th>'
       + members.map(([s, i]) => `<th><span class="tcol"><span class="slot-n">${i + 1}</span><span class="duo">`
@@ -912,40 +1409,76 @@ function renderTeam() {
       + (warn.length
         ? `<div class="x-line"><span class="x-msg">要注意：</span>${warn.map(r => chip(r.atk, `${r.weak}怕/${r.resist}抗`)).join('')}</div>`
         : '<p class="muted small b-intro">沒有 3 隻以上都怕、或 2 隻以上怕又沒人抗的屬性。</p>')
+      + `<div class="x-line"><span class="x-msg">缺口（有人怕、沒人抗）：</span>${gaps.length ? gaps.map(id => chip(id)).join('') : '<span class="none">（無）</span>'}</div>`
+      + `<div class="x-line"><span class="x-msg">本系打不出效果絕佳：</span>${sg.length ? sg.map(id => chip(id)).join('') : '<span class="none">（無）</span>'}</div>`
+      + teamRecHTML(gaps, warn.length)
       + `<div class="mwrap cover" style="margin-top:10px"><table class="matrix team">${h}</tbody></table></div>`
-      + '<p class="note">※ 怕＝受到 ×2 以上；抗＝×½ 以下（含沒有效果）。⚠ 標示 3 隻以上都怕，或 2 隻以上怕又沒人抗的屬性。只算屬性，不含特性。</p>';
+      + '<p class="note">※ 怕＝受到 ×2 以上；抗＝×½ 以下（含沒有效果）。⚠ 標示 3 隻以上都怕，或 2 隻以上怕又沒人抗的屬性。本系＝隊員自己的屬性。'
+      + '只算屬性，不含特性；推薦的雙屬性組合不一定有對應寶可夢，推薦寶可夢也只看屬性，不看能力值與招式。</p>';
   }
+  $('#tSpeed').innerHTML = speedHTML(members);
   saveState();
 }
-$('#tSlots').addEventListener('click', e => {
-  const b = e.target.closest('.slot');
-  if (b) { team.cur = +b.dataset.i; renderTeam(); }
-});
-$('#tPick').addEventListener('click', e => {
-  const b = e.target.closest('.tbtn');
-  if (!b) return;
+// 把屬性加進目前格子（手動改屬性就不再算是名單上的寶可夢）
+function pickTeamType(id) {
   const s = team.slots[team.cur], before = s.length;
-  toggleSel(s, b.dataset.id, 2);
+  team.mons[team.cur] = '';
+  toggleSel(s, id, 2);
   // 這隻剛選滿兩個屬性就跳到後面的空格
   if (before === 1 && s.length === 2) {
     const n = team.slots.findIndex((x, i) => i > team.cur && !x.length);
     if (n >= 0) team.cur = n;
   }
   renderTeam();
+}
+// 把寶可夢放進目前格子，再跳到後面的空格
+function pickTeamMon(key) {
+  team.slots[team.cur] = MON[key].types.slice();
+  team.mons[team.cur] = key;
+  const n = team.slots.findIndex((x, i) => i > team.cur && !x.length);
+  if (n >= 0) team.cur = n;
+  renderTeam();
+}
+const MON_BY_ZH = Object.fromEntries(MONS.map(m => [m.zh, m.key]));
+$('#tMons').innerHTML = MONS.map(m => `<option value="${m.zh}">`).join('');
+$('#monsDate').textContent = MONS_DATE + ' 擷取';
+// 從清單點選就直接放入；手打的等按 Enter 或離開輸入框（change）才比對，免得打到一半就被較短的名字搶先
+function nameInput(e) {
+  const key = MON_BY_ZH[e.target.value.trim()];
+  if (key && (e.type === 'change' || !e.inputType || e.inputType === 'insertReplacementText')) { e.target.value = ''; pickTeamMon(key); }
+}
+$('#tName').addEventListener('input', nameInput);
+$('#tName').addEventListener('change', nameInput);
+$('#tFmt').addEventListener('click', e => {
+  const b = e.target.closest('button[data-fmt]');
+  if (b) { team.fmt = b.dataset.fmt; renderTeam(); }
 });
-$('#tClear').addEventListener('click', () => { team.slots = team.slots.map(() => []); team.cur = 0; renderTeam(); });
+$('#tSlots').addEventListener('click', e => {
+  const b = e.target.closest('.slot');
+  if (b) { team.cur = +b.dataset.i; renderTeam(); }
+});
+$('#tPick').addEventListener('click', e => {
+  const b = e.target.closest('.tbtn');
+  if (b) pickTeamType(b.dataset.id);
+});
+$('#tResult').addEventListener('click', e => {
+  const b = e.target.closest('[data-add], [data-mon]');
+  if (b) b.dataset.mon ? pickTeamMon(b.dataset.mon) : pickTeamType(b.dataset.add);
+});
+$('#tClear').addEventListener('click', () => { team.slots = team.slots.map(() => []); team.mons = team.mons.map(() => ''); team.cur = 0; renderTeam(); });
 
 // ---------- 狀態存網址＋本機（可存書籤、重新整理不清空） ----------
-// 格式：#分頁?m=招式,招式&t=屬性,屬性&a=特性&p=隊員1屬性.屬性,隊員2屬性...
+// 格式：#分頁?m=招式,招式&t=屬性,屬性&a=特性&p=隊員1屬性.屬性,@寶可夢key,...&f=d（雙打排名，單打不寫）
 const STATE_KEY = 'pkmn-champions-state';
 function stateQuery() {
   const q = [];
   if (build.moves.length) q.push('m=' + build.moves.join(','));
   if (build.types.length) q.push('t=' + build.types.join(','));
   if (build.ab) q.push('a=' + build.ab);
-  const p = team.slots.map(s => s.join('.'));
+  const p = team.slots.map((s, i) => team.mons[i] ? '@' + team.mons[i] : s.join('.'));
   while (p.length && !p[p.length - 1]) p.pop();
   if (p.length) q.push('p=' + p.join(','));
+  if (team.fmt === 'd') q.push('f=d');
   return q.join('&');
 }
 const stateHash = () => { const q = stateQuery(); return '#' + curTab + (q ? '?' + q : ''); };
@@ -959,7 +1492,12 @@ function loadState(q) {
   build.moves = ids(kv.m, ',', 4);
   build.types = ids(kv.t, ',', 2);
   build.ab = Object.hasOwn(AB, kv.a || '') ? kv.a : '';
-  (kv.p || '').split(',').slice(0, 6).forEach((s, i) => { team.slots[i] = ids(s, '.', 2); });
+  (kv.p || '').split(',').slice(0, 6).forEach((s, i) => {
+    const m = s[0] === '@' && MON[s.slice(1)];
+    team.slots[i] = m ? m.types.slice() : ids(s, '.', 2);
+    team.mons[i] = m ? m.key : '';
+  });
+  team.fmt = kv.f === 'd' ? 'd' : 's';
 }
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-copy]');
