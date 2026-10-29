@@ -240,6 +240,13 @@ table.matrix { border-collapse: separate; border-spacing: 0; margin: 0 auto; }
 .combo .who { flex-basis: 100%; font-size: 13px; }
 .matrix.vs td { width: 46px; min-width: 46px; font-size: 14px; }
 .matrix.vs tbody th { text-align: left; font-size: 14px; white-space: nowrap; }
+.qpick { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 6px; margin-top: 6px; }
+.qpick button {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 6px 8px; text-align: left;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface); cursor: pointer; font-size: 14px; font-weight: 700;
+}
+.qpick button:hover { background: var(--surface-2); }
+.qpick .chip { font-size: 11px; padding: 0 6px; }
 
 /* ---------- 考試 ---------- */
 .field { margin-top: 16px; }
@@ -419,15 +426,16 @@ footer a { color: inherit; }
         <p class="muted small b-intro">開戰前看到對手的 6 隻時輸入牠們的名字，建議我方帶哪幾隻、誰先發。我方隊伍沿用「隊伍分析」。</p>
         <div class="top-actions"><button class="btn ghost" data-copy>複製連結</button><button class="btn ghost" id="pClear">清除對手</button></div>
       </div>
-      <div class="b-label">對手的 6 隻<span class="muted small">輸入名字依序填入空格；點格子可移除</span></div>
+      <div class="b-label">對手的 6 隻<span class="muted small">點下方清單或打字搜尋，依序填入空格；點格子可移除</span></div>
       <div class="slots" id="pOpp"></div>
       <div class="t-row">
-        <input class="sel" id="pName" list="tMons" placeholder="輸入對手寶可夢名字" autocomplete="off" aria-label="輸入對手寶可夢名字">
+        <input class="sel" id="pName" placeholder="打一兩個字或英文篩選，Enter 加入第一個" autocomplete="off" aria-label="搜尋對手寶可夢">
         <div class="seg" id="pFmt" aria-label="對戰形式">
           <button data-fmt="s" aria-pressed="true">單打（帶 3 隻）</button>
           <button data-fmt="d" aria-pressed="false">雙打（帶 4 隻）</button>
         </div>
       </div>
+      <div id="pList"></div>
     </div>
     <div class="card b-card" id="pResult"></div>
   </section>
@@ -1487,16 +1495,13 @@ function pickTeamMon(key) {
 const MON_BY_ZH = Object.fromEntries(MONS.map(m => [m.zh, m.key]));
 $('#tMons').innerHTML = MONS.map(m => `<option value="${m.zh}">`).join('');
 $('#monsDate').textContent = MONS_DATE + ' 擷取';
-// 名字輸入框：從清單點選就直接放入；手打的等按 Enter 或離開輸入框（change）才比對，免得打到一半就被較短的名字搶先
-function bindNameInput(el, onPick) {
-  const h = e => {
-    const key = MON_BY_ZH[e.target.value.trim()];
-    if (key && (e.type === 'change' || !e.inputType || e.inputType === 'insertReplacementText')) { e.target.value = ''; onPick(key); }
-  };
-  el.addEventListener('input', h);
-  el.addEventListener('change', h);
+// 從清單點選就直接放入；手打的等按 Enter 或離開輸入框（change）才比對，免得打到一半就被較短的名字搶先
+function nameInput(e) {
+  const key = MON_BY_ZH[e.target.value.trim()];
+  if (key && (e.type === 'change' || !e.inputType || e.inputType === 'insertReplacementText')) { e.target.value = ''; pickTeamMon(key); }
 }
-bindNameInput($('#tName'), pickTeamMon);
+$('#tName').addEventListener('input', nameInput);
+$('#tName').addEventListener('change', nameInput);
 // 單打／雙打：隊伍分析的排名依據和出戰選角的帶幾隻共用
 function setFmt(e) {
   const b = e.target.closest('button[data-fmt]');
@@ -1557,6 +1562,7 @@ function renderBring() {
   $('#pOpp').innerHTML = bring.opp.map((k, i) => `<button class="slot" data-i="${i}"${k ? ' title="點一下移除"' : ''}><span class="slot-n">第 ${i + 1} 隻</span>`
     + (k ? `<span class="slot-name">${MON[k].zh}</span>${chips(MON[k].types)}` : '<span class="muted small">空</span>') + '</button>').join('');
   document.querySelectorAll('#pFmt button').forEach(b => b.setAttribute('aria-pressed', b.dataset.fmt === team.fmt));
+  renderOppList();
   const members = team.slots.map((s, i) => [s, i]).filter(([s]) => s.length);
   const opps = bring.opp.map((k, i) => [MON[k], i]).filter(([m]) => m);
   $('#pResult').innerHTML = !members.length ? '<p class="empty">先到「隊伍分析」選好我方隊伍。</p>'
@@ -1564,10 +1570,36 @@ function renderBring() {
     : bringHTML(members, opps);
   saveState();
 }
-// 對手名字依序填進第一個空格
-bindNameInput($('#pName'), key => {
+// 快速選對手：沒打字時列目前排名前 QUICK_N（不含超級進化），有打字就用中文名或英文 key 篩選（超級進化排後面）；
+// 已在對手格子裡的同家族（原型與超級進化）不列
+const QUICK_N = 30;
+function renderOppList() {
+  if (!bring.opp.includes('')) { $('#pList').innerHTML = '<p class="muted small">已填滿 6 隻；點上方格子可移除。</p>'; return; }
+  const q = $('#pName').value.trim().toLowerCase(), rk = m => m.rank[team.fmt] || Infinity;
+  const fams = bring.opp.filter(Boolean).map(k => family(MON[k]));
+  const list = MONS.filter(m => !fams.includes(family(m)) && (q ? m.zh.includes(q) || m.key.includes(q) : !m.base && m.rank[team.fmt]))
+    .sort((x, y) => !!x.base - !!y.base || rk(x) - rk(y)).slice(0, q ? 24 : QUICK_N);
+  $('#pList').innerHTML = `<div class="muted small">${q ? '符合的寶可夢（Enter 加入第一個）' :`${FMT_ZH[team.fmt]}排名前 ${QUICK_N}，點一下加入；不在這裡就在上面打字搜尋`}</div>`
+    + (list.length ? `<div class="qpick">${list.map(m => `<button data-opp="${m.key}">${m.zh}${chips(m.types)}</button>`).join('')}</div>`
+      : '<p class="muted small">找不到，換個字試試（中文名的一部分或英文名都可以）。</p>');
+}
+// 對手依序填進第一個空格
+function addOpp(key) {
   const i = bring.opp.indexOf('');
-  if (i >= 0) { bring.opp[i] = key; renderBring(); }
+  if (i < 0) return;
+  bring.opp[i] = key;
+  $('#pName').value = '';
+  renderBring();
+}
+$('#pName').addEventListener('input', renderOppList);
+// Enter 加入篩選結果的第一個（輸入法選字中的 Enter 不算）
+$('#pName').addEventListener('keydown', e => {
+  const first = $('#pList [data-opp]');
+  if (e.key === 'Enter' && !e.isComposing && first) { e.preventDefault(); addOpp(first.dataset.opp); }
+});
+$('#pList').addEventListener('click', e => {
+  const b = e.target.closest('[data-opp]');
+  if (b) addOpp(b.dataset.opp);
 });
 $('#pOpp').addEventListener('click', e => {
   const b = e.target.closest('.slot');
