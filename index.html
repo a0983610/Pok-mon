@@ -233,6 +233,14 @@ table.matrix { border-collapse: separate; border-spacing: 0; margin: 0 auto; }
 .spd .v { min-width: 2.2em; text-align: right; font-size: 16px; font-variant-numeric: tabular-nums; }
 .spd.me { background: var(--good-bg); border-radius: 8px; }
 
+/* ---------- 出戰選角 ---------- */
+.combo { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 8px; border-top: 1px solid var(--border); font-size: 14px; }
+.combo.top { background: var(--good-bg); border-radius: 8px; }
+.combo .rank { font-weight: 800; color: var(--muted); min-width: 1.2em; }
+.combo .who { flex-basis: 100%; font-size: 13px; }
+.matrix.vs td { width: 46px; min-width: 46px; font-size: 14px; }
+.matrix.vs tbody th { text-align: left; font-size: 14px; white-space: nowrap; }
+
 /* ---------- 考試 ---------- */
 .field { margin-top: 16px; }
 .field-label { font-weight: 700; margin-bottom: 8px; }
@@ -320,7 +328,7 @@ footer a { color: inherit; }
     </svg>
     <div>
       <h1>寶可夢冠軍 屬性克制表</h1>
-      <div class="sub">Pokémon Champions · 18 種屬性相剋 · 快速查詢 · 配招分析 · 隊伍分析 · 隨機考試</div>
+      <div class="sub">Pokémon Champions · 18 種屬性相剋 · 快速查詢 · 配招分析 · 隊伍分析 · 出戰選角 · 隨機考試</div>
     </div>
   </header>
 
@@ -329,6 +337,7 @@ footer a { color: inherit; }
     <button role="tab" data-tab="lookup" aria-selected="false">快速查詢</button>
     <button role="tab" data-tab="build" aria-selected="false">配招分析</button>
     <button role="tab" data-tab="team" aria-selected="false">隊伍分析</button>
+    <button role="tab" data-tab="bring" aria-selected="false">出戰選角</button>
     <button role="tab" data-tab="quiz" aria-selected="false">屬性考試</button>
   </nav>
 
@@ -401,6 +410,26 @@ footer a { color: inherit; }
     <div class="card b-card" id="tResult"></div>
     <div class="card b-card" id="tThreat"></div>
     <div class="card b-card" id="tSpeed"></div>
+  </section>
+
+  <!-- 出戰選角 -->
+  <section id="p-bring" role="tabpanel" hidden>
+    <div class="card">
+      <div class="look-top">
+        <p class="muted small b-intro">開戰前看到對手的 6 隻時輸入牠們的名字，建議我方帶哪幾隻、誰先發。我方隊伍沿用「隊伍分析」。</p>
+        <div class="top-actions"><button class="btn ghost" data-copy>複製連結</button><button class="btn ghost" id="pClear">清除對手</button></div>
+      </div>
+      <div class="b-label">對手的 6 隻<span class="muted small">輸入名字依序填入空格；點格子可移除</span></div>
+      <div class="slots" id="pOpp"></div>
+      <div class="t-row">
+        <input class="sel" id="pName" list="tMons" placeholder="輸入對手寶可夢名字" autocomplete="off" aria-label="輸入對手寶可夢名字">
+        <div class="seg" id="pFmt" aria-label="對戰形式">
+          <button data-fmt="s" aria-pressed="true">單打（帶 3 隻）</button>
+          <button data-fmt="d" aria-pressed="false">雙打（帶 4 隻）</button>
+        </div>
+      </div>
+    </div>
+    <div class="card b-card" id="pResult"></div>
   </section>
 
   <!-- 屬性考試 -->
@@ -975,18 +1004,32 @@ function stabGaps(members) {
 }
 // 排名前 n 的熱門寶可夢（不含超級進化，超級進化沿用原型排名），依排名排序
 const topMons = (fmt, n) => MONS.filter(m => !m.base && m.rank[fmt] && m.rank[fmt] <= n).sort((x, y) => x.rank[fmt] - y.rank[fmt]);
-// 熱門寶可夢逐隻檢查隊員 members：
-// safe＝牠的本系打這隻都 ×1 以下、hit＝這隻的本系能剋牠；同一隻兩者兼具＝有解(2)，只有其一＝半解(1)，都沒有＝沒解(0)
-function threatCheck(members, fmt, n) {
-  return topMons(fmt, n).map(m => {
-    const safe = [], hit = [];
-    members.forEach((defs, i) => {
-      if (bestEff(m.types, defs) <= 1) safe.push(i);
-      if (bestEff(defs, m.types) >= 2) hit.push(i);
-    });
-    const level = safe.some(i => hit.includes(i)) ? 2 : safe.length || hit.length ? 1 : 0;
-    return { mon: m, safe, hit, level };
+// 隊員 members 對一隻對手（屬性 types）：safe＝對手本系打這隻都 ×1 以下、hit＝這隻的本系能剋對手（都是 members 的索引）；
+// 同一隻兩者兼具＝有解(2)，只有其一＝半解(1)，都沒有＝沒解(0)
+function answerOf(members, types) {
+  const safe = [], hit = [];
+  members.forEach((defs, i) => {
+    if (bestEff(types, defs) <= 1) safe.push(i);
+    if (bestEff(defs, types) >= 2) hit.push(i);
   });
+  return { safe, hit, level: safe.some(i => hit.includes(i)) ? 2 : safe.length || hit.length ? 1 : 0 };
+}
+// 熱門寶可夢逐隻檢查隊員 members
+const threatCheck = (members, fmt, n) => topMons(fmt, n).map(m => ({ mon: m, ...answerOf(members, m.types) }));
+// 從隊員 members 挑 k 隻對上對手 opps（每個是屬性陣列）：列出所有組合（idx 是 members 的索引），
+// 依沒解的對手數（少→多）、有解的對手數（多→少）、同一隻兩者兼具的配對總數（多→少）排序
+function bringCombos(members, opps, k) {
+  const combos = [];
+  (function rec(start, cur) {
+    if (cur.length === k) return combos.push(cur.slice());
+    for (let i = start; i < members.length; i++) { cur.push(i); rec(i + 1, cur); cur.pop(); }
+  })(0, []);
+  return combos.map(idx => {
+    const res = opps.map(o => answerOf(idx.map(i => members[i]), o));
+    // full[p]：組合裡第 p 隻能兩者兼具的對手數
+    const full = idx.map((_, p) => res.filter(r => r.safe.includes(p) && r.hit.includes(p)).length);
+    return { idx, res, full, none: res.filter(r => !r.level).length, solved: res.filter(r => r.level === 2).length, pairs: full.reduce((s, n) => s + n, 0) };
+  }).sort((x, y) => x.none - y.none || y.solved - x.solved || y.pairs - x.pairs);
 }
 
 const pick = (arr, rng) => arr[Math.floor(rng() * arr.length)];
@@ -1099,12 +1142,14 @@ const MCLS = { 4: 'm4', 2: 'm2', 1: 'm1', 0.5: 'mh', 0.25: 'mq', 0.125: 'mq', 0:
 const mtag = m => `<span class="mtag ${MCLS[m]}">${fmt(m)}</span>`;
 
 // ---------- 分頁 ----------
-const TABS = ['table', 'lookup', 'build', 'team', 'quiz'];
+const TABS = ['table', 'lookup', 'build', 'team', 'bring', 'quiz'];
 let curTab = 'table';
 function showTab(name) {
   curTab = name;
   document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === name));
   TABS.forEach(n => { $('#p-' + n).hidden = n !== name; });
+  // 出戰選角沿用隊伍分析的隊伍，切過來時重畫
+  if (name === 'bring') renderBring();
   saveState();
 }
 $('.tabs').addEventListener('click', e => {
@@ -1442,17 +1487,22 @@ function pickTeamMon(key) {
 const MON_BY_ZH = Object.fromEntries(MONS.map(m => [m.zh, m.key]));
 $('#tMons').innerHTML = MONS.map(m => `<option value="${m.zh}">`).join('');
 $('#monsDate').textContent = MONS_DATE + ' 擷取';
-// 從清單點選就直接放入；手打的等按 Enter 或離開輸入框（change）才比對，免得打到一半就被較短的名字搶先
-function nameInput(e) {
-  const key = MON_BY_ZH[e.target.value.trim()];
-  if (key && (e.type === 'change' || !e.inputType || e.inputType === 'insertReplacementText')) { e.target.value = ''; pickTeamMon(key); }
+// 名字輸入框：從清單點選就直接放入；手打的等按 Enter 或離開輸入框（change）才比對，免得打到一半就被較短的名字搶先
+function bindNameInput(el, onPick) {
+  const h = e => {
+    const key = MON_BY_ZH[e.target.value.trim()];
+    if (key && (e.type === 'change' || !e.inputType || e.inputType === 'insertReplacementText')) { e.target.value = ''; onPick(key); }
+  };
+  el.addEventListener('input', h);
+  el.addEventListener('change', h);
 }
-$('#tName').addEventListener('input', nameInput);
-$('#tName').addEventListener('change', nameInput);
-$('#tFmt').addEventListener('click', e => {
+bindNameInput($('#tName'), pickTeamMon);
+// 單打／雙打：隊伍分析的排名依據和出戰選角的帶幾隻共用
+function setFmt(e) {
   const b = e.target.closest('button[data-fmt]');
-  if (b) { team.fmt = b.dataset.fmt; renderTeam(); }
-});
+  if (b) { team.fmt = b.dataset.fmt; renderTeam(); renderBring(); }
+}
+$('#tFmt').addEventListener('click', setFmt);
 $('#tSlots').addEventListener('click', e => {
   const b = e.target.closest('.slot');
   if (b) { team.cur = +b.dataset.i; renderTeam(); }
@@ -1467,8 +1517,67 @@ $('#tResult').addEventListener('click', e => {
 });
 $('#tClear').addEventListener('click', () => { team.slots = team.slots.map(() => []); team.mons = team.mons.map(() => ''); team.cur = 0; renderTeam(); });
 
+// ---------- 出戰選角 ----------
+// opp：對手 6 隻的寶可夢 key；帶幾隻、先發幾隻依攻略網站整理的排位規則（單打 6 選 3、雙打 6 選 4）
+const bring = { opp: ['', '', '', '', '', ''] };
+const BRING_N = { s: 3, d: 4 }, LEAD_N = { s: 1, d: 2 };
+// members：[[屬性, 格子索引]...]；opps：[[寶可夢, 格子索引]...]
+function bringHTML(members, opps) {
+  const k = Math.min(BRING_N[team.fmt], members.length), lead = Math.min(LEAD_N[team.fmt], k);
+  const combos = bringCombos(members.map(([s]) => s), opps.map(([m]) => m.types), k), best = combos[0];
+  const name = j => `${members[j][1] + 1} ${slotName(members[j][1])}`;
+  const spe = j => team.mons[members[j][1]] ? MON[team.mons[members[j][1]]].spe : 0;
+  // 先發：第 1 名組合裡能兩者兼具的對手數最多的，同數比速度種族值
+  const leads = best.idx.map((j, p) => ({ j, n: best.full[p] })).sort((x, y) => y.n - x.n || spe(y.j) - spe(x.j)).slice(0, lead).map(x => x.j);
+  const megas = best.idx.filter(j => MON[team.mons[members[j][1]]]?.base).length;
+  const cell = (safe, hit) => safe && hit ? ['✔', 'm2'] : hit ? ['剋', 'm1'] : safe ? ['擋', 'm1'] : ['✘', 'mh'];
+  let t = '<thead><tr><th class="corner">我方 ↓<br>對手 →</th>'
+    + opps.map(([m, i]) => `<th title="${m.zh}"><span class="tcol"><span class="slot-n">${i + 1}</span><span class="duo">`
+      + `${m.types.map(id => `<span class="vchip" style="${style(id)}">${T[id].zh}</span>`).join('')}</span><span class="slot-n">${m.spe}</span></span></th>`).join('')
+    + '</tr></thead><tbody>';
+  members.forEach(([s], j) => {
+    t += `<tr><th>${best.idx.includes(j) ? '★ ' : ''}${name(j)}${spe(j) ? ` <span class="meta">${spe(j)}</span>` : ''}</th>`
+      + opps.map(([m]) => { const [v, c] = cell(bestEff(m.types, s) <= 1, bestEff(s, m.types) >= 2); return `<td class="${c}">${v}</td>`; }).join('') + '</tr>';
+  });
+  return `<div class="res-head">建議出戰<span class="muted small">（${FMT_ZH[team.fmt]}帶 ${k} 隻，共 ${combos.length} 種帶法）</span></div>`
+    + (members.length < BRING_N[team.fmt] ? `<p class="muted small b-intro">我方只有 ${members.length} 隻，全部帶上。</p>` : '')
+    + '<p class="muted small b-intro">依對手裡「沒解」的數量由少到多、「有解」的數量由多到少排序，再比同一隻兩者兼具的配對數。'
+    + '先發取第 1 名組合裡兩者兼具最多的，同數時速度種族值高的優先。</p>'
+    + combos.slice(0, 3).map((c, r) => `<div class="combo${r ? '' : ' top'}"><span class="rank">${r + 1}</span><b>${c.idx.map(name).join('、')}</b>`
+      + `<span class="meta">沒解 ${c.none}・半解 ${opps.length - c.none - c.solved}・有解 ${c.solved}</span>`
+      + (r ? '' : `<span class="who">先發：${leads.map(name).join('、')}${megas > 1 ? `・這組有 ${megas} 隻超級進化，一場只能進化一隻` : ''}</span>`)
+      + (c.none ? `<span class="who x-msg">沒解：${c.res.map((x, o) => x.level ? '' : opps[o][0].zh).filter(Boolean).join('、')}</span>` : '')
+      + '</div>').join('')
+    + `<h3>對位表</h3><div class="mwrap cover"><table class="matrix vs">${t}</tbody></table></div>`
+    + '<p class="note">※ ✔＝不怕牠本系、本系又剋得到；剋＝本系剋得到，但會被牠本系剋；擋＝不怕牠本系，但剋不到；✘＝兩者都沒有。'
+    + '★＝第 1 名組合的成員；名字旁和表頭下方的數字是速度種族值。帶幾隻依攻略網站整理的排位規則（單打 6 選 3、雙打 6 選 4），'
+    + '一場只能超級進化一隻也是同一來源。只看屬性與速度種族值，不含特性、道具、能力投資與配招。</p>';
+}
+function renderBring() {
+  $('#pOpp').innerHTML = bring.opp.map((k, i) => `<button class="slot" data-i="${i}"${k ? ' title="點一下移除"' : ''}><span class="slot-n">第 ${i + 1} 隻</span>`
+    + (k ? `<span class="slot-name">${MON[k].zh}</span>${chips(MON[k].types)}` : '<span class="muted small">空</span>') + '</button>').join('');
+  document.querySelectorAll('#pFmt button').forEach(b => b.setAttribute('aria-pressed', b.dataset.fmt === team.fmt));
+  const members = team.slots.map((s, i) => [s, i]).filter(([s]) => s.length);
+  const opps = bring.opp.map((k, i) => [MON[k], i]).filter(([m]) => m);
+  $('#pResult').innerHTML = !members.length ? '<p class="empty">先到「隊伍分析」選好我方隊伍。</p>'
+    : !opps.length ? '<p class="empty">輸入對手的寶可夢後，這裡會建議帶哪幾隻、誰先發，並列出每隻的對位。</p>'
+    : bringHTML(members, opps);
+  saveState();
+}
+// 對手名字依序填進第一個空格
+bindNameInput($('#pName'), key => {
+  const i = bring.opp.indexOf('');
+  if (i >= 0) { bring.opp[i] = key; renderBring(); }
+});
+$('#pOpp').addEventListener('click', e => {
+  const b = e.target.closest('.slot');
+  if (b) { bring.opp[+b.dataset.i] = ''; renderBring(); }
+});
+$('#pFmt').addEventListener('click', setFmt);
+$('#pClear').addEventListener('click', () => { bring.opp = bring.opp.map(() => ''); renderBring(); });
+
 // ---------- 狀態存網址＋本機（可存書籤、重新整理不清空） ----------
-// 格式：#分頁?m=招式,招式&t=屬性,屬性&a=特性&p=隊員1屬性.屬性,@寶可夢key,...&f=d（雙打排名，單打不寫）
+// 格式：#分頁?m=招式,招式&t=屬性,屬性&a=特性&p=隊員1屬性.屬性,@寶可夢key,...&f=d（雙打，單打不寫）&o=對手寶可夢key,...
 const STATE_KEY = 'pkmn-champions-state';
 function stateQuery() {
   const q = [];
@@ -1479,6 +1588,9 @@ function stateQuery() {
   while (p.length && !p[p.length - 1]) p.pop();
   if (p.length) q.push('p=' + p.join(','));
   if (team.fmt === 'd') q.push('f=d');
+  const o = bring.opp.slice();
+  while (o.length && !o[o.length - 1]) o.pop();
+  if (o.length) q.push('o=' + o.join(','));
   return q.join('&');
 }
 const stateHash = () => { const q = stateQuery(); return '#' + curTab + (q ? '?' + q : ''); };
@@ -1498,6 +1610,7 @@ function loadState(q) {
     team.mons[i] = m ? m.key : '';
   });
   team.fmt = kv.f === 'd' ? 'd' : 's';
+  (kv.o || '').split(',').slice(0, 6).forEach((k, i) => { bring.opp[i] = MON[k] ? k : ''; });
 }
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-copy]');
