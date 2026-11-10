@@ -554,6 +554,7 @@ footer a { color: inherit; }
         <div class="seg" id="cW" aria-label="天氣"></div>
         <div class="seg" id="cT" aria-label="場地"></div>
         <label class="check"><input type="checkbox" id="cCrit"> 急所（擊中要害）</label>
+        <label class="check"><input type="checkbox" id="cTR"> 戲法空間</label>
         <div class="seg" id="cFmt" aria-label="對戰形式">
           <button data-fmt="s" aria-pressed="true">單打</button>
           <button data-fmt="d" aria-pressed="false">雙打</button>
@@ -2231,6 +2232,22 @@ function attacksOf(key, defs, fmt) {
 }
 // 對手（熱門寶可夢或出戰選角填的對手）→ answerOf 用的 { defs, atk }，攻擊屬性和我方同一套算法
 const monUnit = (m, fmt) => ({ defs: m.types, atk: attacksOf(m.key, m.types, fmt) });
+// 超級石＝說明寫「…超級進化的持有物」的道具；一個家族有多種超級進化時，說明的括號寫明是哪一種（如「（超級噴火龍Ｘ）」）
+const isStone = k => (ITEMS[k]?.[1] || '').includes('超級進化的持有物');
+// 一般寶可夢 m 在 fmt 可能超級進化成的型態：[{ mon, p 帶這顆超級石的使用率, counted 算進對位判斷 }]。
+// 使用率 ROLE_PCT% 以上才算（同常帶攻擊的門檻）；這隻沒有道具統計時 p 是 null、每種都算
+function megaInfo(m, fmt) {
+  const forms = megasOf(m), items = useOf(m.key, fmt)?.items || [];
+  if (!items.length) return forms.map(x => ({ mon: x, p: null, counted: true }));
+  return forms.map(x => {
+    const p = items.filter(([k]) => isStone(k) && (forms.length === 1 || ITEMS[k][1].includes(`（${x.zh}）`))).reduce((s, [, q]) => s + q, 0);
+    return { mon: x, p, counted: p >= ROLE_PCT };
+  });
+}
+// 對手 m 的 unit，加上算進判斷的超級進化型態（answerOf 的 megas）
+const oppUnit = (m, fmt) => ({ ...monUnit(m, fmt), megas: megaInfo(m, fmt).filter(x => x.counted).map(x => monUnit(x.mon, fmt)) });
+// 超級進化型態寫成「超級噴火龍Ｙ 76%」（沒有統計的不寫 %）
+const megaText = list => list.map(x => `<b>${x.mon.zh}</b>${chips(x.mon.types)}${x.p != null ? ` ${x.p}%` : ''}`).join('・');
 // 隊伍該有的角色：物攻、特攻輸出各一，再加上 2026-11-09 資料裡該形式排名前 30 名至少 6 隻（兩成）有的功能
 // （單打：強化 11、回復 9、換人 6 隻；雙打：速度控制 11、擾亂 6＋引誘 2、強化 6 隻）。tags 任一個有就算有
 const NEEDS = {
@@ -2273,7 +2290,7 @@ function recommendMon(others, base, fmt, onTeam = [], units = []) {
       if (after && top && role.main !== 'sup' && top.filter(t => t.spe < m.spe).length * 2 < top.length) fix.push({ w: { id: 'trslow', kind: 'trslow' }, by: [], spe: m.spe });
       const add = after ? after.warns.filter(a => !before.some(w => w.id === a.id)) : [];
       const me1 = { defs: m.types, atk: attacksOf(m.key, m.types, fmt) };
-      const threats = none.filter(t => answerOf([me1], monUnit(t, fmt)).level > 0);
+      const threats = none.filter(t => answerOf([me1], oppUnit(t, fmt)).level > 0);
       const mates = role ? onTeam.filter(k => useOf(k, fmt)?.mates.includes(family(m)) || role.use.mates.includes(family(MON[k]))) : [];
       return { mon: m, role, fills: role ? lack.filter(n => needBy(role, n)) : [], fix, add, threats, mates, ...memberScore(others, m.types) };
     });
@@ -2294,7 +2311,7 @@ const topMons = (fmt, n) => MONS.filter(m => !m.base && m.rank[fmt] && m.rank[fm
 // 隊員 members（每隻 { defs 屬性, atk attacksOf 的攻擊屬性 }）對一隻對手 opp（同格式，monUnit）：safe＝對手的攻擊招式打這隻都 ×1 以下、
 // hit＝這隻的攻擊招式能剋對手（都是 members 的索引）；同一隻兩者兼具＝有解(2)，只有其一＝半解(1)，都沒有＝沒解(0)。
 // 對手沒有常用攻擊招式（純輔助）時 bestEff 是 −Infinity，每隻都算 safe。
-// opp.megas：對手可能超級進化成的型態（同格式）；有的話 safe／hit 要對進化前後每種型態都成立
+// opp.megas：對手可能超級進化成的型態（同格式，見 oppUnit）；有的話 safe／hit 要對進化前後每種型態都成立
 function answerOf(members, opp) {
   const safe = [], hit = [], forms = [opp, ...(opp.megas || [])];
   members.forEach(({ defs, atk }, i) => {
@@ -2303,8 +2320,8 @@ function answerOf(members, opp) {
   });
   return { safe, hit, level: safe.some(i => hit.includes(i)) ? 2 : safe.length || hit.length ? 1 : 0 };
 }
-// 熱門寶可夢逐隻檢查隊員 members
-const threatCheck = (members, fmt, n) => topMons(fmt, n).map(m => ({ mon: m, ...answerOf(members, monUnit(m, fmt)) }));
+// 熱門寶可夢逐隻檢查隊員 members（連常帶超級石的超級進化型態一起看）
+const threatCheck = (members, fmt, n) => topMons(fmt, n).map(m => ({ mon: m, ...answerOf(members, oppUnit(m, fmt)) }));
 // 從隊員 members（格式同 answerOf）挑 k 隻對上對手 opps（每個是 monUnit）：列出所有組合（idx 是 members 的索引），
 // 依沒解的對手數（少→多）、有解的對手數（多→少）、同一隻兩者兼具的配對總數（多→少）排序。
 // 一場只能超級進化一隻：alt[i]＝隊員 i 是超級進化時，不進化（原型）的版本。組合裡有 2 隻以上超級進化時，
@@ -3267,20 +3284,26 @@ function threatHTML(members) {
   const list = threatCheck(units, team.fmt, THREAT_N)
     .sort((x, y) => x.level - y.level || x.mon.rank[team.fmt] - y.mon.rank[team.fmt]);
   const who = idx => idx.length ? idx.map(j => `${members[j][1] + 1} ${slotName(members[j][1])}`).join('、') : '（無）';
-  // 剋得到的隊員附上用哪招，例如「1 烈咬陸鯊（地震）」；看本系的寫「本系」
-  const whoHit = (idx, types) => idx.length ? idx.map(j => `${members[j][1] + 1} ${slotName(members[j][1])}（`
-    + [...new Set(units[j].atk.filter(a => eff(a.ty, types) >= 2).map(a => a.zh || '本系'))].join('、') + '）').join('、') : '（無）';
+  // 剋得到的隊員附上用哪招，例如「1 烈咬陸鯊（地震）」；看本系的寫「本系」。牠可能超級進化時，列出能剋其中任一型態的招式
+  const whoHit = (idx, defsList) => idx.length ? idx.map(j => `${members[j][1] + 1} ${slotName(members[j][1])}（`
+    + [...new Set(units[j].atk.filter(a => defsList.some(ts => eff(a.ty, ts) >= 2)).map(a => a.zh || '本系'))].join('、') + '）').join('、') : '（無）';
   const LV = ['✘ 沒解', '△ 半解', '✔ 有解'], cnt = [0, 1, 2].map(l => list.filter(t => t.level === l).length);
   const named = members.filter(([, i]) => team.mons[i]).map(([, i]) => i);
   return `<div class="res-head">熱門威脅檢查<span class="muted small">（${FMT_ZH[team.fmt]}排名前 ${THREAT_N}）</span></div>`
     + `<p class="b-sum">沒解 <b>${cnt[0]}</b> 隻、半解 <b>${cnt[1]}</b> 隻、有解 <b>${cnt[2]}</b> 隻。</p>`
-    + list.map(t => `<div class="threat lv${t.level}"><span class="lv">${LV[t.level]}</span><span class="meta">#${t.mon.rank[team.fmt]}</span>`
-      + `<b>${t.mon.zh}</b>${chips(t.mon.types)}<span class="who">牠的攻擊：${oppAtkText(monUnit(t.mon, team.fmt))}</span>`
-      + `<span class="who">不怕牠：${who(t.safe)}・招式剋牠：${whoHit(t.hit, t.mon.types)}</span>${realHTML(t.mon, named)}</div>`).join('')
+    + list.map(t => {
+      const mg = megaInfo(t.mon, team.fmt).filter(x => x.counted);
+      return `<div class="threat lv${t.level}"><span class="lv">${LV[t.level]}</span><span class="meta">#${t.mon.rank[team.fmt]}</span>`
+        + `<b>${t.mon.zh}</b>${chips(t.mon.types)}${mg.length ? `<span class="who">可能超級進化：${megaText(mg)}</span>` : ''}`
+        + `<span class="who">牠的攻擊：${oppAtkText(monUnit(t.mon, team.fmt))}</span>`
+        + `<span class="who">不怕牠：${who(t.safe)}・招式剋牠：${whoHit(t.hit, [t.mon.types, ...mg.map(x => x.mon.types)])}</span>${realHTML(t.mon, named)}</div>`;
+    }).join('')
     + `<p class="note">※「不怕牠」＝牠${FMT_ZH[team.fmt]}常帶的攻擊招式打這隻都 ×1 以下；「招式剋牠」＝這隻${FMT_ZH[team.fmt]}常帶的攻擊招式能對牠效果絕佳。`
     + `兩邊算法相同：同屬性的攻擊招式使用率加總 ${ROLE_PCT}% 以上才算這個屬性（如龍尾、流星群各 28%，加起來 56% 就算龍），`
     + '擊掌奇襲、冰凍之風這類輔助用的攻擊招式和固定傷害、反擊類招式不算；只選屬性或沒有統計的看本系。'
-    + '有解＝同一隻兩者兼具，半解＝只有其中一種。招式屬性以招式本身的屬性計（氣象球、妖精皮膚等會改變屬性的不另算）；'
+    + '有解＝同一隻兩者兼具，半解＝只有其中一種。'
+    + `「可能超級進化」＝OP.GG 道具統計有 ${ROLE_PCT}% 以上帶這顆超級石的型態（沒有道具統計的每種都算），「不怕」「剋」要對進化前後每種型態都成立才算。`
+    + '招式屬性以招式本身的屬性計（氣象球、妖精皮膚等會改變屬性的不另算）；'
     + `不含特性、道具、能力值；排名與常用招式為 OP.GG 統計（${MONS_DATE} 擷取）。`
     + '「實戰」＝OP.GG 這隻的「敗於」「勝於」前 10 名裡有我方隊員（超級進化看原型）；名單依次數排，熱門寶可夢容易上榜，'
     + '兩份名單都有的不列，只供參考，不影響有解／沒解。</p>';
@@ -3403,9 +3426,9 @@ const BRING_N = { s: 3, d: 4 }, LEAD_N = { s: 1, d: 2 };
 function bringHTML(members, opps) {
   const k = Math.min(BRING_N[team.fmt], members.length), lead = Math.min(LEAD_N[team.fmt], k);
   const units = members.map(unitOf), monOf = j => MON[team.mons[members[j][1]]];
-  // 對手選一般型態、但有超級進化型態的，進化前後都要看（answerOf 的 megas）
-  const oppMegas = opps.map(([m]) => megasOf(m));
-  const oppUnits = opps.map(([m], o) => ({ ...monUnit(m, team.fmt), megas: oppMegas[o].map(x => monUnit(x, team.fmt)) }));
+  // 對手選一般型態、但常帶超級石的，進化前後都要看（oppUnit）
+  const oppMegas = opps.map(([m]) => megaInfo(m, team.fmt).filter(x => x.counted).map(x => x.mon));
+  const oppUnits = opps.map(([m]) => oppUnit(m, team.fmt));
   // 我方超級進化不進化時的版本（原型），給 bringCombos 算「一場只能進化一隻」
   const alt = members.map((_, j) => monOf(j)?.base ? monUnit(MON[monOf(j).base], team.fmt) : null);
   const combos = bringCombos(units, oppUnits, k, alt), best = combos[0];
@@ -3445,7 +3468,8 @@ function bringHTML(members, opps) {
     + `「剋得到」看我方、「不怕」看對手${FMT_ZH[team.fmt]}常帶的攻擊招式（同屬性招式使用率加總 ${ROLE_PCT}% 以上，判斷方式同「隊伍分析」的熱門威脅檢查；`
     + '對手帶哪些見下方「對手情報」），只選屬性或沒有統計的看本系。'
     + '點格子會帶到「傷害計算」算我方打牠的傷害（按「⇄ 對調」看牠打我方；只選屬性的隊員不能點）。'
-    + '對手選一般型態、但有超級進化型態的（表頭標「超」，如噴火龍可能進化成超級噴火龍Ｘ、Ｙ），「不怕」「剋得到」要對進化前後每種型態都成立才算。'
+    + `對手選一般型態、但 OP.GG 道具統計有 ${ROLE_PCT}% 以上帶超級石的（表頭標「超」，如噴火龍多半帶噴火龍進化石Ｙ），`
+    + '「不怕」「剋得到」要對進化前後每種型態都成立才算；各型態的超級石使用率見下方「對手情報」。'
     + '★＝第 1 名組合的成員；名字旁和表頭下方的數字是速度種族值。帶幾隻依攻略網站整理的排位規則（單打 6 選 3、雙打 6 選 4），'
     + '一場只能超級進化一隻也是同一來源：組合裡有 2 隻以上超級進化時，逐一試只進化其中一隻、其他以原型的屬性計，取結果最好的並標出進化哪隻'
     + '（對位表的每一列仍是進化後的樣子）。只看屬性、常用攻擊招式與速度種族值，不含特性、道具、能力投資。</p>';
@@ -3457,11 +3481,13 @@ function oppInfoHTML(opps) {
   const top = (list, dict, n) => list.filter(([k]) => dict[k]).slice(0, n).map(([k, p]) => `<b>${dict[k][0]}</b> ${p}%`).join('・');
   return `<div class="res-head">對手情報<span class="muted small">（依 OP.GG ${fz}統計）</span></div>`
     + opps.map(([m, i]) => {
-      const r = roleOf(m.key, team.fmt), real = realHTML(m, named), mg = megasOf(m);
+      const r = roleOf(m.key, team.fmt), real = realHTML(m, named), mg = megaInfo(m, team.fmt);
+      const mgOut = mg.filter(x => !x.counted);
       const head = `<div class="mrole"><div class="mrole-h"><b>${i + 1} ${m.zh}</b>${chips(m.types)}${r ? roleTags(r) : ''}`
         + `<span class="meta">${m.rank[team.fmt] ? `#${m.rank[team.fmt]}` : '無排名'}${scarf(m)}${m.base ? `・沿用${MON[m.base].zh}的統計` : ''}</span></div>`
         + statsHTML(m)
-        + (mg.length ? `<div class="bst"><span>可能超級進化：${mg.map(x => `<b>${x.zh}</b>${chips(x.types)}`).join('・')}</span></div>` : '');
+        + (mg.length ? `<div class="bst">${mg.length > mgOut.length ? `<span>可能超級進化：${megaText(mg.filter(x => x.counted))}</span>` : ''}`
+          + `${mgOut.length ? `<span class="muted">超級石不到 ${ROLE_PCT}%、不算：${megaText(mgOut)}</span>` : ''}</div>` : '');
       const realLine = real ? `<div class="bst">${real}</div>` : '';
       if (!r) return `${head}<div class="bst"><span>${fz}沒有統計資料，對位表看本系</span></div>${realLine}</div>`;
       const abils = [top(r.use.abils.filter(([k]) => !r.mega.includes(k)), ABILS, 2), ...r.mega.map(k => `<b>${ABILS[k][0]}</b> 超級進化後固定`)].filter(Boolean).join('・');
@@ -3471,7 +3497,8 @@ function oppInfoHTML(opps) {
     }).join('')
     + `<p class="note">※「常帶攻擊」＝同屬性招式使用率加總 ${ROLE_PCT}% 以上的攻擊招式（輔助用、固定傷害、反擊類不算），對位表的「不怕」就是看這些；`
     + '特性列前 2 名、道具列前 3 名，「實戰」同「隊伍分析」熱門威脅檢查的說明。'
-    + '「可能超級進化」＝選的是一般型態、但有超級進化型態，對位表會連進化後的屬性一起看；確定牠會進化就直接選超級進化型態。</p>';
+    + `「可能超級進化」＝選的是一般型態、但 OP.GG 道具統計有 ${ROLE_PCT}% 以上帶這顆超級石（% 是超級石使用率；沒有道具統計的每種都算），`
+    + '對位表會連進化後的屬性一起看；確定牠會進化就直接選超級進化型態。</p>';
 }
 function renderBring() {
   $('#pOpp').innerHTML = bring.opp.map((k, i) => `<button class="slot" data-i="${i}"${k ? ' title="點一下移除"' : ''}><span class="slot-n">第 ${i + 1} 隻</span>`
@@ -3538,9 +3565,9 @@ $('#pClear').addEventListener('click', () => { bring.opp = bring.opp.map(() => '
 // atk／def：攻擊方／防守方寶可夢 key；ai：攻擊方投資（ATK_INV 的索引）；hi、di：防守方 HP、防禦／特防投資（HP_INV、DEF_INV 的索引）；
 // st：能力變化 [攻擊方攻擊, 攻擊方特攻, 防守方防禦, 防守方特防, 攻擊方速度, 防守方速度]；aItem／dItem：道具 key；aAb／dAb：選的特性（空＝用 abOf 的預設）；
 // weather：天氣；crit：急所；extra：加算的招式；terrain：場地；hh：隊友用了幫助（只在雙打算）；walls：防守方的牆（WALLS 的 key）；burn：攻擊方灼傷；
-// sa、sd：攻擊方、防守方速度投資（SPE_INV 的索引）；tw：有順風的一方、par：麻痺的一方（'a' 攻擊方／'d' 防守方）
+// sa、sd：攻擊方、防守方速度投資（SPE_INV 的索引）；tw：有順風的一方、par：麻痺的一方（'a' 攻擊方／'d' 防守方）；tr：戲法空間
 const CALC0 = { atk: '', def: '', ai: 2, hi: 0, di: 0, st: [0, 0, 0, 0, 0, 0], aItem: '', dItem: '', aAb: '', dAb: '', weather: '', crit: false, extra: '',
-  terrain: '', hh: false, walls: [], burn: false, sa: 2, sd: 2, tw: [], par: [] };
+  terrain: '', hh: false, walls: [], burn: false, sa: 2, sd: 2, tw: [], par: [], tr: false };
 const WALLS = ['reflect', 'light-screen', 'aurora-veil'], SIDES = ['a', 'd'];
 const calc = structuredClone(CALC0);
 const CALC_MOVES = Object.keys(MOVES).filter(canCalc);
@@ -3690,7 +3717,7 @@ function calcHTML() {
     hints.push(`<div class="x-line"><span class="x-msg">${D.zh}的${abilZh(dab)}出場會讓${A.zh}${txt}</span><button class="mini" data-im="${im.join('.')}">套用${txt}</button></div>`);
   }
   return `<div class="res-head">${A.zh}${chips(A.types)} → ${D.zh}${chips(D.types)}`
-    + `<span class="muted small">（${[FMT_ZH[team.fmt], FIELD_ZH[calc.weather], FIELD_ZH[calc.terrain], hh && '幫助', calc.burn && '灼傷',
+    + `<span class="muted small">（${[FMT_ZH[team.fmt], FIELD_ZH[calc.weather], FIELD_ZH[calc.terrain], calc.tr && '戲法空間', hh && '幫助', calc.burn && '灼傷',
       ...calc.walls.map(w => MOVES[w][0]), calc.crit && '急所'].filter(Boolean).join('・')}）</span></div>`
     + `<div class="bst">攻擊方（${aname}）<span>攻擊 <b>${statOf(A.bs[1], asp, 1, anat)}</b></span><span>特攻 <b>${statOf(A.bs[3], asp, 3, anat)}</b></span>`
     + `${stg(calc.st[0], '攻擊')}${stg(calc.st[1], '特攻')}${aab ? `<span>${abilZh(aab) || '固定特性'}</span>` : ''}${calc.aItem ? `<span>${ITEMS[calc.aItem][0]}</span>` : ''}</div>`
@@ -3699,7 +3726,8 @@ function calcHTML() {
     + `${stg(calc.st[2], '防禦')}${stg(calc.st[3], '特防')}${dab ? `<span>${abilZh(dab) || '固定特性'}</span>` : ''}${calc.dItem ? `<span>${ITEMS[calc.dItem][0]}</span>` : ''}</div>`
     + hints.join('')
     + `<div class="c-sum info">速度：${spdText(A, 0)} ／ ${spdText(D, 1)} → `
-    + `${spd[0].v > spd[1].v ? `<b>${A.zh}</b>先動` : spd[0].v < spd[1].v ? `<b>${D.zh}</b>先動` : '同速，誰先動各 50%'}（先制招式不看速度）</div>`
+    + `${spd[0].v === spd[1].v ? '同速，誰先動各 50%' : `<b>${(spd[0].v > spd[1].v) !== calc.tr ? A.zh : D.zh}</b>先動${calc.tr ? '（戲法空間：速度慢的先動）' : ''}`}`
+    + '（先制招式不看速度）</div>'
     + dmgSumHTML(A, D, fw)
     + (dmgSumHTML(D, A, bk, `反擊（${D.zh}打回來）：`)
       || `<div class="c-sum">反擊（${D.zh}打回來）：${bk.use.length ? '常用招式裡沒有能算傷害的攻擊招式。'
@@ -3720,7 +3748,8 @@ function calcHTML() {
     + '幾擊＝連續用同一招幾次打倒，不含回復、吃剩的東西、文柚果；抗性樹果、多重鱗片只算第一下，氣勢披帶、結實只在 HP 全滿時撐住一下。'
     + '速度也照 Smogon 冠軍版：速度投資（預設 32＋性格，即最速）→ 能力變化 → 順風 ×2、葉綠素／悠游自如／撥沙／撥雪在對應天氣與衝浪之尾在電氣場地 ×2、'
     + '飛毛腿在麻痺或灼傷時 ×1.5、講究圍巾 ×1.5 → 麻痺 ×½（飛毛腿不減）；同速時誰先動各 50%。先制招式（標「先制」）不看速度；'
-    + '不含戲法空間、加速這類回合中的變化。「反擊」＝防守方打攻擊方最痛的一招，和按「⇄ 對調」看到的相同：投資檔位不動'
+    + '勾「戲法空間」時速度慢的先動（同 Pokémon Showdown，同速仍各 50%、先制招式仍優先）；不含加速這類回合中的變化。'
+    + '「反擊」＝防守方打攻擊方最痛的一招，和按「⇄ 對調」看到的相同：投資檔位不動'
     + '（上方的攻擊投資套在防守方、HP／防禦投資套在攻擊方），能力變化、道具、灼傷、幫助、牆不算。</p>';
 }
 function renderCalc() {
@@ -3747,6 +3776,7 @@ function renderCalc() {
   $('#cW').innerHTML = [['', '無天氣'], ...WEATHERS.map(w => [w, FIELD_ZH[w]])].map(([w, zh]) => `<button data-w="${w}" aria-pressed="${calc.weather === w}">${zh}</button>`).join('');
   $('#cT').innerHTML = [['', '無場地'], ...TERRAINS.map(t => [t, FIELD_ZH[t]])].map(([t, zh]) => `<button data-t="${t}" aria-pressed="${calc.terrain === t}">${zh}</button>`).join('');
   $('#cCrit').checked = calc.crit;
+  $('#cTR').checked = calc.tr;
   $('#cBurn').checked = calc.burn;
   $('#cHH').checked = calc.hh;
   $('#cHHw').hidden = team.fmt !== 'd';
@@ -3791,6 +3821,7 @@ $('#p-calc').addEventListener('change', e => {
   else if (id === 'cDAb') calc.dAb = e.target.value;
   else if (id === 'cExtra') calc.extra = e.target.value;
   else if (id === 'cCrit') calc.crit = e.target.checked;
+  else if (id === 'cTR') calc.tr = e.target.checked;
   else if (id === 'cBurn') calc.burn = e.target.checked;
   else if (id === 'cHH') calc.hh = e.target.checked;
   else if (e.target.dataset.wall) calc.walls = WALLS.filter(w => w === e.target.dataset.wall ? e.target.checked : calc.walls.includes(w));
@@ -3801,7 +3832,7 @@ $('#p-calc').addEventListener('change', e => {
 });
 $('#cFmt').addEventListener('click', setFmt);
 // 對調：特性和速度相關的（速度投資、速度變化、麻痺、那一方的順風）跟著寶可夢走；道具只留換邊後還能帶的（兩邊都能帶的只有講究圍巾）；
-// 攻擊／防禦類能力變化、加算招式和只屬於某一方的灼傷、幫助、牆清掉（天氣、場地留著）
+// 攻擊／防禦類能力變化、加算招式和只屬於某一方的灼傷、幫助、牆清掉（天氣、場地、戲法空間留著）
 $('#cSwap').addEventListener('click', () => {
   const [ai, di] = [calc.aItem, calc.dItem], flip = list => SIDES.filter(s => list.includes(s === 'a' ? 'd' : 'a'));
   [calc.atk, calc.def, calc.aAb, calc.dAb] = [calc.def, calc.atk, calc.dAb, calc.aAb];
@@ -3822,7 +3853,7 @@ $('#cClear').addEventListener('click', () => { Object.assign(calc, structuredClo
 // 格式：#分頁?m=招式,招式&t=屬性,屬性&a=特性&p=隊員1屬性.屬性,@寶可夢key,...&f=d（雙打，單打不寫）&o=對手寶可夢key,...
 //   傷害計算：ca=攻擊方key&cd=防守方key&cv=攻擊方投資.HP投資.防禦投資.攻擊方速度投資.防守方速度投資
 //   &cs=攻擊.特攻.防禦.特防.攻擊方速度.防守方速度能力變化&ci=攻擊方道具.防守方道具&cb=攻擊方特性.防守方特性&cw=天氣&cc=1（急所）&cx=加算招式
-//   &ct=場地&ch=1（幫助）&cl=牆.牆&cn=1（灼傷）&cg=有順風的一方（a.d）&cz=麻痺的一方（a.d）（和預設相同的不寫）
+//   &ct=場地&ch=1（幫助）&cl=牆.牆&cn=1（灼傷）&cg=有順風的一方（a.d）&cz=麻痺的一方（a.d）&cr=1（戲法空間）（和預設相同的不寫）
 const STATE_KEY = 'pkmn-champions-state';
 function stateQuery() {
   const q = [];
@@ -3852,6 +3883,7 @@ function stateQuery() {
   if (calc.burn) q.push('cn=1');
   if (calc.tw.length) q.push('cg=' + calc.tw.join('.'));
   if (calc.par.length) q.push('cz=' + calc.par.join('.'));
+  if (calc.tr) q.push('cr=1');
   return q.join('&');
 }
 const stateHash = () => { const q = stateQuery(); return '#' + curTab + (q ? '?' + q : ''); };
@@ -3899,6 +3931,7 @@ function loadState(q) {
   calc.burn = kv.cn === '1';
   calc.tw = SIDES.filter(s => (kv.cg || '').split('.').includes(s));
   calc.par = SIDES.filter(s => (kv.cz || '').split('.').includes(s));
+  calc.tr = kv.cr === '1';
 }
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-copy]');
