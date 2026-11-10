@@ -518,6 +518,7 @@ footer a { color: inherit; }
           <div class="c-quick" id="cAtkQ"></div>
           <div class="c-f"><span class="c-l">投資</span><div class="seg" id="cAi"></div></div>
           <div class="c-f"><span class="c-l">能力變化</span><label>攻擊 <select class="sel" id="cSt0"></select></label><label>特攻 <select class="sel" id="cSt1"></select></label></div>
+          <div class="c-f"><span class="c-l">特性</span><select class="sel" id="cAAb" aria-label="攻擊方特性"></select></div>
           <div class="c-f"><span class="c-l">道具</span><select class="sel" id="cAItem" aria-label="攻擊方道具"></select></div>
           <div class="c-f"><span class="c-l">加算招式</span><select class="sel" id="cExtra" aria-label="常用招式以外再多算一招"></select></div>
         </div>
@@ -529,6 +530,7 @@ footer a { color: inherit; }
           <div class="c-f"><span class="c-l">HP 投資</span><div class="seg" id="cHi"></div></div>
           <div class="c-f"><span class="c-l">防禦／特防投資</span><div class="seg" id="cDi"></div></div>
           <div class="c-f"><span class="c-l">能力變化</span><label>防禦 <select class="sel" id="cSt2"></select></label><label>特防 <select class="sel" id="cSt3"></select></label></div>
+          <div class="c-f"><span class="c-l">特性</span><select class="sel" id="cDAb" aria-label="防守方特性"></select></div>
           <div class="c-f"><span class="c-l">道具</span><select class="sel" id="cDItem" aria-label="防守方道具"></select></div>
         </div>
       </div>
@@ -2405,9 +2407,66 @@ const NO_CALC = { 'foul-play': '用對手的攻擊計算' };
 const canCalc = k => MOVES[k][2] !== 'status' && MOVES[k][3] != null && !NO_CALC[k];
 // 必定急所的招式（說明寫「必定／一定會擊中要害」，同 Smogon moves.ts 的 willCrit）
 const ALWAYS_CRIT = new Set(Object.keys(MOVES).filter(k => /(必定|一定)會?擊中要害/.test(MOVES[k][4])));
-// 天氣：晴天火 ×1.5、水 ×½；下雨水 ×1.5、火 ×½；沙暴岩石屬性特防 ×1.5；下雪冰屬性防禦 ×1.5；
+// 出招前先提高 1 段特攻的招式（Smogon champions.ts）
+const CHARGE_SPA = new Set(['electro-shot', 'meteor-beam']);
+// 招式標記，給特性判斷用（Smogon moves.ts 寶可夢冠軍版＝朱紫資料再套冠軍修正，取本資料有的攻擊招式）：
+// contact 接觸、punch 拳、bite 咬、bullet 球和彈、sound 聲音、pulse 波動、slicing 切斬、recoil 有反作用力或撞牆傷害、secondary 有追加效果、priority 先制
+const FLAG = Object.fromEntries(Object.entries({
+  contact: 'accelerock acrobatics aerial-ace aqua-jet aqua-step avalanche bite bitter-blade blaze-kick body-press body-slam brave-bird brick-break '
+    + 'brutal-swing bug-bite bullet-punch ceaseless-edge circle-throw close-combat comeuppance counter covet crabhammer cross-chop cross-poison crunch '
+    + 'darkest-lariat dig dire-claw double-edge double-shock dragon-claw dragon-rush dragon-tail drain-punch draining-kiss drill-peck drill-run '
+    + 'dual-wingbeat dynamic-punch endeavor extreme-speed fake-out fell-stinger fire-fang fire-punch first-impression flail flame-charge flare-blitz '
+    + 'flip-turn flying-press foul-play giga-impact glaive-rush grass-knot grassy-glide guillotine gyro-ball hammer-arm head-smash headlong-rush '
+    + 'heat-crash heavy-slam high-horsepower high-jump-kick horn-drill horn-leech ice-fang ice-hammer ice-punch ice-spinner infestation iron-head '
+    + 'iron-tail jaw-lock jet-punch knock-off kowtow-cleave last-resort leaf-blade leech-life liquidation low-kick lunge mach-punch mega-kick megahorn '
+    + 'meteor-mash mortal-spin night-slash nuzzle outrage payback phantom-force play-rough poison-fang poison-jab population-bomb power-trip '
+    + 'power-whip psychic-fangs psyshield-bash quick-attack rage-fist raging-bull rapid-spin razor-shell reversal sacred-sword shadow-claw '
+    + 'shadow-punch shadow-sneak slash snap-trap solar-blade spirit-break steel-roller stomping-tantrum stone-axe storm-throw sucker-punch '
+    + 'super-fang supercell-slam superpower temper-flare thrash throat-chop thunder-fang thunder-punch trailblaze triple-axel trop-kick u-turn '
+    + 'upper-hand volt-tackle waterfall wave-crash wild-charge wood-hammer x-scissor zen-headbutt',
+  punch: 'bullet-punch double-shock drain-punch dynamic-punch fire-punch hammer-arm headlong-rush ice-hammer ice-punch jet-punch mach-punch '
+    + 'meteor-mash rage-fist shadow-punch thunder-punch',
+  bite: 'bite crunch fire-fang ice-fang jaw-lock poison-fang psychic-fangs thunder-fang',
+  bullet: 'acid-spray aura-sphere beak-blast bullet-seed energy-ball focus-blast gyro-ball pollen-puff pyro-ball rock-blast rock-wrecker seed-bomb '
+    + 'shadow-ball sludge-bomb syrup-bomb weather-ball zap-cannon',
+  sound: 'alluring-voice boomburst bug-buzz clanging-scales hyper-voice overdrive psychic-noise round snarl sparkling-aria torch-song',
+  pulse: 'aura-sphere dark-pulse dragon-pulse terrain-pulse water-pulse',
+  slicing: 'aerial-ace air-cutter air-slash aqua-cutter bitter-blade ceaseless-edge cross-poison dire-claw dragon-claw kowtow-cleave leaf-blade '
+    + 'night-slash population-bomb psycho-cut razor-shell sacred-sword shadow-claw slash solar-blade stone-axe x-scissor',
+  recoil: 'brave-bird double-edge flare-blitz head-smash light-of-ruin volt-tackle wave-crash wild-charge wood-hammer high-jump-kick supercell-slam',
+  secondary: 'acid-spray air-slash alluring-voice ancient-power apple-acid aqua-step aura-wheel barb-barrage bite bitter-malice blaze-kick blizzard '
+    + 'body-slam bug-buzz bulldoze burning-jealousy ceaseless-edge charge-beam cross-poison crunch dark-pulse dire-claw discharge dragon-rush '
+    + 'drum-beating dynamic-punch earth-power electroweb energy-ball extrasensory fake-out fiery-dance fire-blast fire-fang fire-punch flame-charge '
+    + 'flamethrower flare-blitz flash-cannon focus-blast grav-apple gunk-shot heat-wave hurricane ice-beam ice-fang ice-punch icicle-crash icy-wind '
+    + 'infernal-parade iron-head iron-tail lava-plume liquidation lumina-crash lunge matcha-gotcha meteor-mash moonblast mortal-spin mountain-gale '
+    + 'mud-shot muddy-water mystical-fire night-daze nuzzle play-rough poison-fang poison-jab psychic psychic-noise psyshield-bash pyro-ball '
+    + 'rapid-spin razor-shell rock-slide rock-tomb salt-cure scald scorching-sands shadow-ball shell-side-arm sludge-bomb sludge-wave snarl '
+    + 'sparkling-aria spirit-break spirit-shackle stone-axe struggle-bug syrup-bomb throat-chop thunder thunder-fang thunder-punch thunderbolt '
+    + 'torch-song trailblaze triple-arrows trop-kick upper-hand volt-tackle water-pulse waterfall zap-cannon zen-headbutt',
+  priority: 'accelerock aqua-jet bullet-punch extreme-speed fake-out feint first-impression ice-shard jet-punch mach-punch quick-attack shadow-sneak '
+    + 'sucker-punch upper-hand vacuum-wave water-shuriken',
+}).map(([f, s]) => [f, new Set(s.split(' '))]));
+// 特性，效果與倍率照 Smogon champions.ts。超級進化專屬、ABILS（一般寶可夢的 OP.GG 詳細頁）裡沒有的中文名依神奇寶貝百科「特性列表」
+const ABIL_ZH = { aerilate: '飛行皮膚', dragonize: '龍皮膚', eelevate: '鰻鰻高升', 'mega-sol': '超級日光', 'fire-mane': '火焰鬃毛',
+  'aura-guard': '波導防護', 'parental-bond': '親子愛', 'fairy-aura': '妖精氣場' };
+const abilZh = k => ABILS[k]?.[0] || ABIL_ZH[k] || '';
+// 一般屬性招式變成這個屬性、威力 ×1.2
+const ATE = { aerilate: 'flying', pixilate: 'fairy', refrigerate: 'ice', dragonize: 'dragon' };
+// 防守方特性讓這個屬性的招式沒有效果
+const ABIL_IMMUNE = { levitate: 'ground', eelevate: 'ground', 'earth-eater': 'ground', 'flash-fire': 'fire', 'water-absorb': 'water',
+  'storm-drain': 'water', 'dry-skin': 'water', 'volt-absorb': 'electric', 'lightning-rod': 'electric', 'motor-drive': 'electric', 'sap-sipper': 'grass' };
+// 場上有這些特性時天氣沒有作用
+const WEATHER_OFF = ['cloud-nine', 'air-lock'];
+// 這裡會算到的特性（選單標示用；開天氣和威嚇在畫面上另外提示）
+const ATK_ABILS = new Set(['aerilate', 'pixilate', 'refrigerate', 'dragonize', 'liquid-voice', 'adaptability', 'protean', 'libero', 'scrappy',
+  'mold-breaker', 'skill-link', 'parental-bond', 'huge-power', 'pure-power', 'hustle', 'water-bubble', 'fire-mane', 'solar-power', 'technician',
+  'mega-launcher', 'strong-jaw', 'steely-spirit', 'sharpness', 'fairy-aura', 'sheer-force', 'sand-force', 'tough-claws', 'punk-rock', 'reckless',
+  'iron-fist', 'sniper', 'mega-sol', 'unaware', 'long-reach', ...WEATHER_OFF, 'drought', 'drizzle', 'sand-stream', 'snow-warning']);
+const DEF_ABILS = new Set([...Object.keys(ABIL_IMMUNE), 'bulletproof', 'soundproof', 'queenly-majesty', 'armor-tail', 'thick-fat', 'heatproof',
+  'water-bubble', 'purifying-salt', 'fur-coat', 'multiscale', 'filter', 'solid-rock', 'fluffy', 'aura-guard', 'punk-rock', 'shell-armor',
+  'battle-armor', 'sturdy', 'unaware', 'ripen', 'fairy-aura', ...WEATHER_OFF, 'drought', 'drizzle', 'sand-stream', 'snow-warning', 'intimidate']);
+// 天氣（算法在 damageCalc）：晴天火 ×1.5、水 ×½；下雨水 ×1.5、火 ×½；沙暴岩石屬性特防 ×1.5；下雪冰屬性防禦 ×1.5；
 // 氣象球有天氣時變成對應屬性、威力 ×2；日光束／日光刃在下雨、沙暴、下雪時威力 ×½
-const WEATHER_MOD = { sun: { fire: 6144, water: 2048 }, rain: { water: 6144, fire: 2048 } };
 const WB_TYPE = { sun: 'fire', rain: 'water', sand: 'rock', snow: 'ice' };
 // 影響傷害的道具（只收 ITEMS 裡有的，也就是 OP.GG 有人帶的），從說明文字判斷效果，倍率照 Smogon 冠軍版：
 // 攻擊方 side a：屬性強化道具該屬性威力 ×1.2（4915）、力量頭帶／博識眼鏡物理／特殊威力 ×1.1（4505）、寶石該屬性威力 ×1.3（5325）、
@@ -2428,69 +2487,138 @@ Object.entries(ITEMS).forEach(([k, [, e]]) => {
 const ATK_INV = [[0, 10, '無投資'], [32, 10, '滿投資'], [32, 11, '滿投資＋性格']];
 const HP_INV = [[0, 10, '0'], [32, 10, '32']];
 const DEF_INV = [[0, 10, '0'], [32, 10, '32'], [32, 11, '32＋性格']];
-// 攻擊方 a：{ key, inv 投資檔位, st { atk, spa } 能力變化, item }；防守方 d：{ key, hp／inv 投資檔位, st { def, spd }, item }；
-// o：{ fmt 's'／'d', weather, crit }（必定急所的招式不管 crit 都算急所）。不算的招式回傳 { skip 原因 }；沒有效果的回傳 eff 0（沒有 hp 以後的欄位）；
-// 其餘回傳 hp 防守方 HP、min／max 用一次的傷害（多段攻擊是各下加總）、ko[n] 連用 n＋1 次被打倒的機率（n＝0～3）、
-// sashed 氣勢披帶撐住了會倒下的第一下、berry 抗性樹果有減半
+// 攻擊方 a：{ key, inv 投資檔位, st { atk, spa } 能力變化, item, ab 特性 }；防守方 d：{ key, hp／inv 投資檔位, st { def, spd }, item, ab }；
+// o：{ fmt 's'／'d', weather, crit }（必定急所的招式不管 crit 都算急所）。不算的招式回傳 { skip 原因 }；
+// 沒有效果的回傳 eff 0（沒有 hp 以後的欄位；immuneBy＝讓招式無效的防守方特性）；
+// 其餘回傳 hp 防守方 HP、min／max 用一次的傷害（多段攻擊是各下加總）、ko[n] 連用 n＋1 次被打倒的機率（n＝0～3）、stab 本系倍率（4096 制）、
+// endured 撐住了會倒下的第一下的氣勢披帶或結實（道具／特性 key）、berry 抗性樹果有減半、notes 有作用的特性與招式效果
 function damageCalc(a, d, mk, o) {
   const [, mtype, cat, power0] = MOVES[mk];
   if (NO_CALC[mk]) return { skip: NO_CALC[mk] };
   if (power0 == null) return { skip: '威力會變動或固定傷害' };
-  const A = MON[a.key], D = MON[d.key];
-  const wb = mk === 'weather-ball' && o.weather, type = wb ? WB_TYPE[o.weather] : mtype, power = wb ? power0 * 2 : power0;
-  const [hits, hitNote] = HITS[mk] || [1];
-  const r = { type, cat, power, hits, hitNote, eff: eff(type, D.types), spread: o.fmt === 'd' && SPREAD.has(mk), stab: A.types.includes(type),
-    crit: o.crit || ALWAYS_CRIT.has(mk) };
+  const A = MON[a.key], D = MON[d.key], aab = a.ab || '', notes = new Set();
+  const use = k => { notes.add(abilZh(k)); return true; };
+  // 破格無視防守方的特性（Smogon 列的可無視特性涵蓋這裡用到的，只有妖精氣場、熟成不在其中）
+  const dab = aab === 'mold-breaker' && !['fairy-aura', 'ripen'].includes(d.ab) ? '' : d.ab || '';
+  if (d.ab && !dab && DEF_ABILS.has(d.ab)) notes.add(`${abilZh(aab)}無視${abilZh(d.ab)}`);
+  const offBy = [aab, d.ab].find(k => WEATHER_OFF.includes(k)), wthr = offBy ? '' : o.weather;
+  if (offBy && o.weather) notes.add(`${abilZh(offBy)}讓天氣沒有作用`);
+  // 招式屬性：氣象球隨天氣（超級日光當晴天）、皮膚類把一般招式變屬性、濕潤之聲把聲音招式變水
+  let type = mtype, power = power0, ate = false;
+  if (mk === 'weather-ball') {
+    const w = aab === 'mega-sol' ? use(aab) && 'sun' : wthr;
+    if (w) { type = WB_TYPE[w]; power *= 2; }
+  } else if (ATE[aab] && type === 'normal') ate = use(aab) && (type = ATE[aab]);
+  else if (aab === 'liquid-voice' && FLAG.sound.has(mk)) type = use(aab) && 'water';
+  let [hits, hitNote] = HITS[mk] || [1], pb = false;
+  if (aab === 'skill-link' && hitNote === VAR_HITS) [hits, hitNote] = [5, use(aab) && `${abilZh(aab)}固定 5 下`];
+  const spread = o.fmt === 'd' && SPREAD.has(mk);
+  if (aab === 'parental-bond' && hits === 1 && !spread) [hits, hitNote, pb] = [2, use(aab) && `${abilZh(aab)}：第 2 下傷害 ¼`, true];
+  const scrappy = aab === 'scrappy' && (type === 'normal' || type === 'fighting') && D.types.includes('ghost') && use(aab);
+  const r = { type, cat, power, hits, hitNote, spread, eff: eff(type, scrappy ? D.types.filter(t => t !== 'ghost') : D.types),
+    crit: (o.crit || ALWAYS_CRIT.has(mk)) && !(['shell-armor', 'battle-armor'].includes(dab) && use(dab)) };
+  if (ABIL_IMMUNE[dab] === type || (dab === 'bulletproof' && FLAG.bullet.has(mk)) || (dab === 'soundproof' && FLAG.sound.has(mk))
+    || (['queenly-majesty', 'armor-tail'].includes(dab) && FLAG.priority.has(mk))) [r.eff, r.immuneBy] = [0, dab];
   if (!r.eff) return r;
+  // 本系 ×1.5；變幻自如／自由者每招都算本系；適應力本系再 +0.5
+  const own = A.types.includes(type);
+  r.stab = 4096 + (own || (['protean', 'libero'].includes(aab) && use(aab)) ? 2048 : 0) + (aab === 'adaptability' && own && use(aab) ? 2048 : 0);
   const ai = mk === 'body-press' ? 2 : cat === 'physical' ? 1 : 3, di = cat === 'physical' || HIT_DEF.has(mk) ? 2 : 4;
   const [asp, anat] = ATK_INV[a.inv], [dsp, dnat] = DEF_INV[d.inv];
   const ait = DMG_ITEMS[a.item] || {}, dit = DMG_ITEMS[d.item] || {};
   r.hp = statOf(D.bs[0], HP_INV[d.hp][0], 0);
-  // 能力變化：急所時不計攻擊方的下降、防守方的上升
-  const ast = ai === 1 ? a.st.atk : ai === 3 ? a.st.spa : 0, dst = di === 2 ? d.st.def : d.st.spd;
+  // 能力變化：急所時不計攻擊方的下降、防守方的上升；對方是天然就不計
+  let ast = ai === 1 ? a.st.atk : ai === 3 ? a.st.spa : 0;
+  if (CHARGE_SPA.has(mk) && ai === 3) {
+    ast = Math.max(-6, Math.min(6, ast + (aab === 'contrary' ? -1 : 1)));
+    notes.add(aab === 'contrary' ? `出招前特攻 −1（${abilZh(aab)}）` : '出招前特攻 +1');
+  }
+  const dst = di === 2 ? d.st.def : d.st.spd;
   let atk = statOf(A.bs[ai], asp, ai, anat);
-  if (ast && !(r.crit && ast < 0)) atk = stageStat(atk, ast);
-  if (ait.atk && family(A) === ait.mon) atk = Math.max(1, pokeRound(atk * ait.atk / 4096));
+  if (ast && !(r.crit && ast < 0) && !(dab === 'unaware' && use(dab))) atk = stageStat(atk, ast);
+  if (aab === 'hustle' && cat === 'physical' && use(aab)) atk = pokeRound(atk * 3 / 2);
+  const atMods = [];
+  if ((aab === 'solar-power' && wthr === 'sun' && cat === 'special') || (aab === 'fire-mane' && type === 'fire')) atMods.push(use(aab) && 6144);
+  else if ((aab === 'water-bubble' && type === 'water') || (['huge-power', 'pure-power'].includes(aab) && cat === 'physical')) atMods.push(use(aab) && 8192);
+  if ((dab === 'thick-fat' && (type === 'fire' || type === 'ice')) || (dab === 'water-bubble' && type === 'fire') || (dab === 'purifying-salt' && type === 'ghost')
+    || (dab === 'heatproof' && type === 'fire')) atMods.push(use(dab) && 2048);
+  if (ait.atk && family(A) === ait.mon) atMods.push(ait.atk);
+  atk = Math.max(1, pokeRound(atk * chainMods(atMods, 410, 131072) / 4096));
   let def = statOf(D.bs[di], dsp, di, dnat);
-  if (dst && !(r.crit && dst > 0)) def = stageStat(def, dst);
-  if ((o.weather === 'sand' && di === 4 && D.types.includes('rock')) || (o.weather === 'snow' && di === 2 && D.types.includes('ice'))) def = pokeRound(def * 3 / 2);
-  const bpMods = [];
-  if ((mk === 'solar-beam' || mk === 'solar-blade') && ['rain', 'sand', 'snow'].includes(o.weather)) bpMods.push(2048);
-  if (ait.bp && (ait.type ? ait.type === type : ait.cat === cat)) bpMods.push(ait.bp);
-  const finalMods = ait.final ? [ait.final] : ait.se && r.eff > 1 ? [ait.se] : [];
+  if (dst && !(r.crit && dst > 0) && !(aab === 'unaware' && use(aab))) def = stageStat(def, dst);
+  if (aab !== 'mega-sol' && ((wthr === 'sand' && di === 4 && D.types.includes('rock')) || (wthr === 'snow' && di === 2 && D.types.includes('ice')))) def = pokeRound(def * 3 / 2);
+  if (dab === 'fur-coat' && di === 2 && use(dab)) def = Math.max(1, pokeRound(def * 8192 / 4096));
+  const contact = FLAG.contact.has(mk) && aab !== 'long-reach';
+  // 威力修正（依 Smogon 的順序；技術高手看這一下的威力 p）
+  const bpModsOf = p => {
+    const m = [];
+    if ((mk === 'solar-beam' || mk === 'solar-blade') && ['rain', 'sand', 'snow'].includes(wthr) && aab !== 'mega-sol') m.push(2048);
+    if ((aab === 'technician' && p <= 60) || (aab === 'mega-launcher' && FLAG.pulse.has(mk)) || (aab === 'strong-jaw' && FLAG.bite.has(mk))
+      || (aab === 'steely-spirit' && type === 'steel') || (aab === 'sharpness' && FLAG.slicing.has(mk))) m.push(use(aab) && 6144);
+    if (type === 'fairy' && (aab === 'fairy-aura' || dab === 'fairy-aura')) m.push(use('fairy-aura') && 5448);
+    if ((aab === 'sheer-force' && (FLAG.secondary.has(mk) || mk === 'electro-shot')) || (aab === 'sand-force' && wthr === 'sand' && ['rock', 'ground', 'steel'].includes(type))
+      || (aab === 'tough-claws' && contact) || (aab === 'punk-rock' && FLAG.sound.has(mk))) m.push(use(aab) && 5325);
+    if (ate) m.push(4915);
+    if ((aab === 'reckless' && FLAG.recoil.has(mk)) || (aab === 'iron-fist' && FLAG.punch.has(mk))) m.push(use(aab) && 4915);
+    if (dab === 'dry-skin' && type === 'fire') m.push(use(dab) && 5120);
+    if (ait.bp && (ait.type ? ait.type === type : ait.cat === cat)) m.push(ait.bp);
+    return m;
+  };
+  // 天氣：超級日光讓自己的招式都當晴天（下雨也不會強化水招式）
+  const sunny = wthr === 'sun' || aab === 'mega-sol';
+  const wx = (sunny && type === 'fire') || (wthr === 'rain' && aab !== 'mega-sol' && type === 'water') ? 6144
+    : (sunny && type === 'water') || (wthr === 'rain' && type === 'fire') ? 2048 : 0;
+  if (wx && aab === 'mega-sol' && wthr !== 'sun') use(aab);
   r.berry = dit.berry === type && r.eff > 1;
-  const wx = WEATHER_MOD[o.weather]?.[type];
-  // 威力 p 打一下的 16 個亂數傷害（由小到大）；first＝整場第一下（樹果只擋這下）
-  const rollsOf = (p, first) => {
-    const bp = Math.max(1, pokeRound(p * chainMods(bpMods, 41, 2097152) / 4096));
+  // 最終修正；first＝整場第一下（多重鱗片、樹果只算這下）
+  const finalModsOf = first => {
+    const m = [];
+    if (aab === 'sniper' && r.crit) m.push(use(aab) && 6144);
+    if (dab === 'multiscale' && first) m.push(use(dab) && 2048);
+    if ((dab === 'fluffy' || dab === 'aura-guard') && contact) m.push(use(dab) && 2048);
+    else if (dab === 'punk-rock' && FLAG.sound.has(mk)) m.push(use(dab) && 2048);
+    if (['solid-rock', 'filter'].includes(dab) && r.eff > 1) m.push(use(dab) && 3072);
+    if (dab === 'fluffy' && type === 'fire') m.push(use(dab) && 8192);
+    if (ait.se && r.eff > 1) m.push(ait.se);
+    else if (ait.final) m.push(ait.final);
+    if (first && r.berry) m.push(dab === 'ripen' && use(dab) ? 1024 : 2048);
+    return m;
+  };
+  // 威力 p 打一下的 16 個亂數傷害（由小到大）；child＝親子愛的第 2 下（傷害 ¼）
+  const rollsOf = (p, first, child) => {
+    const bp = Math.max(1, pokeRound(p * chainMods(bpModsOf(p), 41, 2097152) / 4096));
     let b = Math.floor(Math.floor(22 * bp * atk / def) / 50 + 2);
-    if (r.spread) b = pokeRound(b * 3072 / 4096);
+    if (spread) b = pokeRound(b * 3072 / 4096);
+    if (child) b = pokeRound(b * 1024 / 4096);
     if (wx) b = pokeRound(b * wx / 4096);
     if (r.crit) b = Math.floor(b * 1.5);
-    const fm = chainMods(first && r.berry ? [...finalMods, 2048] : finalMods, 41, 131072);
+    const fm = chainMods(finalModsOf(first), 41, 131072);
     return Array.from({ length: 16 }, (_, i) => {
       let x = Math.floor(b * (85 + i) / 100);
-      if (r.stab) x = x * 6144 / 4096;
+      if (r.stab !== 4096) x = x * r.stab / 4096;
       x = Math.floor(pokeRound(x) * r.eff);
       return pokeRound(Math.max(1, x * fm / 4096));
     });
   };
   const pw = h => mk === 'triple-axel' ? 20 * (h + 1) : power;
-  const first = Array.from({ length: hits }, (_, h) => rollsOf(pw(h), !h));
-  const later = r.berry ? Array.from({ length: hits }, (_, h) => rollsOf(pw(h), false)) : first;
+  const first = Array.from({ length: hits }, (_, h) => rollsOf(pw(h), !h, pb && h === 1));
+  const later = r.berry || dab === 'multiscale' ? Array.from({ length: hits }, (_, h) => rollsOf(pw(h), false, pb && h === 1)) : first;
   r.min = first.reduce((s, x) => s + x[0], 0);
   r.max = first.reduce((s, x) => s + x[15], 0);
-  r.sashed = !!dit.sash && hits === 1 && r.max >= r.hp;
-  // 累計傷害的機率分布（超過 HP 的都併在 HP）；氣勢披帶讓整場第一下最多打到剩 1 HP
+  // 氣勢披帶、結實：HP 全滿時整場第一下最多打到剩 1 HP
+  const endure = dit.sash ? d.item : dab === 'sturdy' ? dab : '';
+  r.endured = endure && hits === 1 && r.max >= r.hp ? endure : '';
+  // 累計傷害的機率分布（超過 HP 的都併在 HP）
   let dist = new Map([[0, 1]]);
   r.ko = [0, 1, 2, 3].map(n => {
     (n ? later : first).forEach((rs, h) => {
-      const xs = dit.sash && !n && !h ? rs.map(x => Math.min(x, r.hp - 1)) : rs, nd = new Map();
+      const xs = endure && !n && !h ? rs.map(x => Math.min(x, r.hp - 1)) : rs, nd = new Map();
       dist.forEach((p, v) => xs.forEach(x => { const s = Math.min(r.hp, v + x); nd.set(s, (nd.get(s) || 0) + p / 16); }));
       dist = nd;
     });
     return dist.get(r.hp) || 0;
   });
+  r.notes = [...notes].filter(Boolean);
   return r;
 }
 // 幾擊打倒：ko 是 damageCalc 的 ko
@@ -3259,8 +3387,9 @@ $('#pClear').addEventListener('click', () => { bring.opp = bring.opp.map(() => '
 
 // ---------- 傷害計算 ----------
 // atk／def：攻擊方／防守方寶可夢 key；ai：攻擊方投資（ATK_INV 的索引）；hi、di：防守方 HP、防禦／特防投資（HP_INV、DEF_INV 的索引）；
-// st：能力變化 [攻擊方攻擊, 攻擊方特攻, 防守方防禦, 防守方特防]；aItem／dItem：道具 key；weather：天氣；crit：急所；extra：加算的招式
-const CALC0 = { atk: '', def: '', ai: 2, hi: 0, di: 0, st: [0, 0, 0, 0], aItem: '', dItem: '', weather: '', crit: false, extra: '' };
+// st：能力變化 [攻擊方攻擊, 攻擊方特攻, 防守方防禦, 防守方特防]；aItem／dItem：道具 key；aAb／dAb：選的特性（空＝用 abOf 的預設）；
+// weather：天氣；crit：急所；extra：加算的招式
+const CALC0 = { atk: '', def: '', ai: 2, hi: 0, di: 0, st: [0, 0, 0, 0], aItem: '', dItem: '', aAb: '', dAb: '', weather: '', crit: false, extra: '' };
 const calc = structuredClone(CALC0);
 const CALC_MOVES = Object.keys(MOVES).filter(canCalc);
 ['cSt0', 'cSt1', 'cSt2', 'cSt3'].forEach(id => {
@@ -3295,6 +3424,31 @@ function itemOptions(side, key, cur) {
     + (top.length ? `<optgroup label="這隻常帶">${top.map(opt).join('')}</optgroup>` : '')
     + `<optgroup label="${top.length ? '其他' : '影響傷害的道具'}">${rest.map(opt).join('')}</optgroup>`;
 }
+// 寶可夢 key 實際用的特性：超級進化用固定特性；其他用選的 cur，沒選或不在這隻的常用特性裡就用使用率最高的；沒有統計回傳 ''
+function abOf(key, cur) {
+  const m = MON[key];
+  if (!m) return '';
+  if (m.base) return m.megaAbils[0] || '';
+  const list = useOf(key, team.fmt)?.abils || [];
+  return list.some(([k]) => k === cur) ? cur : list[0]?.[0] || '';
+}
+// 特性選單：這隻的 OP.GG 常用特性（附使用率），rel 以外的標「不影響這裡的計算」；超級進化只列固定特性
+function abilOptions(rel, key, cur) {
+  const m = MON[key], tag = k => rel.has(k) ? '' : '・不影響這裡的計算';
+  if (!m) return '<option value="">（先選寶可夢）</option>';
+  if (m.base) { const k = m.megaAbils[0] || ''; return `<option value="${k}">${abilZh(k) || '固定特性'}（超級進化${tag(k)}）</option>`; }
+  const list = useOf(key, team.fmt)?.abils || [];
+  if (!list.length) return '<option value="">沒有 OP.GG 特性統計（不算特性）</option>';
+  return list.map(([k, p]) => `<option value="${k}"${k === cur ? ' selected' : ''}>${abilZh(k) || k}（${p}%${tag(k)}）</option>`).join('');
+}
+// 出場就開天氣的特性（FIELD_SET 對應天氣）
+const ENTRY_WEATHER = ['drought', 'drizzle', 'sand-stream', 'snow-warning'];
+// 威嚇對攻擊方特性 ab 的效果 [攻擊變化, 特攻變化]，照 Smogon util.ts 的 checkIntimidate；不吃威嚇回傳 null
+function intimidateOn(ab) {
+  if (['clear-body', 'white-smoke', 'hyper-cutter', 'full-metal-body', 'inner-focus', 'own-tempo', 'oblivious', 'scrappy'].includes(ab)) return null;
+  if (['contrary', 'defiant', 'guard-dog'].includes(ab)) return [1, 0];
+  return ab === 'simple' ? [-2, 0] : ab === 'competitive' ? [-1, 2] : [-1, 0];
+}
 // 快選：我方隊伍（隊伍分析）和對手（出戰選角）用名字選的寶可夢
 function quickHTML(side) {
   const btn = k => `<button class="mini" data-side="${side}" data-k="${k}" aria-pressed="${calc[side] === k}">${MON[k].zh}</button>`;
@@ -3302,9 +3456,9 @@ function quickHTML(side) {
   return (mine.length ? `<span class="meta">我方</span>${mine.map(btn).join('')}` : '') + (opp.length ? `<span class="meta">對手</span>${opp.map(btn).join('')}` : '');
 }
 function calcHTML() {
-  const A = MON[calc.atk], D = MON[calc.def];
-  const a = { key: calc.atk, inv: calc.ai, st: { atk: calc.st[0], spa: calc.st[1] }, item: calc.aItem };
-  const d = { key: calc.def, hp: calc.hi, inv: calc.di, st: { def: calc.st[2], spd: calc.st[3] }, item: calc.dItem };
+  const A = MON[calc.atk], D = MON[calc.def], aab = abOf(calc.atk, calc.aAb), dab = abOf(calc.def, calc.dAb);
+  const a = { key: calc.atk, inv: calc.ai, st: { atk: calc.st[0], spa: calc.st[1] }, item: calc.aItem, ab: aab };
+  const d = { key: calc.def, hp: calc.hi, inv: calc.di, st: { def: calc.st[2], spd: calc.st[3] }, item: calc.dItem, ab: dab };
   const o = { fmt: team.fmt, weather: calc.weather, crit: calc.crit };
   const use = useOf(calc.atk, team.fmt)?.moves || [];
   const list = use.filter(([k]) => MOVES[k][2] !== 'status');
@@ -3318,21 +3472,32 @@ function calcHTML() {
   const kos = ok.filter(x => x.r.ko?.[0] > 1e-9), top = ok.find(x => x.r.ko);
   const row = ({ k, p, r }) => {
     const head = `<b>${MOVES[k][0]}</b>${chip(r.type)}${mtag(r.eff)}<span class="meta">${CAT_ZH[r.cat]} ${r.power}`
-      + `${r.hits > 1 ? ` ×${r.hits} 下${r.hitNote ? `（${r.hitNote}）` : ''}` : ''}${r.stab ? '・本系' : ''}${r.spread ? '・範圍 ×0.75' : ''}`
-      + `${ALWAYS_CRIT.has(k) ? '・必定急所' : ''}・${p ? `使用率 ${p}%` : '加算'}</span>`;
-    if (!r.eff) return `<div class="dmg"><div class="dmg-h">${head}<span class="ko">沒有效果</span></div></div>`;
+      + `${r.hits > 1 ? ` ×${r.hits} 下${r.hitNote ? `（${r.hitNote}）` : ''}` : ''}${r.stab > 4096 ? `・本系${r.stab > 6144 ? ' ×2' : ''}` : ''}`
+      + `${r.spread ? '・範圍 ×0.75' : ''}${ALWAYS_CRIT.has(k) ? '・必定急所' : ''}・${p ? `使用率 ${p}%` : '加算'}</span>`;
+    if (!r.eff) return `<div class="dmg"><div class="dmg-h">${head}<span class="ko">沒有效果${r.immuneBy ? `（${abilZh(r.immuneBy)}）` : ''}</span></div></div>`;
     const lo = pct(r.min, r.hp), hi = pct(r.max, r.hp), kt = koText(r.ko);
+    const extra = [...r.notes, r.berry && `${ITEMS[calc.dItem][0]}減半第一下`, r.endured && `${ITEMS[r.endured]?.[0] || abilZh(r.endured)}撐住第一下`].filter(Boolean);
     return `<div class="dmg"><div class="dmg-h">${head}<span class="ko k${kt.n}">${kt.text}</span></div>`
       + `<div class="dmg-bar"><span style="width:${Math.min(100, lo)}%"></span><span class="rng" style="width:${Math.min(100, hi) - Math.min(100, lo)}%"></span></div>`
-      + `<div class="meta">${lo}～${hi}%（${r.min}～${r.max}／HP ${r.hp}）${r.berry ? `・${ITEMS[calc.dItem][0]}減半第一下` : ''}${r.sashed ? '・氣勢披帶撐住第一下' : ''}</div></div>`;
+      + `<div class="meta">${lo}～${hi}%（${r.min}～${r.max}／HP ${r.hp}）${extra.map(s => '・' + s).join('')}</div></div>`;
   };
+  // 提示：開天氣的特性和目前天氣不同、防守方有威嚇（攻擊方能力變化還沒調時）
+  const hints = [[A, aab], [D, dab]].filter(([, k]) => ENTRY_WEATHER.includes(k) && FIELD_SET[k] !== calc.weather)
+    .map(([m, k]) => `<div class="x-line"><span class="x-msg">${m.zh}的${abilZh(k)}出場會變${FIELD_ZH[FIELD_SET[k]]}，目前是${FIELD_ZH[calc.weather] || '無天氣'}</span>`
+      + `<button class="mini" data-setw="${FIELD_SET[k]}">改成${FIELD_ZH[FIELD_SET[k]]}</button></div>`);
+  const im = dab === 'intimidate' && intimidateOn(aab);
+  if (im && !calc.st[0] && !calc.st[1]) {
+    const txt = [im[0] && `攻擊 ${im[0] > 0 ? '+' : '−'}${Math.abs(im[0])}`, im[1] && `特攻 +${im[1]}`].filter(Boolean).join('、');
+    hints.push(`<div class="x-line"><span class="x-msg">${D.zh}的${abilZh(dab)}出場會讓${A.zh}${txt}</span><button class="mini" data-im="${im.join('.')}">套用${txt}</button></div>`);
+  }
   return `<div class="res-head">${A.zh}${chips(A.types)} → ${D.zh}${chips(D.types)}`
     + `<span class="muted small">（${[FMT_ZH[team.fmt], FIELD_ZH[calc.weather], calc.crit && '急所'].filter(Boolean).join('・')}）</span></div>`
     + `<div class="bst">攻擊方（${aname}）<span>攻擊 <b>${statOf(A.bs[1], asp, 1, anat)}</b></span><span>特攻 <b>${statOf(A.bs[3], asp, 3, anat)}</b></span>`
-    + `${stg(calc.st[0], '攻擊')}${stg(calc.st[1], '特攻')}${calc.aItem ? `<span>${ITEMS[calc.aItem][0]}</span>` : ''}</div>`
+    + `${stg(calc.st[0], '攻擊')}${stg(calc.st[1], '特攻')}${aab ? `<span>${abilZh(aab) || '固定特性'}</span>` : ''}${calc.aItem ? `<span>${ITEMS[calc.aItem][0]}</span>` : ''}</div>`
     + `<div class="bst">防守方（HP ${HP_INV[calc.hi][2]}・防禦／特防 ${dname}）<span>HP <b>${statOf(D.bs[0], HP_INV[calc.hi][0], 0)}</b></span>`
     + `<span>防禦 <b>${statOf(D.bs[2], dsp, 2, dnat)}</b></span><span>特防 <b>${statOf(D.bs[4], dsp, 4, dnat)}</b></span>`
-    + `${stg(calc.st[2], '防禦')}${stg(calc.st[3], '特防')}${calc.dItem ? `<span>${ITEMS[calc.dItem][0]}</span>` : ''}</div>`
+    + `${stg(calc.st[2], '防禦')}${stg(calc.st[3], '特防')}${dab ? `<span>${abilZh(dab) || '固定特性'}</span>` : ''}${calc.dItem ? `<span>${ITEMS[calc.dItem][0]}</span>` : ''}</div>`
+    + hints.join('')
     + (kos.length ? `<div class="c-sum bad">${D.zh}會被一擊打倒：${kos.map(x => `<b>${MOVES[x.k][0]}</b> ${koText(x.r.ko).text}`).join('、')}</div>`
       : top ? `<div class="c-sum good">${D.zh}不會被一擊打倒；最痛的是 <b>${MOVES[top.k][0]}</b> ${pct(top.r.min, top.r.hp)}～${pct(top.r.max, top.r.hp)}%，${koText(top.r.ko).text}</div>`
       : ok.length ? `<div class="c-sum good">${A.zh}的招式對${D.zh}都沒有效果。</div>` : '')
@@ -3340,19 +3505,24 @@ function calcHTML() {
     + ok.map(row).join('')
     + Object.entries(why).map(([w, ns]) => `<div class="x-line"><span class="x-msg">不算（${w}）：</span>${ns.join('、')}</div>`).join('')
     + '<p class="note">※ 公式照 Smogon damage-calc 的寶可夢冠軍版：Lv50、個體值 31，算進能力值與投資、本系 ×1.5、屬性相剋、亂數 85～100%（16 段）、'
-    + '雙打範圍招式 ×0.75、天氣、急所 ×1.5、能力變化、道具。投資套在這招用到的那項能力：物理招看攻擊打防禦、特殊招看特攻打特防（精神衝擊打防禦、撲擊用自己的防禦）；'
+    + '雙打範圍招式 ×0.75、天氣、急所 ×1.5、能力變化、特性、道具。投資套在這招用到的那項能力：物理招看攻擊打防禦、特殊招看特攻打特防（精神衝擊打防禦、撲擊用自己的防禦）；'
     + '「滿投資」＝能力點數 32，「＋性格」再 ×1.1。上方能力值是投資後、能力變化前的數字。列出的招式是 OP.GG 常用招式裡的攻擊招式，依傷害由高到低排。'
-    + '不含特性（如飄浮、適應力、多重鱗片；被威嚇請把攻擊調 −1）、反射壁／光牆、灼傷與場地。威力有條件會變的招式（如拍落、雜技、憤怒之拳）以基本威力計，噴火／噴水以 HP 全滿計。'
-    + '幾擊＝連續用同一招幾次打倒，不含回復、吃剩的東西、文柚果；抗性樹果只擋第一下，氣勢披帶只在 HP 全滿時撐住一下。</p>';
+    + '特性：超級進化用固定特性，其他預設用 OP.GG 使用率最高的，可在選單改；要看場上狀況的不算（如猛火、毅力、引火的強化、正電／負電、分析、大將、鬥爭心、畫皮），'
+    + '開天氣的特性和威嚇不會自動套用，結果上方會提示。破格會無視防守方的特性。電光束出招前特攻 +1 已算進去。'
+    + '不含反射壁／光牆、灼傷與場地。威力有條件會變的招式（如拍落、雜技、憤怒之拳）以基本威力計，噴火／噴水以 HP 全滿計。'
+    + '幾擊＝連續用同一招幾次打倒，不含回復、吃剩的東西、文柚果；抗性樹果、多重鱗片只算第一下，氣勢披帶、結實只在 HP 全滿時撐住一下。</p>';
 }
 function renderCalc() {
-  [['atk', 'aItem', 'a', '#cAtk', '#cAtkQ', '#cAItem'], ['def', 'dItem', 'd', '#cDef', '#cDefQ', '#cDItem']].forEach(([side, it, s, inp, q, sel]) => {
-    if (calc[it] && !itemOK(s, calc[side], calc[it])) calc[it] = '';
-    $(inp).value = calc[side] ? MON[calc[side]].zh : '';
-    $(q).innerHTML = quickHTML(side);
-    $(sel).innerHTML = itemOptions(s, calc[side], calc[it]);
-    $(sel).disabled = !!MON[calc[side]]?.base;
-  });
+  [['atk', 'aItem', 'a', '#cAtk', '#cAtkQ', '#cAItem', 'aAb', '#cAAb', ATK_ABILS], ['def', 'dItem', 'd', '#cDef', '#cDefQ', '#cDItem', 'dAb', '#cDAb', DEF_ABILS]]
+    .forEach(([side, it, s, inp, q, sel, ab, abSel, rel]) => {
+      if (calc[it] && !itemOK(s, calc[side], calc[it])) calc[it] = '';
+      $(inp).value = calc[side] ? MON[calc[side]].zh : '';
+      $(q).innerHTML = quickHTML(side);
+      $(sel).innerHTML = itemOptions(s, calc[side], calc[it]);
+      $(sel).disabled = !!MON[calc[side]]?.base;
+      $(abSel).innerHTML = abilOptions(rel, calc[side], abOf(calc[side], calc[ab]));
+      $(abSel).disabled = $(abSel).options.length < 2;
+    });
   $('#cAi').innerHTML = segHTML(ATK_INV, calc.ai);
   $('#cHi').innerHTML = segHTML(HP_INV, calc.hi);
   $('#cDi').innerHTML = segHTML(DEF_INV, calc.di);
@@ -3365,11 +3535,11 @@ function renderCalc() {
     : '<p class="empty">選好攻擊方和防守方後，這裡會列出攻擊方常用攻擊招式打過去的傷害、佔防守方 HP 的比例，以及幾下會被打倒。</p>';
   saveState();
 }
-// 換寶可夢時清掉那一方的道具；換攻擊方也清掉加算招式
+// 換寶可夢時清掉那一方的道具和選的特性；換攻擊方也清掉加算招式
 function setCalcMon(side, key) {
   if (calc[side] !== key) {
     calc[side] = key;
-    if (side === 'atk') { calc.aItem = ''; calc.extra = ''; } else calc.dItem = '';
+    if (side === 'atk') { calc.aItem = calc.aAb = calc.extra = ''; } else calc.dItem = calc.dAb = '';
   }
   renderCalc();
 }
@@ -3386,20 +3556,25 @@ $('#p-calc').addEventListener('click', e => {
   if (b.dataset.k) setCalcMon(b.dataset.side, b.dataset.k);
   else if (seg === 'cAi' || seg === 'cHi' || seg === 'cDi') { calc[{ cAi: 'ai', cHi: 'hi', cDi: 'di' }[seg]] = +b.dataset.v; renderCalc(); }
   else if (seg === 'cW') { calc.weather = b.dataset.w; renderCalc(); }
+  else if (b.dataset.setw) { calc.weather = b.dataset.setw; renderCalc(); }
+  else if (b.dataset.im) { [calc.st[0], calc.st[1]] = b.dataset.im.split('.').map(Number); renderCalc(); }
 });
 $('#p-calc').addEventListener('change', e => {
   const id = e.target.id;
   if (/^cSt\d$/.test(id)) calc.st[+id[3]] = +e.target.value;
   else if (id === 'cAItem') calc.aItem = e.target.value;
   else if (id === 'cDItem') calc.dItem = e.target.value;
+  else if (id === 'cAAb') calc.aAb = e.target.value;
+  else if (id === 'cDAb') calc.dAb = e.target.value;
   else if (id === 'cExtra') calc.extra = e.target.value;
   else if (id === 'cCrit') calc.crit = e.target.checked;
   else return;
   renderCalc();
 });
 $('#cFmt').addEventListener('click', setFmt);
+// 對調：特性跟著寶可夢走；道具（攻擊方、防守方能選的不同）、能力變化和加算招式清掉
 $('#cSwap').addEventListener('click', () => {
-  [calc.atk, calc.def] = [calc.def, calc.atk];
+  [calc.atk, calc.def, calc.aAb, calc.dAb] = [calc.def, calc.atk, calc.dAb, calc.aAb];
   calc.aItem = calc.dItem = calc.extra = '';
   calc.st = [0, 0, 0, 0];
   renderCalc();
@@ -3409,7 +3584,7 @@ $('#cClear').addEventListener('click', () => { Object.assign(calc, structuredClo
 // ---------- 狀態存網址＋本機（可存書籤、重新整理不清空） ----------
 // 格式：#分頁?m=招式,招式&t=屬性,屬性&a=特性&p=隊員1屬性.屬性,@寶可夢key,...&f=d（雙打，單打不寫）&o=對手寶可夢key,...
 //   傷害計算：ca=攻擊方key&cd=防守方key&cv=攻擊方投資.HP投資.防禦投資&cs=攻擊.特攻.防禦.特防能力變化&ci=攻擊方道具.防守方道具
-//   &cw=天氣&cc=1（急所）&cx=加算招式（和預設相同的不寫）
+//   &cb=攻擊方特性.防守方特性&cw=天氣&cc=1（急所）&cx=加算招式（和預設相同的不寫）
 const STATE_KEY = 'pkmn-champions-state';
 function stateQuery() {
   const q = [];
@@ -3429,6 +3604,7 @@ function stateQuery() {
   if (cv !== [CALC0.ai, CALC0.hi, CALC0.di].join('.')) q.push('cv=' + cv);
   if (calc.st.some(Boolean)) q.push('cs=' + calc.st.join('.'));
   if (calc.aItem || calc.dItem) q.push('ci=' + calc.aItem + '.' + calc.dItem);
+  if (calc.aAb || calc.dAb) q.push('cb=' + calc.aAb + '.' + calc.dAb);
   if (calc.weather) q.push('cw=' + calc.weather);
   if (calc.crit) q.push('cc=1');
   if (calc.extra) q.push('cx=' + calc.extra);
@@ -3463,6 +3639,10 @@ function loadState(q) {
   const [ia, id] = (kv.ci || '').split('.');
   calc.aItem = itemOK('a', calc.atk, ia) ? ia : '';
   calc.dItem = itemOK('d', calc.def, id) ? id : '';
+  // 特性只要是資料裡有的 key 就收，實際用哪個由 abOf 依這隻的常用特性決定
+  const [ba, bd] = (kv.cb || '').split('.'), abKey = k => ABILS[k] || ABIL_ZH[k] ? k : '';
+  calc.aAb = abKey(ba);
+  calc.dAb = abKey(bd);
   calc.weather = WEATHERS.includes(kv.cw) ? kv.cw : '';
   calc.crit = kv.cc === '1';
   calc.extra = CALC_MOVES.includes(kv.cx) ? kv.cx : '';
