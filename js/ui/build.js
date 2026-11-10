@@ -1,5 +1,9 @@
 // ---------- 配招分析 ----------
 const build = { moves: [], types: [], ab: '' };
+const DEF_GROUPS = [[4, '雙重弱點'], [2, '弱點'], [1, '普通'], [0.5, '抵抗'], [0.25, '雙重抵抗'], [0, '免疫']];
+const ATK_GROUPS = [[2, '效果絕佳'], [1, '普通'], [0.5, '效果不好'], [0, '沒有效果']];
+const groupRow = (m, label, ids, sub = () => '') => `<div class="rg"><div class="rg-l">${mtag(m)}<span>${label}</span></div>`
+  + `<div class="rg-c">${ids.length ? ids.map(id => chip(id, sub(id))).join('') : '<span class="none">（無）</span>'}</div></div>`;
 const BEST_GROUPS = [4, 2, 1, 0.5, 0.25, 0];
 // 點選切換；超過上限就換掉最早選的
 function toggleSel(list, id, max) {

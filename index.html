@@ -136,7 +136,7 @@ table.matrix { border-collapse: separate; border-spacing: 0; margin: 0 auto; }
 .matrix th.hl .vchip, .matrix th.hl .rchip { outline: 2px solid var(--text); outline-offset: 1px; }
 .note { margin-top: 10px; font-size: 13px; color: var(--muted); }
 
-/* ---------- 快速查詢 ---------- */
+/* ---------- 共用元件：分段按鈕、屬性按鈕、按鈕、結果分組 ---------- */
 .seg { display: inline-flex; background: var(--surface-2); border-radius: 999px; padding: 4px; gap: 2px; flex-wrap: wrap; }
 .seg button { border: 0; background: transparent; border-radius: 999px; padding: 6px 14px; cursor: pointer; font-weight: 600; color: var(--muted); }
 .seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
@@ -160,7 +160,6 @@ table.matrix { border-collapse: separate; border-spacing: 0; margin: 0 auto; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 .btn.primary:hover { filter: brightness(1.06); }
 .btn.ghost { border-color: transparent; background: transparent; color: var(--muted); }
-.result { margin-top: 16px; }
 .res-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-weight: 700; font-size: 16px; margin-bottom: 4px; }
 .rg { display: grid; grid-template-columns: 130px 1fr; gap: 10px; align-items: start; padding: 10px 0; border-top: 1px solid var(--border); }
 .rg-l { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
@@ -316,66 +315,11 @@ table.matrix { border-collapse: separate; border-spacing: 0; margin: 0 auto; }
 .dmg-bar span { background: var(--accent); }
 .dmg-bar .rng { opacity: .35; }
 
-/* ---------- 考試 ---------- */
-.field { margin-top: 16px; }
-.field-label { font-weight: 700; margin-bottom: 8px; }
-.pills { display: flex; flex-wrap: wrap; gap: 8px; }
-.pill { position: relative; }
-.pill input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
-.pill span {
-  display: flex; flex-direction: column; padding: 8px 14px; border: 2px solid var(--border); border-radius: 12px;
-  background: var(--surface); font-weight: 700; min-width: 72px; text-align: center;
-}
-.pill span small { font-weight: 500; color: var(--muted); font-size: 12px; }
-.pill input:checked + span { border-color: var(--accent); background: var(--good-bg); }
-@media (prefers-color-scheme: dark) { .pill input:checked + span { background: var(--surface-2); } }
-.pill input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 2px; }
+/* ---------- 勾選框、提示列 ---------- */
 .check { display: inline-flex; align-items: center; gap: 8px; margin-top: 16px; cursor: pointer; }
 .check input { width: 18px; height: 18px; accent-color: var(--accent); }
-.setup-actions { margin-top: 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.err { color: var(--nve); font-weight: 600; }
-.q-top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 14px; color: var(--muted); }
-.q-top b { color: var(--text); }
-.q-top .btn { margin-left: auto; padding: 4px 12px; }
-.progress { height: 6px; background: var(--surface-2); border-radius: 99px; margin: 10px 0 4px; overflow: hidden; }
-.progress div { height: 100%; width: 0; background: var(--accent); transition: width .25s; }
-.q-kind { display: inline-block; margin-top: 12px; font-size: 12px; font-weight: 700; color: var(--muted); background: var(--surface-2); padding: 2px 10px; border-radius: 99px; }
-.q-prompt { text-align: center; padding: 18px 4px 20px; font-size: 19px; line-height: 2.1; }
-.q-prompt .chip { font-size: 18px; padding: 3px 14px; }
-.q-flow { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; }
-.q-arrow { color: var(--muted); font-size: 22px; }
-.q-ask { font-weight: 700; }
-.q-ask em, .rv-q em { font-style: normal; color: var(--accent); }
-.opts { display: grid; gap: 10px; }
-.opts.n4 { grid-template-columns: repeat(4, 1fr); }
-.opts.n6 { grid-template-columns: repeat(6, 1fr); }
-.opt {
-  position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-  min-height: 72px; padding: 10px 6px; border: 2px solid var(--border); border-radius: 12px; background: var(--surface); cursor: pointer;
-}
-.opt:hover:not(:disabled) { border-color: var(--muted); }
-.opt:disabled { cursor: default; }
-.opt .k { position: absolute; top: 4px; left: 8px; font-size: 11px; color: var(--muted); font-weight: 700; }
-.opt .v { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
-.opt .s { font-size: 12px; color: var(--muted); }
-.opt .chip { font-size: 17px; padding: 4px 16px; }
-.opt.correct { border-color: var(--se); background: var(--good-bg); }
-.opt.wrong { border-color: var(--nve); background: var(--bad-bg); }
-.opt.dim { opacity: .5; }
-.q-fb { min-height: 28px; margin-top: 14px; }
-.fb-title { font-weight: 800; font-size: 17px; }
-.fb-ok { color: var(--se); }
-.fb-ng { color: var(--nve); }
-@media (prefers-color-scheme: dark) { .fb-ok { color: #51c26b; } .fb-ng { color: #ff7a7f; } }
 .x-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 6px; font-size: 14px; }
 .x-msg { color: var(--muted); }
-.q-actions { margin-top: 14px; display: flex; justify-content: flex-end; }
-.score-big { font-size: 40px; font-weight: 800; line-height: 1.2; }
-.r-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
-.rlist { padding-left: 22px; margin: 0; }
-.rlist li { padding: 10px 0; border-top: 1px solid var(--border); }
-.rlist .rv-q { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-weight: 600; }
-.rlist .rv-a { font-size: 13px; color: var(--muted); margin-top: 2px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 
 footer { margin-top: 28px; font-size: 12px; color: var(--muted); line-height: 1.8; }
 footer a { color: inherit; }
@@ -389,9 +333,6 @@ footer a { color: inherit; }
   .rg { grid-template-columns: 1fr; gap: 6px; }
   .c-vs { grid-template-columns: 1fr; }
   .c-swap { justify-self: center; }
-  .opts.n4 { grid-template-columns: repeat(2, 1fr); }
-  .opts.n6 { grid-template-columns: repeat(3, 1fr); }
-  .q-prompt { font-size: 17px; }
 }
 </style>
 </head>
@@ -405,18 +346,16 @@ footer a { color: inherit; }
     </svg>
     <div>
       <h1>寶可夢冠軍 屬性克制表</h1>
-      <div class="sub">Pokémon Champions · 18 種屬性相剋 · 快速查詢 · 配招分析 · 隊伍分析 · 出戰選角 · 傷害計算 · 隨機考試</div>
+      <div class="sub">Pokémon Champions · 18 種屬性相剋 · 配招分析 · 隊伍分析 · 出戰選角 · 傷害計算</div>
     </div>
   </header>
 
   <nav class="tabs" role="tablist">
     <button role="tab" data-tab="table" aria-selected="true">克制表</button>
-    <button role="tab" data-tab="lookup" aria-selected="false">快速查詢</button>
     <button role="tab" data-tab="build" aria-selected="false">配招分析</button>
     <button role="tab" data-tab="team" aria-selected="false">隊伍分析</button>
     <button role="tab" data-tab="bring" aria-selected="false">出戰選角</button>
     <button role="tab" data-tab="calc" aria-selected="false">傷害計算</button>
-    <button role="tab" data-tab="quiz" aria-selected="false">屬性考試</button>
   </nav>
 
   <!-- 克制表 -->
@@ -428,25 +367,9 @@ footer a { color: inherit; }
       <span><span class="mtag m1">&nbsp;</span>空白 = ×1</span>
       <span>直列＝攻擊方（招式屬性），橫排＝防守方（寶可夢屬性）</span>
     </div>
-    <div class="minfo" id="mInfo">滑過或點格子看說明；點<b>列標題</b>看該屬性的攻擊相性，點<b>欄標題</b>看防守相性。</div>
+    <div class="minfo" id="mInfo">滑過或點格子看說明；滑過或點<b>列標題</b>看該屬性的攻擊相性，<b>欄標題</b>看防守相性。</div>
     <div class="mwrap"><table class="matrix" id="matrix"></table></div>
     <p class="note">※ 只計算屬性相剋，不含特性（如飄浮、引火）、道具、天氣、場地等影響。雙屬性寶可夢的倍率＝兩個屬性的倍率相乘。</p>
-  </section>
-
-  <!-- 快速查詢 -->
-  <section id="p-lookup" role="tabpanel" hidden>
-    <div class="card">
-      <div class="look-top">
-        <div class="seg" id="lookMode">
-          <button data-mode="def" aria-pressed="true">🛡 防守：對手是什麼屬性？</button>
-          <button data-mode="atk" aria-pressed="false">⚔ 攻擊：我用什麼屬性招式？</button>
-        </div>
-        <button class="btn ghost" id="lookClear">清除</button>
-      </div>
-      <p class="muted small" id="lookHint"></p>
-      <div class="pick" id="pick"></div>
-      <div class="result" id="result"></div>
-    </div>
   </section>
 
   <!-- 配招分析 -->
@@ -569,53 +492,6 @@ footer a { color: inherit; }
     <div class="card b-card" id="cResult"></div>
   </section>
 
-  <!-- 屬性考試 -->
-  <section id="p-quiz" role="tabpanel" hidden>
-    <div class="card" id="qSetup">
-      <h2>屬性考試</h2>
-      <p class="muted small">隨機出題，練到一看到屬性就反射出倍率。</p>
-      <div class="field">
-        <div class="field-label">題型（可複選）</div>
-        <div class="pills" id="qKinds"></div>
-      </div>
-      <div class="field">
-        <div class="field-label">題數</div>
-        <div class="pills" id="qCounts"></div>
-      </div>
-      <label class="check"><input type="checkbox" id="qAuto" checked> 答對後自動跳下一題</label>
-      <div class="setup-actions">
-        <button class="btn primary" id="qStart">開始考試</button>
-        <span class="err" id="qErr" hidden>請至少選一種題型</span>
-        <span class="muted small">快捷鍵：數字鍵 1–6 作答、Enter 下一題</span>
-      </div>
-    </div>
-
-    <div class="card" id="qPlay" hidden>
-      <div class="q-top">
-        <span id="qCount"></span>
-        <span>答對 <b id="qScore">0</b></span>
-        <span>連對 <b id="qStreak">0</b></span>
-        <button class="btn" id="qQuit">結束</button>
-      </div>
-      <div class="progress"><div id="qBar"></div></div>
-      <span class="q-kind" id="qKind"></span>
-      <div class="q-prompt" id="qPrompt"></div>
-      <div class="opts" id="qOpts"></div>
-      <div class="q-fb" id="qFb" aria-live="polite"></div>
-      <div class="q-actions"><button class="btn primary" id="qNext" hidden>下一題 ⏎</button></div>
-    </div>
-
-    <div class="card" id="qResult" hidden>
-      <div class="score-big" id="rScore"></div>
-      <div class="muted" id="rMeta"></div>
-      <div class="r-actions">
-        <button class="btn primary" id="rAgain">再考一次</button>
-        <button class="btn" id="rWrong">只練錯題</button>
-        <button class="btn ghost" id="rSetup">回到設定</button>
-      </div>
-      <div id="rReview"></div>
-    </div>
-  </section>
 
   <footer>
     資料：Pokémon Champions 使用與主系列第六世代（《X／Y》）起相同的 18 屬性相剋倍率；
@@ -633,17 +509,14 @@ footer a { color: inherit; }
 <script src="mons-data.js"></script>
 <script src="js/engine/core.js"></script>
 <script src="js/engine/roles.js"></script>
-<script src="js/engine/quiz.js"></script>
 <script src="js/engine/damage.js"></script>
 <script src="js/ui/common.js"></script>
 <script src="js/ui/table.js"></script>
-<script src="js/ui/lookup.js"></script>
 <script src="js/ui/build.js"></script>
 <script src="js/ui/team.js"></script>
 <script src="js/ui/bring.js"></script>
 <script src="js/ui/calc.js"></script>
 <script src="js/ui/state.js"></script>
-<script src="js/ui/quiz.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>

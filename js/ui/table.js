@@ -32,21 +32,14 @@ function matrixInfo(el) {
   } else if (el.matches('th.rowh')) {
     const r = +el.dataset.row, p = attackProfile(IDS[r]);
     setHL(r, null);
-    $('#mInfo').innerHTML = `${chip(IDS[r])} 招式：效果絕佳 ${p[2].length} 種、效果不好 ${p[0.5].length} 種、沒有效果 ${p[0].length} 種（點擊看詳細）`;
+    $('#mInfo').innerHTML = `${chip(IDS[r])} 招式：效果絕佳 ${p[2].length} 種、效果不好 ${p[0.5].length} 種、沒有效果 ${p[0].length} 種`;
   } else if (el.matches('th.colh')) {
     const c = +el.dataset.col, p = defenseProfile([IDS[c]]);
     setHL(null, c);
-    $('#mInfo').innerHTML = `${chip(IDS[c])} 寶可夢：弱點 ${p[2].length} 種、抵抗 ${p[0.5].length} 種、免疫 ${p[0].length} 種（點擊看詳細）`;
+    $('#mInfo').innerHTML = `${chip(IDS[c])} 寶可夢：弱點 ${p[2].length} 種、抵抗 ${p[0.5].length} 種、免疫 ${p[0].length} 種`;
   }
 }
 tbl.addEventListener('mouseover', e => { const el = e.target.closest('td, th.rowh, th.colh'); if (el) matrixInfo(el); });
 tbl.addEventListener('mouseleave', clearHL);
-tbl.addEventListener('click', e => {
-  const el = e.target.closest('td, th.rowh, th.colh');
-  if (!el) return;
-  if (el.matches('td')) return matrixInfo(el);
-  if (el.matches('th.rowh')) { look.mode = 'atk'; look.atk = IDS[+el.dataset.row]; }
-  else { look.mode = 'def'; look.def = [IDS[+el.dataset.col]]; }
-  renderLookup();
-  showTab('lookup');
-});
+// 點擊（手機沒有滑過）：格子和標題都在下方顯示說明
+tbl.addEventListener('click', e => { const el = e.target.closest('td, th.rowh, th.colh'); if (el) matrixInfo(el); });

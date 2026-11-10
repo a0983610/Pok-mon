@@ -4,7 +4,6 @@ const [startTab, startQ] = location.hash.slice(1).split('?');
 let initQ = startQ;
 if (initQ == null) { try { initQ = localStorage.getItem(STATE_KEY) || ''; } catch (e) { initQ = ''; } }
 loadState(initQ);
-renderLookup();
 renderBuild();
 renderTeam();
 showTab(TABS.includes(startTab) ? startTab : 'table');

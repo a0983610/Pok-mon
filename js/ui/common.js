@@ -22,7 +22,7 @@ const MCLS = { 4: 'm4', 2: 'm2', 1: 'm1', 0.5: 'mh', 0.25: 'mq', 0.125: 'mq', 0:
 const mtag = m => `<span class="mtag ${MCLS[m]}">${fmt(m)}</span>`;
 
 // ---------- 分頁 ----------
-const TABS = ['table', 'lookup', 'build', 'team', 'bring', 'calc', 'quiz'];
+const TABS = ['table', 'build', 'team', 'bring', 'calc'];
 let curTab = 'table';
 function showTab(name) {
   curTab = name;
