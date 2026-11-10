@@ -157,12 +157,13 @@ function speedPair(x, y, f) {
   const spd = [x, y].map(s => speedOf(s, { weather, terrain: f.terrain }));
   return { spd, first: spd[0].v === spd[1].v ? -1 : (spd[0].v > spd[1].v) !== !!f.tr ? 0 : 1 };
 }
-// 攻擊方 a：{ key, inv 投資 [點數, 性格], st { atk, spa } 能力變化, item, ab 特性 }；防守方 d：{ key, hp／inv 投資 [點數, 性格], st { def, spd }, item, ab }
+// 攻擊方 a：{ key, inv 投資 [點數, 性格], st { atk, spa } 能力變化, item, ab 特性 }；防守方 d：{ key, hp／inv 投資 [點數, 性格], st { def, spd }, item, ab, cur 目前剩下的 HP（沒給＝全滿） }
 // （投資也可以改給 sp／nat，見 invAt；a 另外可帶 set 給 dmgRows 用登錄的招式）；
 // o：{ fmt 's'／'d', weather, crit, terrain, hh 幫助, walls 防守方的牆, burn 攻擊方灼傷 }（必定急所的招式不管 crit 都算急所）。不算的招式回傳 { skip 原因 }；
 // 沒有效果的回傳 eff 0（沒有 hp 以後的欄位；immuneBy＝讓招式無效的防守方特性，blockedBy＝其他原因的說明，如精神場地擋先制）；
-// 其餘回傳 hp 防守方 HP、min／max 用一次的傷害（多段攻擊是各下加總）、ko[n] 連用 n＋1 次被打倒的機率（n＝0～3）、stab 本系倍率（4096 制）、
-// endured 撐住了會倒下的第一下的氣勢披帶或結實（道具／特性 key）、berry 抗性樹果有減半、notes 有作用的特性與招式效果
+// 其餘回傳 hp 防守方最大 HP、min／max 用一次的傷害（多段攻擊是各下加總）、ko[n] 連用 n＋1 次打掉剩下 HP 的機率（n＝0～3）、stab 本系倍率（4096 制）、
+// endured 撐住了會倒下的第一下的氣勢披帶或結實（道具／特性 key）、berry 抗性樹果有減半、notes 有作用的特性與招式效果。
+// d.cur 比最大 HP 少時，氣勢披帶、結實、多重鱗片（都要 HP 全滿）沒有作用
 function damageCalc(a, d, mk, o) {
   const [, mtype, cat, power0] = MOVES[mk];
   if (NO_CALC[mk]) return { skip: NO_CALC[mk] };
@@ -205,6 +206,8 @@ function damageCalc(a, d, mk, o) {
   const [asp, anat] = invAt(a, ai, a.inv), [dsp, dnat] = invAt(d, di, d.inv);
   const ait = DMG_ITEMS[a.item] || {}, dit = DMG_ITEMS[d.item] || {};
   r.hp = statOf(D.bs[0], invAt(d, 0, d.hp)[0], 0);
+  // 剩下的 HP need：沒給 cur 或不少於最大 HP 都算全滿
+  const full = !(d.cur < r.hp), need = full ? r.hp : Math.max(1, d.cur);
   // 能力變化：急所時不計攻擊方的下降、防守方的上升；對方是天然就不計
   let ast = ai === 1 ? a.st.atk : ai === 3 ? a.st.spa : 0;
   if (CHARGE_SPA.has(mk) && ai === 3) {
@@ -285,7 +288,7 @@ function damageCalc(a, d, mk, o) {
     const m = [];
     if (wall) m.push(wall);
     if (aab === 'sniper' && r.crit) m.push(use(aab) && 6144);
-    if (dab === 'multiscale' && first) m.push(use(dab) && 2048);
+    if (dab === 'multiscale' && full && first) m.push(use(dab) && 2048);
     if ((dab === 'fluffy' || dab === 'aura-guard') && contact) m.push(use(dab) && 2048);
     else if (dab === 'punk-rock' && FLAG.sound.has(mk)) m.push(use(dab) && 2048);
     if (['solid-rock', 'filter'].includes(dab) && r.eff > 1) m.push(use(dab) && 3072);
@@ -314,21 +317,21 @@ function damageCalc(a, d, mk, o) {
   };
   const pw = h => mk === 'triple-axel' ? 20 * (h + 1) : power;
   const first = Array.from({ length: hits }, (_, h) => rollsOf(pw(h), !h, pb && h === 1));
-  const later = r.berry || dab === 'multiscale' || (knock && !keep) ? Array.from({ length: hits }, (_, h) => rollsOf(pw(h), false, pb && h === 1)) : first;
+  const later = r.berry || (dab === 'multiscale' && full) || (knock && !keep) ? Array.from({ length: hits }, (_, h) => rollsOf(pw(h), false, pb && h === 1)) : first;
   r.min = first.reduce((s, x) => s + x[0], 0);
   r.max = first.reduce((s, x) => s + x[15], 0);
   // 氣勢披帶、結實：HP 全滿時整場第一下最多打到剩 1 HP
-  const endure = dit.sash ? d.item : dab === 'sturdy' ? dab : '';
+  const endure = !full ? '' : dit.sash ? d.item : dab === 'sturdy' ? dab : '';
   r.endured = endure && hits === 1 && r.max >= r.hp ? endure : '';
-  // 累計傷害的機率分布（超過 HP 的都併在 HP）
+  // 累計傷害的機率分布（超過剩下 HP 的都併在剩下 HP）
   let dist = new Map([[0, 1]]);
   r.ko = [0, 1, 2, 3].map(n => {
     (n ? later : first).forEach((rs, h) => {
       const xs = endure && !n && !h ? rs.map(x => Math.min(x, r.hp - 1)) : rs, nd = new Map();
-      dist.forEach((p, v) => xs.forEach(x => { const s = Math.min(r.hp, v + x); nd.set(s, (nd.get(s) || 0) + p / 16); }));
+      dist.forEach((p, v) => xs.forEach(x => { const s = Math.min(need, v + x); nd.set(s, (nd.get(s) || 0) + p / 16); }));
       dist = nd;
     });
-    return dist.get(r.hp) || 0;
+    return dist.get(need) || 0;
   });
   r.notes = [...notes].filter(Boolean);
   return r;
@@ -352,19 +355,35 @@ function dmgRows(a, d, o, extra) {
   rows.filter(x => x.r.skip).forEach(x => (why[x.r.skip] ||= []).push(MOVES[x.k][0]));
   return { use, ok, why, kos: ok.filter(x => x.r.ko?.[0] > 1e-9), top: ok.find(x => x.r.ko) };
 }
-// 對位的一方（出招表、之後的對戰中共用）：寶可夢 key、fmt；set＝我方登錄的配招（對手不傳）。
+// 對位的一方（出招表、對戰中共用）：寶可夢 key、fmt；set＝我方登錄的配招（對手不傳）。
 // 沒登錄的欄位照傷害計算的預設（CALC0）：攻擊／特攻 32＋性格、速度 32＋性格、HP／防禦／特防 0、不帶道具、特性用 defAbOf
 function battler(key, fmt, set) {
   const sp = set && hasSpread(set) ? { sp: set.sp, nat: set.nat } : {};
   return { key, set, ab: set?.ab || defAbOf(key, fmt), item: set?.item || '', ...sp, atkInv: [32, 11], hp: [0, 10], defInv: [0, 10], speInv: [32, 11] };
 }
-// 一對一對位：x、y 是 battler，f：{ fmt, weather, terrain, tr }（沒給的當沒有）；能力變化、灼傷、幫助、牆、開場特性都不算。
+// battler b 的最大 HP
+const hpOf = b => statOf(MON[b.key].bs[0], invAt(b, 0, b.hp)[0], 0);
+// 一對一對位：x、y 是 battler，對戰中另外帶 st { atk, def, spa, spd, spe } 能力變化、cur 目前剩下的 HP、tw 順風（沒給的當沒有、全滿）；
+// f：{ fmt, weather, terrain, tr }（沒給的當沒有）；灼傷、麻痺、幫助、牆、開場特性都不算。
 // 道具兩個方向都帶著（damageCalc 只讀這個方向用得到的效果，如攻擊方不看樹果）。
 // 回傳 xy＝x 打 y、yx＝y 打 x（dmgRows 的結果）、spd／first（speedPair：first 0＝x 先動、1＝y 先動、-1＝同速）
 function duel(x, y, f) {
   const o = { fmt: f.fmt, weather: f.weather || '', crit: false, terrain: f.terrain || '', hh: false, walls: [], burn: false };
-  const atk = b => ({ key: b.key, inv: b.atkInv, sp: b.sp, nat: b.nat, st: { atk: 0, spa: 0 }, item: b.item, ab: b.ab, set: b.set });
-  const def = b => ({ key: b.key, hp: b.hp, inv: b.defInv, sp: b.sp, nat: b.nat, st: { def: 0, spd: 0 }, item: b.item, ab: b.ab });
-  const spe = b => ({ key: b.key, inv: b.speInv, sp: b.sp, nat: b.nat, st: 0, item: b.item, ab: b.ab });
+  const st = (b, k) => b.st?.[k] || 0;
+  const atk = b => ({ key: b.key, inv: b.atkInv, sp: b.sp, nat: b.nat, st: { atk: st(b, 'atk'), spa: st(b, 'spa') }, item: b.item, ab: b.ab, set: b.set });
+  const def = b => ({ key: b.key, hp: b.hp, inv: b.defInv, sp: b.sp, nat: b.nat, st: { def: st(b, 'def'), spd: st(b, 'spd') }, item: b.item, ab: b.ab, cur: b.cur });
+  const spe = b => ({ key: b.key, inv: b.speInv, sp: b.sp, nat: b.nat, st: st(b, 'spe'), item: b.item, ab: b.ab, tw: !!b.tw });
   return { xy: dmgRows(atk(x), def(y), o), yx: dmgRows(atk(y), def(x), o), ...speedPair(spe(x), spe(y), { weather: o.weather, terrain: o.terrain, tr: !!f.tr }) };
+}
+// 對戰中對手 y 的道具還不知道時（y.item 空），牠可能帶的道具 items [[道具 key, 使用率]] 裡，帶了會讓 duel(x, y, f) 的結果 base 翻盤的：
+// first＝變成 y 先動、ko＝變成 y 一擊打得倒 x（打得倒的第一招）、hold＝x 原本一擊打得倒 y、帶了就打不倒（原本打得倒的第一招）。
+// 只看影響傷害或速度的道具（DMG_ITEMS）；回傳 [{ k, p, first, ko, hold, d 帶了的 duel }]
+function itemFlips(x, y, f, items, base) {
+  return items.filter(([k]) => DMG_ITEMS[k]).flatMap(([k, p]) => {
+    const d = duel(x, { ...y, item: k }, f);
+    const first = base.first !== 1 && d.first === 1;
+    const ko = !base.yx.kos.length && d.yx.kos[0];
+    const hold = !d.xy.kos.length && base.xy.kos[0];
+    return first || ko || hold ? [{ k, p, first, ko, hold, d }] : [];
+  });
 }

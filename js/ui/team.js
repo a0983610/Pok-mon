@@ -442,10 +442,10 @@ function pickTeamMon(key) {
   renderTeam();
 }
 $('#monsDate').textContent = MONS_DATE + ' 擷取';
-// 單打／雙打：隊伍分析的排名依據、出戰選角的帶幾隻和傷害計算的常用招式、範圍招式共用
+// 單打／雙打：隊伍分析的排名依據、出戰選角的帶幾隻、對戰中場上幾隻和傷害計算的常用招式、範圍招式共用
 function setFmt(e) {
   const b = e.target.closest('button[data-fmt]');
-  if (b) { team.fmt = b.dataset.fmt; renderTeam(); renderBring(); renderCalc(); }
+  if (b) { team.fmt = b.dataset.fmt; renderTeam(); renderBring(); renderBattle(); renderCalc(); }
 }
 $('#tFmt').addEventListener('click', setFmt);
 $('#tSlots').addEventListener('click', e => {

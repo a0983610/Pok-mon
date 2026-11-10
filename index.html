@@ -315,6 +315,45 @@ table.matrix { border-collapse: separate; border-spacing: 0; margin: 0 auto; }
 .dmg-bar span { background: var(--accent); }
 .dmg-bar .rng { opacity: .35; }
 
+/* ---------- 對戰中 ---------- */
+.bt-wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.bt-res { position: sticky; top: 8px; max-height: calc(100vh - 16px); overflow: auto; }
+.bt-side .b-label { margin-top: 10px; }
+.bt-pos { padding: 8px 10px; margin-bottom: 8px; border: 2px solid var(--border); border-radius: 12px; }
+.bt-pos[aria-current] { cursor: pointer; }
+.bt-pos[aria-current="true"] { border-color: var(--accent); }
+.bt-pos.empty { display: flex; align-items: center; gap: 8px; min-height: 48px; color: var(--muted); font-size: 13px; }
+.bt-h { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font-size: 16px; }
+.bt-off { margin-left: auto; }
+.bt-hp { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 14px; }
+.bt-hp .c-l { min-width: 0; }
+.bt-hp input[type="range"] { flex: 1; min-width: 60px; margin: 0; accent-color: var(--accent); }
+.bt-hp .c-num { width: 5.6em; flex: none; }
+.bt-sts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; font-size: 13px; }
+.bt-st { display: inline-flex; align-items: center; gap: 3px; }
+.bt-st .mini { width: 30px; height: 28px; padding: 0; }
+.bt-st b { min-width: 1.8em; text-align: center; font-variant-numeric: tabular-nums; }
+.bt-st .up { color: var(--se); }
+.bt-st .dn { color: var(--nve); }
+@media (prefers-color-scheme: dark) { .bt-st .up { color: #51c26b; } .bt-st .dn { color: #ff7a7f; } }
+.bt-info { margin-top: 6px; }
+.bt-more { margin-top: 6px; }
+.bt-more summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+.bt-bench { display: flex; flex-wrap: wrap; gap: 6px; }
+.bt-bench .mini { padding: 4px 12px; }
+.bt-pair { padding: 10px 0; border-top: 1px solid var(--border); }
+.bt-ph { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; font-size: 15px; }
+.bt-ord { margin-left: auto; font-weight: 800; }
+.bt-sub { margin-top: 8px; font-size: 13px; font-weight: 700; color: var(--muted); }
+.bt-mv { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; padding: 4px 0; border-top: 1px dashed var(--border); font-size: 14px; }
+.bt-mv .chip { font-size: 11px; padding: 0 6px; }
+.bt-mv .mtag { font-size: 12px; min-width: 28px; padding: 0 5px; }
+.bt-pct { font-variant-numeric: tabular-nums; }
+@media (max-width: 900px) {
+  .bt-wrap { grid-template-columns: minmax(0, 1fr); }
+  .bt-res { position: static; max-height: none; }
+}
+
 /* ---------- 勾選框、提示列 ---------- */
 .check { display: inline-flex; align-items: center; gap: 8px; margin-top: 16px; cursor: pointer; }
 .check input { width: 18px; height: 18px; accent-color: var(--accent); }
@@ -333,6 +372,8 @@ footer a { color: inherit; }
   .rg { grid-template-columns: 1fr; gap: 6px; }
   .c-vs { grid-template-columns: 1fr; }
   .c-swap { justify-self: center; }
+  .bt-hp { flex-wrap: wrap; row-gap: 4px; }
+  .bt-hp input[type="range"] { order: 9; flex-basis: 100%; }
 }
 </style>
 </head>
@@ -346,7 +387,7 @@ footer a { color: inherit; }
     </svg>
     <div>
       <h1>寶可夢冠軍 屬性克制表</h1>
-      <div class="sub">Pokémon Champions · 18 種屬性相剋 · 配招分析 · 隊伍分析 · 出戰選角 · 傷害計算</div>
+      <div class="sub">Pokémon Champions · 18 種屬性相剋 · 配招分析 · 隊伍分析 · 出戰選角 · 對戰中 · 傷害計算</div>
     </div>
   </header>
 
@@ -355,6 +396,7 @@ footer a { color: inherit; }
     <button role="tab" data-tab="build" aria-selected="false">配招分析</button>
     <button role="tab" data-tab="team" aria-selected="false">隊伍分析</button>
     <button role="tab" data-tab="bring" aria-selected="false">出戰選角</button>
+    <button role="tab" data-tab="battle" aria-selected="false">對戰中</button>
     <button role="tab" data-tab="calc" aria-selected="false">傷害計算</button>
   </nav>
 
@@ -437,6 +479,32 @@ footer a { color: inherit; }
     <div class="card b-card" id="pInfo"></div>
   </section>
 
+  <!-- 對戰中 -->
+  <section id="p-battle" role="tabpanel" hidden>
+    <div class="bt-wrap">
+      <div class="card">
+        <div class="look-top">
+          <p class="muted small b-intro">對戰時把雙方場上的寶可夢點上來，調剩下的 HP、能力變化與場地，旁邊（窄螢幕在下方）即時列出每一招的傷害、能不能打倒、誰先動。我方沿用「隊伍分析」（含登錄的配招），對手沿用「出戰選角」的 6 隻。</p>
+          <div class="top-actions"><button class="btn ghost" data-copy>複製連結</button><button class="btn ghost" id="btClear">清除</button></div>
+        </div>
+        <div class="bt-side" id="bt-me"></div>
+        <div class="bt-side" id="bt-opp"></div>
+        <div class="t-row c-field">
+          <div class="seg" id="btW" aria-label="天氣"></div>
+          <div class="seg" id="btT" aria-label="場地"></div>
+          <label class="check"><input type="checkbox" id="btTR"> 戲法空間</label>
+          <label class="check"><input type="checkbox" data-btw="me"> 我方順風</label>
+          <label class="check"><input type="checkbox" data-btw="opp"> 對手順風</label>
+          <div class="seg" id="btFmt" aria-label="對戰形式">
+            <button data-fmt="s" aria-pressed="true">單打</button>
+            <button data-fmt="d" aria-pressed="false">雙打</button>
+          </div>
+        </div>
+      </div>
+      <div class="card bt-res" id="btResult"></div>
+    </div>
+  </section>
+
   <!-- 傷害計算 -->
   <section id="p-calc" role="tabpanel" hidden>
     <div class="card">
@@ -516,6 +584,7 @@ footer a { color: inherit; }
 <script src="js/ui/team.js"></script>
 <script src="js/ui/bring.js"></script>
 <script src="js/ui/calc.js"></script>
+<script src="js/ui/battle.js"></script>
 <script src="js/ui/state.js"></script>
 <script src="js/main.js"></script>
 </body>
