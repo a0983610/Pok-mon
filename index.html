@@ -220,7 +220,6 @@ table.matrix { border-collapse: separate; border-spacing: 0; margin: 0 auto; }
 @media (prefers-color-scheme: dark) { .matrix.team td.warn { color: #ff7a7f; } }
 .slot-name { font-size: 13px; font-weight: 700; line-height: 1.2; text-align: center; }
 .t-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; }
-.t-row .sel { flex: 1 1 220px; }
 .meta { color: var(--muted); font-size: 13px; }
 .threat { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; padding: 8px 0; border-top: 1px solid var(--border); font-size: 14px; }
 .threat .lv { font-weight: 800; min-width: 3.2em; }
@@ -279,8 +278,13 @@ table.matrix { border-collapse: separate; border-spacing: 0; margin: 0 auto; }
 /* ---------- 傷害計算 ---------- */
 .c-vs { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px 16px; align-items: start; }
 .c-vs .b-label { margin-top: 0; }
+.c-side { min-width: 0; }
 .c-swap { align-self: center; }
-.c-name { width: 100%; }
+.c-name { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-height: 28px; font-size: 16px; font-weight: 700; }
+.c-pick { margin-top: 8px; }
+.c-sts { flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.c-st { display: inline-flex; align-items: center; gap: 4px; }
+.c-st label { margin-right: 2px; }
 .c-quick { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; }
 .c-quick:empty { display: none; }
 .mini[aria-pressed="true"] { border-color: var(--accent); background: var(--good-bg); }
@@ -460,13 +464,11 @@ footer a { color: inherit; }
   <section id="p-team" role="tabpanel" hidden>
     <div class="card">
       <div class="look-top">
-        <p class="muted small b-intro">先點隊伍格子，再輸入寶可夢名字，或選屬性（1～2 個）從下方列出的寶可夢挑一隻；放好會自動跳到下一個空格。只選屬性不挑寶可夢也能看屬性分析，但看不到角色、常用招式與特性。</p>
+        <p class="muted small b-intro">先點隊伍格子，再選屬性（1～2 個），從下方列出的寶可夢挑一隻；放好會自動跳到下一個空格。只選屬性不挑寶可夢也能看屬性分析，但看不到角色、常用招式與特性。</p>
         <div class="top-actions"><button class="btn ghost" data-copy>複製連結</button><button class="btn ghost" id="tClear">清除</button></div>
       </div>
       <div class="slots" id="tSlots"></div>
       <div class="t-row">
-        <input class="sel" id="tName" list="tMons" placeholder="輸入寶可夢名字，例如 烈咬陸鯊" autocomplete="off" aria-label="用名字選寶可夢">
-        <datalist id="tMons"></datalist>
         <div class="seg" id="tFmt" aria-label="排名依據">
           <button data-fmt="s" aria-pressed="true">單打排名</button>
           <button data-fmt="d" aria-pressed="false">雙打排名</button>
@@ -487,18 +489,18 @@ footer a { color: inherit; }
   <section id="p-bring" role="tabpanel" hidden>
     <div class="card">
       <div class="look-top">
-        <p class="muted small b-intro">開戰前看到對手的 6 隻時輸入牠們的名字，建議我方帶哪幾隻、誰先發。我方隊伍沿用「隊伍分析」。</p>
+        <p class="muted small b-intro">開戰前看到對手的 6 隻時把牠們選進來，建議我方帶哪幾隻、誰先發。我方隊伍沿用「隊伍分析」。</p>
         <div class="top-actions"><button class="btn ghost" data-copy>複製連結</button><button class="btn ghost" id="pClear">清除對手</button></div>
       </div>
-      <div class="b-label">對手的 6 隻<span class="muted small">點下方清單或打字搜尋，依序填入空格；點格子可移除</span></div>
+      <div class="b-label">對手的 6 隻<span class="muted small">點下方清單或選屬性篩選，依序填入空格；點格子可移除</span></div>
       <div class="slots" id="pOpp"></div>
       <div class="t-row">
-        <input class="sel" id="pName" placeholder="打一兩個字或英文篩選，Enter 加入第一個" autocomplete="off" aria-label="搜尋對手寶可夢">
         <div class="seg" id="pFmt" aria-label="對戰形式">
           <button data-fmt="s" aria-pressed="true">單打（帶 3 隻）</button>
           <button data-fmt="d" aria-pressed="false">雙打（帶 4 隻）</button>
         </div>
       </div>
+      <div class="pick sm" id="pPick" aria-label="用屬性篩選對手寶可夢"></div>
       <div id="pList"></div>
     </div>
     <div class="card b-card" id="pResult"></div>
@@ -514,10 +516,12 @@ footer a { color: inherit; }
       <div class="c-vs">
         <div class="c-side">
           <div class="b-label">⚔ 攻擊方</div>
-          <input class="sel c-name" id="cAtk" list="tMons" placeholder="輸入寶可夢名字" autocomplete="off" aria-label="攻擊方寶可夢">
+          <div class="c-name" id="cAtk"></div>
           <div class="c-quick" id="cAtkQ"></div>
+          <div class="pick sm c-pick" id="cAtkP" data-side="atk" aria-label="用屬性篩選攻擊方寶可夢"></div>
+          <div id="cAtkL"></div>
           <div class="c-f"><span class="c-l">投資</span><div class="seg" id="cAi"></div></div>
-          <div class="c-f"><span class="c-l">能力變化</span><label>攻擊 <select class="sel" id="cSt0"></select></label><label>特攻 <select class="sel" id="cSt1"></select></label></div>
+          <div class="c-f"><span class="c-l">能力變化</span><div class="c-sts"><span class="c-st"><label for="cSt0">攻擊</label><select class="sel" id="cSt0"></select></span><span class="c-st"><label for="cSt1">特攻</label><select class="sel" id="cSt1"></select></span></div></div>
           <div class="c-f"><span class="c-l">特性</span><select class="sel" id="cAAb" aria-label="攻擊方特性"></select></div>
           <div class="c-f"><span class="c-l">道具</span><select class="sel" id="cAItem" aria-label="攻擊方道具"></select></div>
           <div class="c-f"><span class="c-l">加算招式</span><select class="sel" id="cExtra" aria-label="常用招式以外再多算一招"></select></div>
@@ -525,11 +529,13 @@ footer a { color: inherit; }
         <button class="btn c-swap" id="cSwap" title="攻擊方和防守方對調">⇄ 對調</button>
         <div class="c-side">
           <div class="b-label">🛡 防守方</div>
-          <input class="sel c-name" id="cDef" list="tMons" placeholder="輸入寶可夢名字" autocomplete="off" aria-label="防守方寶可夢">
+          <div class="c-name" id="cDef"></div>
           <div class="c-quick" id="cDefQ"></div>
+          <div class="pick sm c-pick" id="cDefP" data-side="def" aria-label="用屬性篩選防守方寶可夢"></div>
+          <div id="cDefL"></div>
           <div class="c-f"><span class="c-l">HP 投資</span><div class="seg" id="cHi"></div></div>
           <div class="c-f"><span class="c-l">防禦／特防投資</span><div class="seg" id="cDi"></div></div>
-          <div class="c-f"><span class="c-l">能力變化</span><label>防禦 <select class="sel" id="cSt2"></select></label><label>特防 <select class="sel" id="cSt3"></select></label></div>
+          <div class="c-f"><span class="c-l">能力變化</span><div class="c-sts"><span class="c-st"><label for="cSt2">防禦</label><select class="sel" id="cSt2"></select></span><span class="c-st"><label for="cSt3">特防</label><select class="sel" id="cSt3"></select></span></div></div>
           <div class="c-f"><span class="c-l">特性</span><select class="sel" id="cDAb" aria-label="防守方特性"></select></div>
           <div class="c-f"><span class="c-l">道具</span><select class="sel" id="cDItem" aria-label="防守方道具"></select></div>
         </div>
@@ -2193,7 +2199,7 @@ function roleOf(key, fmt) {
   return { use, mega, phys: phys / 100, spec: spec / 100, sup: sup / 100, main: sup >= Math.max(phys, spec) ? 'sup' : phys >= spec ? 'phys' : 'spec', tags };
 }
 // 防守屬性 defs 的隊員實際打得出的攻擊屬性 [{ ty 屬性, zh 招式中文名（本系時是 null） }]：
-// 用名字選、fmt 有統計的看常用攻擊招式（使用率 ROLE_PCT% 以上；輔助用的攻擊招式、固定傷害和反擊類不吃相剋，都不算），
+// 挑了寶可夢、fmt 有統計的看常用攻擊招式（使用率 ROLE_PCT% 以上；輔助用的攻擊招式、固定傷害和反擊類不吃相剋，都不算），
 // 只選屬性或沒有統計的看本系
 const FIXED_DMG = new Set(['counter', 'mirror-coat', 'metal-burst', 'comeuppance', 'endeavor', 'super-fang', 'ruination',
   'natures-madness', 'seismic-toss', 'night-shade', 'final-gambit', 'psywave']);
@@ -2229,7 +2235,7 @@ const lackNeeds = (roles, fmt) => roles.length ? NEEDS[fmt].filter(n => !roles.s
 //      units 是其他隊員，格式同 answerOf，候選本身能擋或能剋就算，同熱門威脅檢查）
 //   3. 常見隊友：候選和隊上成員出現在對方的 OP.GG 隊友名單裡（mates，隊上成員的 key）
 //   4. recommendMember 的屬性評分，最後看排名（沒排名的排最後）
-// 搭配、角色、隊友只在隊上已有用名字選的隊員、候選有排名時比（候選在 fmt 沒排名時，OP.GG 仍可能有零星統計，樣本太少不採用）。
+// 搭配、角色、隊友只在隊上已有挑了寶可夢的隊員、候選有排名時比（候選在 fmt 沒排名時，OP.GG 仍可能有零星統計，樣本太少不採用）。
 // 超級進化和原型屬性一樣、比較結果也一樣時只留原型。fix 每項是 { w 解決的提醒, by 候選撐起它的特性／招式（traitScan 的 has 項目）}
 function recommendMon(others, base, fmt, onTeam = [], units = []) {
   const rk = m => m.rank[fmt] || Infinity, fams = onTeam.map(k => family(MON[k]));
@@ -2909,7 +2915,7 @@ function teamRecHTML(gaps, warnNow) {
     + `</div><h3>第 ${team.cur + 1} 隻推薦寶可夢</h3>`
     + `<p class="muted small b-intro">從名單${base.length ? `裡有${T[base[0]].zh}屬性的` : ''}寶可夢挑，依序比：①搭配──能解決幾個「隊伍特性與場地招式」的提醒`
     + '（隊上有戲法空間時，慢的攻擊手也算），扣掉會新增的；②能補上幾個「隊伍角色」缺的角色，加上能當幾隻「沒解」熱門威脅的對策；'
-    + `③是不是 OP.GG 上隊上成員的常見隊友（搭配、角色、隊友要隊上已有用名字選的隊員）；④加入後隊伍的 ⚠ 數、缺口數；⑤${FMT_ZH[team.fmt]}排名。點一下直接放進這格。</p><div class="b-rec">`
+    + `③是不是 OP.GG 上隊上成員的常見隊友（搭配、角色、隊友要隊上已有挑了寶可夢的隊員）；④加入後隊伍的 ⚠ 數、缺口數；⑤${FMT_ZH[team.fmt]}排名。點一下直接放進這格。</p><div class="b-rec">`
     + recommendMon(others, base, team.fmt, team.mons.filter(Boolean), units).slice(0, 5).map((r, i) => `<button data-mon="${r.mon.key}"><span class="rank">${i + 1}</span>`
       + `${recInfo(r)}${delta(r)}<span class="meta">攻擊 ${r.mon.bs[1]}・特攻 ${r.mon.bs[3]}・${rankText(r.mon)}</span></button>`).join('')
     + '</div>';
@@ -2949,16 +2955,16 @@ function summaryHTML(members) {
     [warn.length && `要注意 ${warn.map(r => T[r.atk].zh).join('、')}`, gaps.length && `缺口 ${gaps.map(id => T[id].zh).join('、')}`].filter(Boolean).join('；'),
     recs.filter(r => r.warn < warn.length || r.gaps.length < gaps.length).sort((x, y) => x.warn - y.warn || x.gaps.length - y.gaps.length)
       .map(r => [r, `缺口 ${gaps.length}→${r.gaps.length}`])));
-  return `<div class="res-head">隊伍總評<span class="muted small">（${fz}；${members.length} 隻，其中 ${named.length} 隻用名字選）</span></div>`
+  return `<div class="res-head">隊伍總評<span class="muted small">（${fz}；${members.length} 隻，其中 ${named.length} 隻挑了寶可夢）</span></div>`
     + (out.length ? out.join('') : '<p class="b-sum">✔ 目前沒有明顯問題。</p>')
-    + (slot < 0 ? '<p class="muted small b-intro">6 隻都選了；要換人的話，點格子後輸入其他寶可夢的名字就能換掉。</p>'
+    + (slot < 0 ? '<p class="muted small b-intro">6 隻都選了；要換人的話，點格子後重新選屬性、挑其他寶可夢就能換掉。</p>'
       : `<h3>下一隻（第 ${slot + 1} 隻）建議</h3><div class="b-rec">`
         + recs.slice(0, 3).map((r, i) => `<button data-mon="${r.mon.key}"><span class="rank">${i + 1}</span>${recInfo(r)}<span class="meta">${rankText(r.mon)}</span></button>`).join('')
         + '</div>')
     + `<p class="note">※ 問題整理自下面各卡片（隊伍角色、隊伍特性與場地招式、弱點總表、熱門威脅檢查）；「可以補」和「下一隻建議」`
     + `都是放進第 ${slot + 1 || '—'} 隻（第一個空格）時的推薦，排序方式同弱點總表下的「推薦寶可夢」，點一下直接放進去。</p>`;
 }
-// 隊伍角色：用名字選的隊員依常用招式判斷角色、列出常用招式與效果，並對照 NEEDS 標出隊伍還缺什麼
+// 隊伍角色：挑了寶可夢的隊員依常用招式判斷角色、列出常用招式與效果，並對照 NEEDS 標出隊伍還缺什麼
 const MAIN_ZH = { phys: '物攻', spec: '特攻', sup: '輔助' };
 const CAT_ZH = { physical: '物理', special: '特殊', status: '變化' };
 const roleTags = r => `<span class="role ${r.main}">${MAIN_ZH[r.main]}</span>` + r.tags.map(t => `<span class="rtag">${ROLE[t.id].zh}</span>`).join('');
@@ -2985,7 +2991,7 @@ function roleHTML(members) {
       ? `<p class="b-sum">物攻 <b>${cnt('phys')}</b> 隻・特攻 <b>${cnt('spec')}</b> 隻・輔助 <b>${cnt('sup')}</b> 隻</p>`
         + `<div class="x-line"><span class="x-msg">${fz}隊伍該有：</span>${NEEDS[team.fmt].map(n => lack.includes(n)
           ? `<span class="need no">✘ ${n.zh}</span>` : `<span class="need ok">✔ ${n.zh}（${who(n)}）</span>`).join('')}</div>`
-      : '<p class="muted small b-intro">用名字選寶可夢後，才會判斷角色、標出隊伍還缺什麼。</p>')
+      : '<p class="muted small b-intro">挑了寶可夢後，才會判斷角色、標出隊伍還缺什麼。</p>')
     + rows.map(({ i, key, r }) => {
       if (!key) return `<div class="mrole"><div class="mrole-h"><b>${i + 1}</b>${chips(team.slots[i])}<span class="meta">只選屬性，沒有招式資料</span></div></div>`;
       const head = `<div class="mrole"><div class="mrole-h"><b>${i + 1} ${MON[key].zh}</b>`;
@@ -3010,7 +3016,7 @@ function roleHTML(members) {
     + `<br>「隊伍該有」＝物攻、特攻輸出各一，加上${fz}排名前 30 名裡至少兩成有的功能。`
     + '<br>道具、常見隊友也是 OP.GG 的統計（道具只收使用率 5% 以上；隊友是 OP.GG「隊友」名單的前幾名，標 ✔ 的已在隊上）。</p></details>';
 }
-// 隊伍特性與場地招式：用名字選的隊員依常用特性、招式（使用率 ROLE_PCT% 以上，同功能標籤）分類，再做搭配檢查；只看我方。
+// 隊伍特性與場地招式：挑了寶可夢的隊員依常用特性、招式（使用率 ROLE_PCT% 以上，同功能標籤）分類，再做搭配檢查；只看我方。
 // 清單可含目前資料還沒有的特性／招式（如薄霧製造者、沙暴），之後更新資料出現了就會算進去
 const NO_WEATHER = ['cloud-nine', 'air-lock'];
 // abils＝特性、moves＝招式（資料裡特性和招式的 key 不重複）
@@ -3099,8 +3105,8 @@ function traitHTML(members) {
   const label = hs => [...new Set(hs.map(h => h.j))].map(j => `${who(j)}（${hs.filter(h => h.j === j).map(abText).join('、')}）`);
   const names = list => list.filter(k => ABILS[k] || MOVES[k]).map(k => zhOf(k) + (fieldTag(k) ? `（${fieldTag(k)}）` : '')).join('、');
   const head = `<div class="res-head">隊伍特性與場地招式<span class="muted small">（依${fz}常用特性與招式；${mine.length} 隻有資料）</span></div>`;
-  if (!mine.length) return head + `<p class="muted small b-intro">${named.length ? `用名字選的隊員在${fz}都沒有統計資料。`
-    : '用名字選寶可夢後，才會依常用特性與招式標出誰會開天氣、開場地、順風、戲法空間、反先制、抗威嚇等。'}</p>`;
+  if (!mine.length) return head + `<p class="muted small b-intro">${named.length ? `挑了寶可夢的隊員在${fz}都沒有統計資料。`
+    : '挑了寶可夢後，才會依常用特性與招式標出誰會開天氣、開場地、順風、戲法空間、反先制、抗威嚇等。'}</p>`;
   const text = w => ({
     need: () => `${label([w.h])[0]}只在${FIELD_ZH[w.f]}有效果，隊上沒有隊友或招式會開${FIELD_ZH[w.f]}`,
     two: () => `隊上會開 ${w.fs.length} 種${w.zh}（${w.fs.map(f => FIELD_ZH[f]).join('、')}），後出場的會蓋掉先開的${w.zh}`,
@@ -3126,16 +3132,16 @@ function traitHTML(members) {
     + `順風和戲法空間在同一隊會提醒；有戲法空間，但一半以上的隊員比${fz}熱門前 ${THREAT_N} 的一半以上快（只比速度種族值），也會提醒。`
     + '精神場地只保護在地面上的寶可夢不被先制招式攻擊。</p></details>';
 }
-// 目前格子選了屬性、還沒挑寶可夢時，列出屬性都符合的寶可夢讓使用者挑：依排名（超級進化排後面），
-// 同家族已在其他格子的不列；最多列 TYPE_LIST_N 隻，角色只在有排名時標（同 recommendMon）
-const TYPE_LIST_N = 30;
+// 屬性篩選（隊伍分析、出戰選角、傷害計算共用）：屬性都符合的寶可夢，依 fmt 排名（沒排名的排後面，超級進化再排後面）
+const monsOfTypes = (sel, fmt) => MONS.filter(m => sel.every(t => m.types.includes(t)))
+  .sort((x, y) => !!x.base - !!y.base || (x.rank[fmt] || Infinity) - (y.rank[fmt] || Infinity));
+// 目前格子選了屬性、還沒挑寶可夢時，列出屬性都符合的寶可夢讓使用者挑：同家族已在其他格子的不列；
+// 全部列出（沒有打字搜尋，截斷的話單屬性又沒排名的會選不到），角色只在有排名時標（同 recommendMon）
 function typeListHTML() {
   const sel = team.slots[team.cur];
   if (!sel.length || team.mons[team.cur]) return '';
-  const rk = m => m.rank[team.fmt] || Infinity;
   const fams = team.mons.filter((k, i) => k && i !== team.cur).map(k => family(MON[k]));
-  const list = MONS.filter(m => sel.every(t => m.types.includes(t)) && !fams.includes(family(m)))
-    .sort((x, y) => !!x.base - !!y.base || rk(x) - rk(y));
+  const list = monsOfTypes(sel, team.fmt).filter(m => !fams.includes(family(m)));
   const meta = m => {
     const r = m.rank[team.fmt] && roleOf(m.key, team.fmt);
     return (m.rank[team.fmt] ? `#${m.rank[team.fmt]}` : '無排名') + (r ? '・' + MAIN_ZH[r.main] : '');
@@ -3143,9 +3149,8 @@ function typeListHTML() {
   return `<div class="b-label">有${sel.map(id => T[id].zh).join('＋')}屬性的寶可夢<span class="muted small">共 ${list.length} 隻`
     + `${list.length ? `，依${FMT_ZH[team.fmt]}排名；點一下放進第 ${team.cur + 1} 隻` : ''}</span></div>`
     + (list.length
-      ? `<div class="qpick">${list.slice(0, TYPE_LIST_N).map(m => `<button data-mon="${m.key}">${m.zh}${chips(m.types)}<span class="meta">${meta(m)}</span></button>`).join('')}</div>`
-      : '<p class="muted small b-intro">名單裡沒有這種屬性組合的寶可夢；只選屬性也能看屬性分析。</p>')
-    + (list.length > TYPE_LIST_N ? `<p class="muted small b-intro">還有 ${list.length - TYPE_LIST_N} 隻沒列出，再選一個屬性或在上面打名字縮小範圍。</p>` : '');
+      ? `<div class="qpick">${list.map(m => `<button data-mon="${m.key}">${m.zh}${chips(m.types)}<span class="meta">${meta(m)}</span></button>`).join('')}</div>`
+      : '<p class="muted small b-intro">名單裡沒有這種屬性組合的寶可夢；只選屬性也能看屬性分析。</p>');
 }
 // 熱門威脅：沒解的排前面，同一級再依排名
 function threatHTML(members) {
@@ -3157,7 +3162,7 @@ function threatHTML(members) {
   const whoHit = (idx, types) => idx.length ? idx.map(j => `${members[j][1] + 1} ${slotName(members[j][1])}（`
     + [...new Set(units[j].atk.filter(a => eff(a.ty, types) >= 2).map(a => a.zh || '本系'))].join('、') + '）').join('、') : '（無）';
   const LV = ['✘ 沒解', '△ 半解', '✔ 有解'], cnt = [0, 1, 2].map(l => list.filter(t => t.level === l).length);
-  // 實戰：OP.GG 這隻熱門寶可夢的敗於／勝於名單裡有我方用名字選的隊員（同家族算）；
+  // 實戰：OP.GG 這隻熱門寶可夢的敗於／勝於名單裡有我方挑了寶可夢的隊員（同家族算）；
   // 兩份名單都有的不列（名單依次數排，兩隻都熱門時常常兩邊都上榜，看不出誰剋誰）
   const named = members.filter(([, i]) => team.mons[i]).map(([, i]) => i);
   const real = m => {
@@ -3178,7 +3183,7 @@ function threatHTML(members) {
     + '「實戰」＝OP.GG 這隻的「敗於」「勝於」前 10 名裡有我方隊員（超級進化看原型）；名單依次數排，熱門寶可夢容易上榜，'
     + '兩份名單都有的不列，只供參考，不影響有解／沒解。</p>';
 }
-// 速度線：我方（用名字選的才有速度）和熱門寶可夢依速度種族值由快到慢排，同速時我方排前面
+// 速度線：我方（挑了寶可夢的才有速度）和熱門寶可夢依速度種族值由快到慢排，同速時我方排前面
 // 帶講究圍巾的使用率（OP.GG 道具統計）；超級進化要帶超級石，不標
 const scarf = m => { const p = !m.base && useOf(m.key, team.fmt)?.items.find(([k]) => k === 'choice-scarf')?.[1]; return p ? `・講究圍巾 ${p}%` : ''; };
 function speedHTML(members) {
@@ -3192,7 +3197,7 @@ function speedHTML(members) {
       return `<div class="x-line"><b>${i + 1} ${mon.zh}</b><span class="x-msg">速度 ${mon.spe}：比 ${n((t, m) => t < m)} 隻快、`
         + `同速 ${n((t, m) => t === m)} 隻、比 ${n((t, m) => t > m)} 隻慢</span></div>`;
     }).join('')
-    + (members.some(([, i]) => !team.mons[i]) ? '<p class="muted small b-intro">只選屬性的格子沒有速度資料，用名字選寶可夢才會列進速度線。</p>' : '')
+    + (members.some(([, i]) => !team.mons[i]) ? '<p class="muted small b-intro">只選屬性的格子沒有速度資料，挑了寶可夢才會列進速度線。</p>' : '')
     + `<div style="margin-top:8px">${rows.map(x => `<div class="spd${x.i != null ? ' me' : ''}"><b class="v">${x.mon.spe}</b><b>${x.mon.zh}</b>${chips(x.mon.types)}`
       + `<span class="meta">${x.i != null ? `我方第 ${x.i + 1} 隻` : `#${x.mon.rank[team.fmt]}`}${scarf(x.mon)}</span></div>`).join('')}</div>`
     + '<p class="note">※ 只比速度種族值，不含性格、能力投資、道具、特性與場地（如順風、戲法空間）；'
@@ -3210,9 +3215,9 @@ function renderTeam() {
   $('#tSum').innerHTML = members.length ? summaryHTML(members)
     : '<p class="empty">選好隊員後，這裡會集中列出隊伍的問題（搭配、缺的角色、沒解的熱門威脅、屬性弱點），每條附可以補的寶可夢，並建議下一隻選誰。</p>';
   $('#tRole').innerHTML = members.length ? roleHTML(members)
-    : '<p class="empty">用名字選好隊員後，這裡會依 OP.GG 常用招式判斷每隻是物攻、特攻輸出還是輔助，列出常用招式與效果，並標出隊伍還缺哪些角色。</p>';
+    : '<p class="empty">挑好隊員的寶可夢後，這裡會依 OP.GG 常用招式判斷每隻是物攻、特攻輸出還是輔助，列出常用招式與效果，並標出隊伍還缺哪些角色。</p>';
   $('#tTrait').innerHTML = members.length ? traitHTML(members)
-    : '<p class="empty">用名字選好隊員後，這裡會依 OP.GG 常用特性與招式標出誰會開天氣、開場地、順風、戲法空間、反先制、抗威嚇等，並做搭配檢查。</p>';
+    : '<p class="empty">挑好隊員的寶可夢後，這裡會依 OP.GG 常用特性與招式標出誰會開天氣、開場地、順風、戲法空間、反先制、抗威嚇等，並做搭配檢查。</p>';
   if (!members.length) {
     $('#tResult').innerHTML = '<p class="empty">選好隊員後，這裡會列出整隊被各屬性打的倍率，標出共同弱點與缺口，並建議下一隻補什麼屬性、哪隻寶可夢。</p>';
     $('#tThreat').innerHTML = `<p class="empty">選好隊員後，這裡會檢查${FMT_ZH[team.fmt]}排名前 ${THREAT_N} 的熱門寶可夢，看隊伍有沒有人能應付。</p>`;
@@ -3258,16 +3263,7 @@ function pickTeamMon(key) {
   if (n >= 0) team.cur = n;
   renderTeam();
 }
-const MON_BY_ZH = Object.fromEntries(MONS.map(m => [m.zh, m.key]));
-$('#tMons').innerHTML = MONS.map(m => `<option value="${m.zh}">`).join('');
 $('#monsDate').textContent = MONS_DATE + ' 擷取';
-// 從清單點選就直接放入；手打的等按 Enter 或離開輸入框（change）才比對，免得打到一半就被較短的名字搶先
-function nameInput(e) {
-  const key = MON_BY_ZH[e.target.value.trim()];
-  if (key && (e.type === 'change' || !e.inputType || e.inputType === 'insertReplacementText')) { e.target.value = ''; pickTeamMon(key); }
-}
-$('#tName').addEventListener('input', nameInput);
-$('#tName').addEventListener('change', nameInput);
 // 單打／雙打：隊伍分析的排名依據、出戰選角的帶幾隻和傷害計算的常用招式、範圍招式共用
 function setFmt(e) {
   const b = e.target.closest('button[data-fmt]');
@@ -3299,7 +3295,7 @@ $('#tClear').addEventListener('click', () => { team.slots = team.slots.map(() =>
 
 // ---------- 出戰選角 ----------
 // opp：對手 6 隻的寶可夢 key；帶幾隻、先發幾隻依攻略網站整理的排位規則（單打 6 選 3、雙打 6 選 4）
-const bring = { opp: ['', '', '', '', '', ''] };
+const bring = { opp: ['', '', '', '', '', ''], pick: [] };
 const BRING_N = { s: 3, d: 4 }, LEAD_N = { s: 1, d: 2 };
 // members：[[屬性, 格子索引]...]；opps：[[寶可夢, 格子索引]...]
 function bringHTML(members, opps) {
@@ -3347,32 +3343,32 @@ function renderBring() {
     : bringHTML(members, opps);
   saveState();
 }
-// 快速選對手：沒打字時列目前排名前 QUICK_N（不含超級進化），有打字就用中文名或英文 key 篩選（超級進化排後面）；
+// 快速選對手：沒選屬性時列目前排名前 QUICK_N（不含超級進化），有選屬性就全部列出屬性都符合的（monsOfTypes 的順序）；
 // 已在對手格子裡的同家族（原型與超級進化）不列
 const QUICK_N = 30;
 function renderOppList() {
+  renderPick($('#pPick'), bring.pick);
   if (!bring.opp.includes('')) { $('#pList').innerHTML = '<p class="muted small">已填滿 6 隻；點上方格子可移除。</p>'; return; }
-  const q = $('#pName').value.trim().toLowerCase(), rk = m => m.rank[team.fmt] || Infinity;
-  const fams = bring.opp.filter(Boolean).map(k => family(MON[k]));
-  const list = MONS.filter(m => !fams.includes(family(m)) && (q ? m.zh.includes(q) || m.key.includes(q) : !m.base && m.rank[team.fmt]))
-    .sort((x, y) => !!x.base - !!y.base || rk(x) - rk(y)).slice(0, q ? 24 : QUICK_N);
-  $('#pList').innerHTML = `<div class="muted small">${q ? '符合的寶可夢（Enter 加入第一個）' :`${FMT_ZH[team.fmt]}排名前 ${QUICK_N}，點一下加入；不在這裡就在上面打字搜尋`}</div>`
-    + (list.length ? `<div class="qpick">${list.map(m => `<button data-opp="${m.key}">${m.zh}${chips(m.types)}</button>`).join('')}</div>`
-      : '<p class="muted small">找不到，換個字試試（中文名的一部分或英文名都可以）。</p>');
+  const sel = bring.pick, fams = bring.opp.filter(Boolean).map(k => family(MON[k]));
+  const list = monsOfTypes(sel, team.fmt).filter(m => !fams.includes(family(m)) && (sel.length || !m.base && m.rank[team.fmt]));
+  const shown = sel.length ? list : list.slice(0, QUICK_N);
+  $('#pList').innerHTML = (sel.length
+    ? `<div class="b-label">有${sel.map(id => T[id].zh).join('＋')}屬性的寶可夢<span class="muted small">共 ${list.length} 隻${list.length ? `，依${FMT_ZH[team.fmt]}排名；點一下加入` : ''}</span></div>`
+    : `<div class="b-label">${FMT_ZH[team.fmt]}排名前 ${QUICK_N}<span class="muted small">點一下加入；不在這裡就點上方屬性篩選（選 1～2 個）</span></div>`)
+    + (shown.length ? `<div class="qpick">${shown.map(m => `<button data-opp="${m.key}">${m.zh}${chips(m.types)}</button>`).join('')}</div>`
+      : '<p class="muted small">名單裡沒有這種屬性組合的寶可夢（已在對手格子裡的同家族不列）。</p>');
 }
-// 對手依序填進第一個空格
+// 對手依序填進第一個空格，並清掉屬性篩選回到排名清單
 function addOpp(key) {
   const i = bring.opp.indexOf('');
   if (i < 0) return;
   bring.opp[i] = key;
-  $('#pName').value = '';
+  bring.pick = [];
   renderBring();
 }
-$('#pName').addEventListener('input', renderOppList);
-// Enter 加入篩選結果的第一個（輸入法選字中的 Enter 不算）
-$('#pName').addEventListener('keydown', e => {
-  const first = $('#pList [data-opp]');
-  if (e.key === 'Enter' && !e.isComposing && first) { e.preventDefault(); addOpp(first.dataset.opp); }
+$('#pPick').addEventListener('click', e => {
+  const b = e.target.closest('.tbtn');
+  if (b) { toggleSel(bring.pick, b.dataset.id, 2); renderOppList(); }
 });
 $('#pList').addEventListener('click', e => {
   const b = e.target.closest('[data-opp]');
@@ -3392,8 +3388,12 @@ $('#pClear').addEventListener('click', () => { bring.opp = bring.opp.map(() => '
 const CALC0 = { atk: '', def: '', ai: 2, hi: 0, di: 0, st: [0, 0, 0, 0], aItem: '', dItem: '', aAb: '', dAb: '', weather: '', crit: false, extra: '' };
 const calc = structuredClone(CALC0);
 const CALC_MOVES = Object.keys(MOVES).filter(canCalc);
-['cSt0', 'cSt1', 'cSt2', 'cSt3'].forEach(id => {
+// 能力變化：下拉選單兩旁加 −1／+1／歸0 按鈕（data-st 是 calc.st 的索引，data-d 是增減量，0＝歸零）
+['cSt0', 'cSt1', 'cSt2', 'cSt3'].forEach((id, i) => {
+  const btn = (d, text) => `<button class="mini" data-st="${i}" data-d="${d}">${text}</button>`;
   $('#' + id).innerHTML = [6, 5, 4, 3, 2, 1, 0, -1, -2, -3, -4, -5, -6].map(v => `<option value="${v}">${v > 0 ? '+' + v : v < 0 ? '−' + -v : '0'}</option>`).join('');
+  $('#' + id).insertAdjacentHTML('beforebegin', btn(-1, '−1'));
+  $('#' + id).insertAdjacentHTML('afterend', btn(1, '+1') + btn(0, '歸0'));
 });
 $('#cExtra').innerHTML = '<option value="">（不加）</option>' + TYPES.map(t => {
   const ks = CALC_MOVES.filter(k => MOVES[k][1] === t.id).sort((x, y) => MOVES[y][3] - MOVES[x][3]);
@@ -3449,11 +3449,21 @@ function intimidateOn(ab) {
   if (['contrary', 'defiant', 'guard-dog'].includes(ab)) return [1, 0];
   return ab === 'simple' ? [-2, 0] : ab === 'competitive' ? [-1, 2] : [-1, 0];
 }
-// 快選：我方隊伍（隊伍分析）和對手（出戰選角）用名字選的寶可夢
+// 快選：我方隊伍（隊伍分析）挑了的寶可夢和對手（出戰選角）
 function quickHTML(side) {
   const btn = k => `<button class="mini" data-side="${side}" data-k="${k}" aria-pressed="${calc[side] === k}">${MON[k].zh}</button>`;
   const mine = team.mons.filter(Boolean), opp = bring.opp.filter(Boolean);
   return (mine.length ? `<span class="meta">我方</span>${mine.map(btn).join('')}` : '') + (opp.length ? `<span class="meta">對手</span>${opp.map(btn).join('')}` : '');
+}
+// 攻擊方／防守方各自的屬性篩選（不存網址，選好寶可夢就清掉）；有選屬性才列出符合的寶可夢
+const calcPick = { atk: [], def: [] };
+function calcListHTML(side) {
+  const sel = calcPick[side];
+  if (!sel.length) return '';
+  const list = monsOfTypes(sel, team.fmt);
+  return `<div class="b-label">有${sel.map(id => T[id].zh).join('＋')}屬性的寶可夢<span class="muted small">共 ${list.length} 隻${list.length ? `，依${FMT_ZH[team.fmt]}排名；點一下帶入` : ''}</span></div>`
+    + (list.length ? `<div class="qpick">${list.map(m => `<button data-side="${side}" data-k="${m.key}">${m.zh}${chips(m.types)}</button>`).join('')}</div>`
+      : '<p class="muted small b-intro">名單裡沒有這種屬性組合的寶可夢。</p>');
 }
 function calcHTML() {
   const A = MON[calc.atk], D = MON[calc.def], aab = abOf(calc.atk, calc.aAb), dab = abOf(calc.def, calc.dAb);
@@ -3516,8 +3526,11 @@ function renderCalc() {
   [['atk', 'aItem', 'a', '#cAtk', '#cAtkQ', '#cAItem', 'aAb', '#cAAb', ATK_ABILS], ['def', 'dItem', 'd', '#cDef', '#cDefQ', '#cDItem', 'dAb', '#cDAb', DEF_ABILS]]
     .forEach(([side, it, s, inp, q, sel, ab, abSel, rel]) => {
       if (calc[it] && !itemOK(s, calc[side], calc[it])) calc[it] = '';
-      $(inp).value = calc[side] ? MON[calc[side]].zh : '';
+      $(inp).innerHTML = calc[side] ? `${MON[calc[side]].zh}${chips(MON[calc[side]].types)}`
+        : '<span class="muted small">還沒選；點下方我方／對手，或選屬性找寶可夢</span>';
       $(q).innerHTML = quickHTML(side);
+      renderPick($(inp + 'P'), calcPick[side]);
+      $(inp + 'L').innerHTML = calcListHTML(side);
       $(sel).innerHTML = itemOptions(s, calc[side], calc[it]);
       $(sel).disabled = !!MON[calc[side]]?.base;
       $(abSel).innerHTML = abilOptions(rel, calc[side], abOf(calc[side], calc[ab]));
@@ -3535,29 +3548,25 @@ function renderCalc() {
     : '<p class="empty">選好攻擊方和防守方後，這裡會列出攻擊方常用攻擊招式打過去的傷害、佔防守方 HP 的比例，以及幾下會被打倒。</p>';
   saveState();
 }
-// 換寶可夢時清掉那一方的道具和選的特性；換攻擊方也清掉加算招式
+// 換寶可夢時清掉那一方的道具和選的特性；換攻擊方也清掉加算招式。選好就清掉那一方的屬性篩選，收起清單
 function setCalcMon(side, key) {
+  calcPick[side] = [];
   if (calc[side] !== key) {
     calc[side] = key;
     if (side === 'atk') { calc.aItem = calc.aAb = calc.extra = ''; } else calc.dItem = calc.dAb = '';
   }
   renderCalc();
 }
-// 從清單點選就直接帶入；手打的等按 Enter 或離開輸入框（change）才比對，對不到就還原
-function calcName(e) {
-  const key = MON_BY_ZH[e.target.value.trim()];
-  if (key && (e.type === 'change' || !e.inputType || e.inputType === 'insertReplacementText')) setCalcMon(e.target.id === 'cAtk' ? 'atk' : 'def', key);
-  else if (e.type === 'change') renderCalc();
-}
-['#cAtk', '#cDef'].forEach(s => { $(s).addEventListener('input', calcName); $(s).addEventListener('change', calcName); });
 $('#p-calc').addEventListener('click', e => {
   const b = e.target.closest('button'), seg = b?.closest('.seg')?.id;
   if (!b) return;
   if (b.dataset.k) setCalcMon(b.dataset.side, b.dataset.k);
+  else if (b.classList.contains('tbtn')) { toggleSel(calcPick[b.closest('.c-pick').dataset.side], b.dataset.id, 2); renderCalc(); }
   else if (seg === 'cAi' || seg === 'cHi' || seg === 'cDi') { calc[{ cAi: 'ai', cHi: 'hi', cDi: 'di' }[seg]] = +b.dataset.v; renderCalc(); }
   else if (seg === 'cW') { calc.weather = b.dataset.w; renderCalc(); }
   else if (b.dataset.setw) { calc.weather = b.dataset.setw; renderCalc(); }
   else if (b.dataset.im) { [calc.st[0], calc.st[1]] = b.dataset.im.split('.').map(Number); renderCalc(); }
+  else if (b.dataset.st) { const i = +b.dataset.st, d = +b.dataset.d; calc.st[i] = d ? Math.max(-6, Math.min(6, calc.st[i] + d)) : 0; renderCalc(); }
 });
 $('#p-calc').addEventListener('change', e => {
   const id = e.target.id;
@@ -3579,7 +3588,7 @@ $('#cSwap').addEventListener('click', () => {
   calc.st = [0, 0, 0, 0];
   renderCalc();
 });
-$('#cClear').addEventListener('click', () => { Object.assign(calc, structuredClone(CALC0)); renderCalc(); });
+$('#cClear').addEventListener('click', () => { Object.assign(calc, structuredClone(CALC0)); calcPick.atk = []; calcPick.def = []; renderCalc(); });
 
 // ---------- 狀態存網址＋本機（可存書籤、重新整理不清空） ----------
 // 格式：#分頁?m=招式,招式&t=屬性,屬性&a=特性&p=隊員1屬性.屬性,@寶可夢key,...&f=d（雙打，單打不寫）&o=對手寶可夢key,...
