@@ -994,6 +994,31 @@ function leadPick(c, n, uOf, sOf, kOf, opps, setups, fmt) {
   }).sort((x, y) => x.noAtk - y.noAtk || y.cover - x.cover || x.loose.length - y.loose.length || x.weak.length - y.weak.length
     || (y.sup.length > 0) - (x.sup.length > 0) || y.spe - x.spe)[0];
 }
+// 出戰選角：帶幾隻、先發幾隻依攻略網站整理的排位規則（單打 6 選 3、雙打 6 選 4）
+const BRING_N = { s: 3, d: 4 }, LEAD_N = { s: 1, d: 2 };
+// 我方 mems（[{ defs 屬性, key 寶可夢 key（只選屬性的是空字串）}...]）對上對手 opps（寶可夢）在 fmt 該帶誰、誰先發。回傳
+//   k 帶幾隻、lead 先發幾隻、units 我方的 unit、alt 超級進化不進化時的原型 unit、oppUnits 對手的 unit（oppUnit）、
+//   oppMegas 對手可能超級進化成的寶可夢、setupBy 每隻對手撐起「強化」標籤的招式、setups 強化手的對手索引、
+//   combos 所有帶法（bringCombos，第一個最好）、pick 第 1 名組合的先發（leadPick）
+function bringPlan(mems, opps, fmt) {
+  const k = Math.min(BRING_N[fmt], mems.length), lead = Math.min(LEAD_N[fmt], k);
+  const units = mems.map(x => ({ defs: x.defs, atk: attacksOf(x.key, x.defs, fmt) })), monOf = j => MON[mems[j].key];
+  // 對手選一般型態、但常帶超級石的，進化前後都要看（oppUnit）
+  const oppMegas = opps.map(m => megaInfo(m, fmt).filter(x => x.counted).map(x => x.mon));
+  const oppUnits = opps.map(m => oppUnit(m, fmt));
+  // 我方超級進化不進化時的版本（原型），給 bringCombos 算「一場只能進化一隻」
+  const alt = mems.map((_, j) => monOf(j)?.base ? monUnit(MON[monOf(j).base], fmt) : null);
+  const combos = bringCombos(units, oppUnits, k, alt), best = combos[0];
+  const spe = j => monOf(j)?.spe || 0;
+  // 先發（不進化的超級進化看原型的屬性和速度）：從第 1 名組合挑（leadPick；單打 1 隻，雙打 2 隻一起看搭配）
+  const speIn = (c, j) => alt[j] && c.evo != null && j !== c.evo ? MON[monOf(j).base].spe : spe(j);
+  const unitIn = (c, j) => alt[j] && c.evo != null && j !== c.evo ? alt[j] : units[j];
+  // 對手的強化手：常帶強化招式（隊伍角色的「強化」標籤，如劍舞、詭計、龍之舞）的，存對手索引和撐起標籤的招式
+  const setupBy = opps.map(m => roleOf(m.key, fmt)?.tags.find(t => t.id === 'setup')?.by || []);
+  const setups = setupBy.map((by, o) => by.length ? o : -1).filter(o => o >= 0);
+  const pick = leadPick(best, lead, j => unitIn(best, j), j => speIn(best, j), j => mems[j].key, oppUnits, setups, fmt);
+  return { k, lead, units, alt, oppUnits, oppMegas, setupBy, setups, combos, pick };
+}
 
 const pick = (arr, rng) => arr[Math.floor(rng() * arr.length)];
 function shuffle(arr, rng = Math.random) {
@@ -1219,6 +1244,13 @@ function speedOf(s, f) {
   if (s.par && s.ab !== 'quick-feet') { v = Math.floor(v * 50 / 100); notes.push('麻痺 ×½'); }
   return { v, notes };
 }
+// 雙方速度與誰先動：x、y 是 speedOf 的 s，f：{ weather, terrain, tr 戲法空間 }；天氣被無關天氣／氣閘擋掉時加速特性也不算（同 damageCalc）。
+// 回傳 spd [x 的, y 的]（speedOf 的結果）、first 0＝x 先動、1＝y 先動、-1＝同速（各 50%）；戲法空間時速度慢的先動，先制招式不看這個
+function speedPair(x, y, f) {
+  const weather = [x.ab, y.ab].some(k => WEATHER_OFF.includes(k)) ? '' : f.weather;
+  const spd = [x, y].map(s => speedOf(s, { weather, terrain: f.terrain }));
+  return { spd, first: spd[0].v === spd[1].v ? -1 : (spd[0].v > spd[1].v) !== !!f.tr ? 0 : 1 };
+}
 // 攻擊方 a：{ key, inv 投資 [點數, 性格], st { atk, spa } 能力變化, item, ab 特性 }；防守方 d：{ key, hp／inv 投資 [點數, 性格], st { def, spd }, item, ab }；
 // o：{ fmt 's'／'d', weather, crit, terrain, hh 幫助, walls 防守方的牆, burn 攻擊方灼傷 }（必定急所的招式不管 crit 都算急所）。不算的招式回傳 { skip 原因 }；
 // 沒有效果的回傳 eff 0（沒有 hp 以後的欄位；immuneBy＝讓招式無效的防守方特性，blockedBy＝其他原因的說明，如精神場地擋先制）；
@@ -1401,6 +1433,17 @@ function koText(ko) {
   if (n < 0) return { n: 5, text: '四擊打不倒' };
   if (ko[n] > 1 - 1e-9) return { n: n + 1, text: `確定${NUM_ZH[n]}擊` };
   return { n: n + 1, text: `亂數${NUM_ZH[n]}擊（${Math.min(99.9, Math.max(0.1, Math.round(ko[n] * 1000) / 10))}%）` };
+}
+// 攻擊方 a 打防守方 d（damageCalc 的格式）：a 在 o.fmt 的常用攻擊招式（再加 extra）逐招算，ok 依最大傷害排序、why 是不算的招式依原因分組；
+// kos 會被一擊打倒的招式、top 最痛的一招
+function dmgRows(a, d, o, extra) {
+  const use = useOf(a.key, o.fmt)?.moves || [];
+  const list = use.filter(([k]) => MOVES[k][2] !== 'status');
+  if (extra && !list.some(([k]) => k === extra)) list.push([extra, 0]);
+  const rows = list.map(([k, p]) => ({ k, p, r: damageCalc(a, d, k, o) }));
+  const ok = rows.filter(x => !x.r.skip).sort((x, y) => (y.r.max || 0) - (x.r.max || 0)), why = {};
+  rows.filter(x => x.r.skip).forEach(x => (why[x.r.skip] ||= []).push(MOVES[x.k][0]));
+  return { use, ok, why, kos: ok.filter(x => x.r.ko?.[0] > 1e-9), top: ok.find(x => x.r.ko) };
 }
 // ===== LOGIC END =====
 
@@ -2077,28 +2120,15 @@ $('#tSum').addEventListener('click', e => {
 $('#tClear').addEventListener('click', () => { team.slots = team.slots.map(() => []); team.mons = team.mons.map(() => ''); team.cur = 0; renderTeam(); });
 
 // ---------- 出戰選角 ----------
-// opp：對手 6 隻的寶可夢 key；帶幾隻、先發幾隻依攻略網站整理的排位規則（單打 6 選 3、雙打 6 選 4）
+// opp：對手 6 隻的寶可夢 key
 const bring = { opp: ['', '', '', '', '', ''], pick: [] };
-const BRING_N = { s: 3, d: 4 }, LEAD_N = { s: 1, d: 2 };
 // members：[[屬性, 格子索引]...]；opps：[[寶可夢, 格子索引]...]
 function bringHTML(members, opps) {
-  const k = Math.min(BRING_N[team.fmt], members.length), lead = Math.min(LEAD_N[team.fmt], k);
-  const units = members.map(unitOf), monOf = j => MON[team.mons[members[j][1]]];
-  // 對手選一般型態、但常帶超級石的，進化前後都要看（oppUnit）
-  const oppMegas = opps.map(([m]) => megaInfo(m, team.fmt).filter(x => x.counted).map(x => x.mon));
-  const oppUnits = opps.map(([m]) => oppUnit(m, team.fmt));
-  // 我方超級進化不進化時的版本（原型），給 bringCombos 算「一場只能進化一隻」
-  const alt = members.map((_, j) => monOf(j)?.base ? monUnit(MON[monOf(j).base], team.fmt) : null);
-  const combos = bringCombos(units, oppUnits, k, alt), best = combos[0];
+  const { k, lead, units, alt, oppUnits, oppMegas, setupBy, setups, combos, pick } =
+    bringPlan(members.map(([s, i]) => ({ defs: s, key: team.mons[i] })), opps.map(([m]) => m), team.fmt);
+  const best = combos[0], monOf = j => MON[team.mons[members[j][1]]];
   const name = j => `${members[j][1] + 1} ${slotName(members[j][1])}`;
   const spe = j => monOf(j)?.spe || 0;
-  // 先發（不進化的超級進化看原型的屬性和速度）：從第 1 名組合挑（leadPick；單打 1 隻，雙打 2 隻一起看搭配）
-  const speIn = (c, j) => alt[j] && c.evo != null && j !== c.evo ? MON[monOf(j).base].spe : spe(j);
-  const unitIn = (c, j) => alt[j] && c.evo != null && j !== c.evo ? alt[j] : units[j];
-  // 對手的強化手：常帶強化招式（隊伍角色的「強化」標籤，如劍舞、詭計、龍之舞）的，存對手索引和撐起標籤的招式
-  const setupBy = opps.map(([m]) => roleOf(m.key, team.fmt)?.tags.find(t => t.id === 'setup')?.by || []);
-  const setups = setupBy.map((by, o) => by.length ? o : -1).filter(o => o >= 0);
-  const pick = leadPick(best, lead, j => unitIn(best, j), j => speIn(best, j), j => team.mons[members[j][1]], oppUnits, setups, team.fmt);
   const leads = pick.js;
   const setupText = o => `${opps[o][0].zh}（${setupBy[o].map(([zh, p]) => `${zh} ${p}%`).join('、')}）`;
   const leadInfo = [lead === 2 && `兩隻合起來有解 ${pick.cover}／${opps.length} 隻`,
@@ -2344,17 +2374,6 @@ function calcListHTML(side) {
 }
 const hpPct = (v, hp) => Math.floor(v * 1000 / hp) / 10;
 const stgText = v => v > 0 ? '+' + v : '−' + -v;
-// 攻擊方 a 打防守方 d（damageCalc 的格式）：常用攻擊招式（再加 extra）逐招算，ok 依最大傷害排序、why 是不算的招式依原因分組；
-// kos 會被一擊打倒的招式、top 最痛的一招
-function dmgRows(a, d, o, extra) {
-  const use = useOf(a.key, team.fmt)?.moves || [];
-  const list = use.filter(([k]) => MOVES[k][2] !== 'status');
-  if (extra && !list.some(([k]) => k === extra)) list.push([extra, 0]);
-  const rows = list.map(([k, p]) => ({ k, p, r: damageCalc(a, d, k, o) }));
-  const ok = rows.filter(x => !x.r.skip).sort((x, y) => (y.r.max || 0) - (x.r.max || 0)), why = {};
-  rows.filter(x => x.r.skip).forEach(x => (why[x.r.skip] ||= []).push(MOVES[x.k][0]));
-  return { use, ok, why, kos: ok.filter(x => x.r.ko?.[0] > 1e-9), top: ok.find(x => x.r.ko) };
-}
 // 一句話總結 A 打 D：會被一擊打倒的招式，或最痛的一招（pre 放在句首；先制招式標出來，因為不看速度）
 const mvName = k => `<b>${MOVES[k][0]}</b>${FLAG.priority.has(k) ? '（先制）' : ''}`;
 function dmgSumHTML(A, D, { ok, kos, top }, pre = '') {
@@ -2373,10 +2392,8 @@ function calcHTML() {
   // 道具（對調後兩邊都能帶的只有講究圍巾，不影響傷害）、能力變化、加算招式、灼傷、幫助、牆不算；天氣、場地、急所照舊
   const bk = dmgRows({ key: calc.def, inv: calc.ai, st: { atk: 0, spa: 0 }, item: '', ab: dab },
     { key: calc.atk, hp: calc.hi, inv: calc.di, st: { def: 0, spd: 0 }, item: '', ab: aab }, { ...o, hh: false, walls: [], burn: false }, '');
-  // 速度：天氣被無關天氣／氣閘擋掉時加速特性也不算（同 damageCalc）
-  const wthr = [aab, dab].some(k => WEATHER_OFF.includes(k)) ? '' : calc.weather;
-  const spd = SIDES.map((s, i) => speedOf({ key: [calc.atk, calc.def][i], inv: [calc.sa, calc.sd][i], st: calc.st[4 + i], item: [calc.aItem, calc.dItem][i],
-    ab: [aab, dab][i], tw: calc.tw.includes(s), par: calc.par.includes(s), status: calc.par.includes(s) || (!i && calc.burn) }, { weather: wthr, terrain: calc.terrain }));
+  const { spd, first } = speedPair(...SIDES.map((s, i) => ({ key: [calc.atk, calc.def][i], inv: [calc.sa, calc.sd][i], st: calc.st[4 + i], item: [calc.aItem, calc.dItem][i],
+    ab: [aab, dab][i], tw: calc.tw.includes(s), par: calc.par.includes(s), status: calc.par.includes(s) || (!i && calc.burn) })), { weather: calc.weather, terrain: calc.terrain, tr: calc.tr });
   const spdText = (m, i) => `${m.zh} <b>${spd[i].v}</b><span class="meta">（${[`投資 ${invName(SPE_INV, [calc.sa, calc.sd][i])}`,
     calc.st[4 + i] && `速度 ${stgText(calc.st[4 + i])}`, ...spd[i].notes].filter(Boolean).join('・')}）</span>`;
   const [asp, anat] = calc.ai, [dsp, dnat] = calc.di, aname = invName(ATK_INV, calc.ai), dname = invName(DEF_INV, calc.di);
@@ -2419,7 +2436,7 @@ function calcHTML() {
     + `${stg(calc.st[2], '防禦')}${stg(calc.st[3], '特防')}${dab ? `<span>${abilZh(dab) || '固定特性'}</span>` : ''}${calc.dItem ? `<span>${ITEMS[calc.dItem][0]}</span>` : ''}</div>`
     + hints.join('')
     + `<div class="c-sum info">速度：${spdText(A, 0)} ／ ${spdText(D, 1)} → `
-    + `${spd[0].v === spd[1].v ? '同速，誰先動各 50%' : `<b>${(spd[0].v > spd[1].v) !== calc.tr ? A.zh : D.zh}</b>先動${calc.tr ? '（戲法空間：速度慢的先動）' : ''}`}`
+    + `${first < 0 ? '同速，誰先動各 50%' : `<b>${first ? D.zh : A.zh}</b>先動${calc.tr ? '（戲法空間：速度慢的先動）' : ''}`}`
     + '（先制招式不看速度）</div>'
     + dmgSumHTML(A, D, fw)
     + (dmgSumHTML(D, A, bk, `反擊（${D.zh}打回來）：`)
