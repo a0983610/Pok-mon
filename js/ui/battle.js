@@ -3,7 +3,7 @@
 // 我方沿用隊伍分析（含登錄的配招），對手沿用出戰選角的 6 隻。
 // me／opp：場上位置放的隊伍格子／對手格子索引（-1＝空；單打只用第 1 個位置）；sel：點下方寶可夢時要放進哪個位置；
 // st：場上位置的能力變化 [攻擊, 防禦, 特攻, 特防, 速度]（換下場就清掉，同遊戲）；hp：我方各格剩下的 HP（null＝全滿）；ohp：對手各格剩下的 HP %；
-// item：對手各格看到的道具（空＝還不知道，不算道具）；ab：對手各格選的特性（空＝用 defAbOf 的預設）；
+// item：對手各格標的道具（空＝用預設 btOppItems、'-'＝沒有道具）；ab：對手各格選的特性（空＝用 defAbOf 的預設）；
 // form：各格選的型態（空＝隊伍分析／出戰選角裡的那個，用來切換超級進化前後）；weather、terrain、tr 戲法空間、tw 有順風的一方（'me'／'opp'）；
 // keys：記錄時各格的寶可夢 key（隊伍或對手換了寶可夢，那格的紀錄就清掉）
 const BT_SIDES = ['me', 'opp'];
@@ -37,13 +37,27 @@ function syncBattle() {
     battle[side].forEach((j, p) => { if (j === i) { battle[side][p] = -1; battle.st[side][p] = [0, 0, 0, 0, 0]; } });
   }));
 }
-// 場上位置 p 的寶可夢：duel 用的 battler（我方照登錄的配招；對手套選的特性與看到的道具），加上能力變化 st、目前 HP cur、順風 tw，
+// 對手各格實際算的道具：標了的照標的（'-'＝沒有道具），沒標的預設牠 OP.GG 最常帶的。同一隊不能帶重複的道具：
+// 標了的先佔，其餘依使用率由高到低分配（同一顆給使用率高的那隻，另一隻改拿牠下一個常帶的）；超級進化帶自己的超級石（回傳 ''，不影響計算）。
+// unset＝把這一格當成沒標（選單上顯示「預設是什麼」用）
+function btOppItems(unset = -1) {
+  const out = Array(6).fill(''), taken = new Set(), done = new Set();
+  const free = i => bring.opp[i] && !MON[btKey('opp', i)].base, mark = i => i === unset ? '' : battle.item[i];
+  bring.opp.forEach((k, i) => { const it = mark(i); if (free(i) && it && it !== '-') { out[i] = it; taken.add(it); } });
+  bring.opp.flatMap((k, i) => free(i) && !mark(i) ? (useOf(btKey('opp', i), team.fmt)?.items || []).filter(([it]) => !isStone(it)).map(([it, p]) => ({ i, it, p })) : [])
+    .sort((x, y) => y.p - x.p || x.i - y.i)
+    .forEach(({ i, it }) => { if (!done.has(i) && !taken.has(it)) { out[i] = it; taken.add(it); done.add(i); } });
+  return out;
+}
+// 場上位置 p 的寶可夢：duel 用的 battler（我方照登錄的配招；對手套選的特性與 btOppItems 的道具），加上能力變化 st、目前 HP cur、順風 tw，
 // 另外帶 i 格子索引、H 最大 HP、pct 剩下的 HP %；空的位置回傳 null
 function btMon(side, p) {
   const i = battle[side][p];
   if (i < 0) return null;
   const key = btKey(side, i), fmt = team.fmt;
-  const b = side === 'me' ? battler(key, fmt, team.sets[i]) : { ...battler(key, fmt), ab: defAbOf(key, fmt, battle.ab[i]), item: MON[key].base ? '' : battle.item[i] };
+  // 我方登錄成超級進化、這場切回原型的，帶的是自己的超級石（不影響計算）
+  const b = side === 'me' ? { ...battler(key, fmt, team.sets[i]), ...(key !== team.mons[i] && { item: '' }) }
+    : { ...battler(key, fmt), ab: defAbOf(key, fmt, battle.ab[i]), item: btOppItems()[i] };
   const H = hpOf(b), cur = side === 'me' ? Math.min(H, battle.hp[i] ?? H) : Math.ceil(H * battle.ohp[i] / 100);
   return { ...b, st: Object.fromEntries(BT_STATS.map(([k], n) => [k, battle.st[side][p][n]])), cur, tw: battle.tw.includes(side),
     i, H, pct: side === 'me' ? hpPct(cur, H) : battle.ohp[i] };
@@ -64,18 +78,18 @@ function btFormHTML(side, i) {
   return `<div class="c-f"><span class="c-l">型態</span><div class="seg">${forms.map(m => `<button data-bform="${side}.${i}" data-k="${m.key}" aria-pressed="${m.key === cur}">`
     + `${m.base ? (forms.length > 2 ? m.zh : '超級進化') : '沒進化'}</button>`).join('')}</div></div>`;
 }
-// 對手道具選單：其他對手已標的道具不列（同一隊不能帶重複的道具），超級石不列（超級進化在「型態」切換）；這隻 OP.GG 常帶的排前面，
-// 影響傷害或速度的附效果說明，其他的排後面
+// 對手道具選單：第一項是預設（btOppItems 分配到的），再來是「沒有道具」；其他對手標了的道具不列（同一隊不能帶重複的道具），
+// 超級石不列（超級進化在「型態」切換）；這隻 OP.GG 常帶的排前面，影響傷害或速度的附效果說明，其他的排後面
 function btItemOptions(i, key) {
   if (MON[key].base) { const st = stoneOf(MON[key]); return `<option value="">${st ? ITEMS[st][0] : '專屬的超級石'}（超級進化固定）</option>`; }
-  const taken = new Set(battle.item.filter((k, j) => k && j !== i)), use = Object.fromEntries(useOf(key, team.fmt)?.items || []);
-  const opt = k => {
-    const notes = [DMG_ITEMS[k] && itemNote(DMG_ITEMS[k]), use[k] && `這隻 ${use[k]}% 帶`].filter(Boolean);
-    return `<option value="${k}"${k === battle.item[i] ? ' selected' : ''}>${ITEMS[k][0]}${notes.length ? `（${notes.join('・')}）` : ''}</option>`;
-  };
+  const taken = new Set(battle.item.filter((k, j) => k && k !== '-' && j !== i)), use = Object.fromEntries(useOf(key, team.fmt)?.items || []);
+  const note = k => { const n = [DMG_ITEMS[k] && itemNote(DMG_ITEMS[k]), use[k] && `這隻 ${use[k]}% 帶`].filter(Boolean); return n.length ? `（${n.join('・')}）` : ''; };
+  const opt = k => `<option value="${k}"${k === battle.item[i] ? ' selected' : ''}>${ITEMS[k][0]}${note(k)}</option>`;
   const list = Object.keys(ITEMS).filter(k => !isStone(k) && !taken.has(k));
   const top = list.filter(k => use[k]).sort((x, y) => use[y] - use[x]), rest = list.filter(k => !use[k]).sort((x, y) => !!DMG_ITEMS[y] - !!DMG_ITEMS[x]);
-  return '<option value="">還不知道（不算道具）</option>'
+  const auto = btOppItems(i)[i];
+  return `<option value="">預設：${auto ? ITEMS[auto][0] + note(auto) : '沒有可分配的常帶道具'}</option>`
+    + `<option value="-"${battle.item[i] === '-' ? ' selected' : ''}>沒有道具（用掉了、被拍落）</option>`
     + (top.length ? `<optgroup label="這隻常帶">${top.map(opt).join('')}</optgroup>` : '') + `<optgroup label="${top.length ? '其他' : '道具'}">${rest.map(opt).join('')}</optgroup>`;
 }
 function btPosHTML(side, p) {
@@ -91,7 +105,7 @@ function btPosHTML(side, p) {
   // 收起時的摘要：不是 0 的能力變化、特性、道具
   const s = battle.st[side][p], fold = `${side}.${p}`;
   const sum = [BT_STATS.map(([, zh], n) => s[n] ? `${zh} ${stgText(s[n])}` : '').filter(Boolean).join('・') || '能力變化都是 0', abilZh(b.ab),
-    me ? b.item && ITEMS[b.item][0] : m.base ? '超級石' : battle.item[i] ? ITEMS[battle.item[i]][0] : '道具還不知道'].filter(Boolean).join('・');
+    me ? b.item && ITEMS[b.item][0] : m.base ? '超級石' : b.item ? `${ITEMS[b.item][0]}${battle.item[i] ? '' : '（預設）'}` : '沒有道具'].filter(Boolean).join('・');
   return `<div ${attr}><div class="bt-h">${tag}<b>${m.zh}</b>${chips(m.types)}<button class="mini bt-off" data-bout="${fold}">下場</button></div>`
     + btFormHTML(side, i)
     + `<div class="bt-hp"><span class="c-l">HP</span><input type="range" ${hp}><input type="number" class="sel c-num" inputmode="numeric" ${hp}>`
@@ -102,7 +116,7 @@ function btPosHTML(side, p) {
 const btFold = {};
 const btIsOpen = k => k in btFold ? btFold[k] : matchMedia('(min-width: 901px)').matches;
 $('#p-battle').addEventListener('toggle', e => { const k = e.target.dataset?.fold; if (k) btFold[k] = e.target.open; }, true);
-// 下方的寶可夢按鈕：場上的標起來，HP 不滿的標剩下多少、對手標看到的道具
+// 下方的寶可夢按鈕：場上的標起來，HP 不滿的標剩下多少、對手標了的道具
 function btBenchHTML(side) {
   const on = battle[side].slice(0, btN());
   return btList(side).map((k, i) => {
@@ -110,7 +124,7 @@ function btBenchHTML(side) {
     const key = btKey(side, i), v = side === 'me' ? battle.hp[i] : battle.ohp[i];
     const H = side === 'me' && v != null ? hpOf(battler(key, team.fmt, team.sets[i])) : 0;
     const hp = v === 0 ? '倒下' : side === 'me' ? (v == null || v >= H ? '' : `${hpPct(v, H)}%`) : v < 100 ? `${v}%` : '';
-    const sub = [hp, side === 'opp' && battle.item[i] && ITEMS[battle.item[i]][0]].filter(Boolean).join('・');
+    const it = side === 'opp' && battle.item[i], sub = [hp, it && (it === '-' ? '沒道具' : ITEMS[it][0])].filter(Boolean).join('・');
     return `<button class="mini" data-bput="${side}" data-i="${i}" aria-pressed="${on.includes(i)}">${MON[key].zh}${sub ? `<span class="meta">${sub}</span>` : ''}</button>`;
   }).join('');
 }
@@ -149,16 +163,6 @@ function btPairHTML(M, O, f) {
   else if (btPri(kill).length) lines.push(['bad', `⚠ ${om.zh}的先制招式打得倒${mm.zh}：${btHits(btPri(kill))}`]);
   if (d.first !== 1 && mine.length) lines.push(['good', `✔ ${tie}${mm.zh}先動就打得倒${om.zh}：${btHits(mine)}`]);
   else if (btPri(mine).length) lines.push(['good', `✔ 先制招式打得倒${om.zh}：${btHits(btPri(mine))}`]);
-  // 對手道具還不知道：牠 OP.GG 常帶、會讓先後或擊倒翻盤的提醒；其他對手已標的道具牠不可能帶（同一隊不能重複），不提醒
-  if (!om.base && !battle.item[O.i]) {
-    const taken = new Set(battle.item.filter(Boolean));
-    const cands = (useOf(O.key, team.fmt)?.items || []).filter(([k]) => !taken.has(k) && !isStone(k));
-    itemFlips(M, O, f, cands, d).forEach(x => {
-      const k2 = x.d.yx.kos, now = x.d.first !== 0 && k2.length > 0 && !was;
-      const parts = [x.first && `${om.zh}變先動`, (x.ko || (x.first && k2.length)) && `打得倒${mm.zh}（${btHits(k2)}）`, x.hold && `撐得住${mvName(x.hold.k)}`];
-      lines.push([now ? 'bad' : '', `${now ? '⚠ ' : ''}若帶${ITEMS[x.k][0]}（OP.GG ${x.p}%）：${parts.filter(Boolean).join('，')}`]);
-    });
-  }
   const rows = (x, n) => x.ok.length ? x.ok.slice(0, n).map(btMoveRow).join('') : `<div class="meta">${x.use.length ? '沒有能算傷害的攻擊招式' : '沒有招式資料'}</div>`;
   return `<div class="bt-pair">${head(`<span class="bt-ord">${order}</span>`)}`
     + `<div class="meta">速度：${mm.zh} ${spd(0, M)}／${om.zh} ${spd(1, O)}${f.tr ? '（戲法空間：慢的先動）' : ''}</div>`
@@ -176,8 +180,8 @@ function btResultHTML() {
     + mine.map(M => opps.map(O => btPairHTML(M, O, f)).join('')).join('')
     + '<p class="note">※ 我方照「隊伍分析」登錄的招式、特性、道具、能力點數與性格算，沒登錄的欄位和對手都照「傷害計算」的預設：'
     + '攻擊／特攻 32＋性格、速度 32＋性格、HP／防禦／特防 0、特性用 OP.GG 最常見的（對手的特性可在上方改；超級進化用固定特性）。'
-    + '對手的道具看到才標，沒標的不算道具；牠 OP.GG 常帶、帶了會讓誰先動或能不能一擊打倒翻盤的道具另外列「若帶…」'
-    + '（同一隊不能帶重複的道具：已標在其他對手身上的不提醒，選單也不列）。'
+    + '對手的道具預設 OP.GG 最常帶的，看到實際道具就在選單改（用掉或被拍落選「沒有道具」）。同一隊不能帶重複的道具：'
+    + '標了的先算，沒標的依使用率由高到低分配，同一顆給使用率高的那隻、另一隻改拿牠下一個常帶的；其他對手標了的道具選單也不列。'
     + '% 是佔對方最大 HP 的比例；「一擊」「二擊」是連用同一招打掉對方剩下的 HP（對手剩下的 % 換算成 HP 時無條件進位），'
     + '不是全滿時氣勢披帶、結實、多重鱗片沒有作用。招式看登錄的或 OP.GG 常用招式裡的攻擊招式，依傷害由高到低排。'
     + '先動看實際速度（能力變化、順風 ×2、戲法空間、講究圍巾、天氣／場地加速特性）；同速各 50%，先制招式不看速度。能力變化換下場就清掉。'

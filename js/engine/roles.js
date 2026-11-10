@@ -75,6 +75,20 @@ const emptySet = () => ({ moves: ['', '', '', ''], item: '', ab: '', sp: [0, 0, 
 const setFilled = s => s.moves.some(Boolean) || !!s.item || !!s.ab || s.sp.some(Boolean) || !!s.nat[0];
 // 配招有填能力點數或性格才用登錄的投資，不然照預設（傷害計算分頁是那頁的投資檔位）
 const hasSpread = set => set.sp.some(Boolean) || !!set.nat[0];
+// 統計清單依使用率由高到低（同使用率照原本順序）
+const byUse = list => list.slice().sort((x, y) => y[1] - x[1]);
+// 寶可夢 key 在 fmt 最常帶的道具（不算超級石：一般型態不帶超級石，超級進化型態固定帶自己的超級石，回傳 ''）；沒有統計回傳 ''
+const topItem = (key, fmt) => !MON[key] || MON[key].base ? '' : byUse(useOf(key, fmt)?.items || []).find(([k]) => !isStone(k))?.[0] || '';
+// 挑好寶可夢時預填的配招：OP.GG fmt 使用率前 4 招、最常用的特性、最常帶的道具（超級進化的特性、道具是固定的，不填）；
+// 能力點數與性格沒有統計，不填。沒有統計回傳 null（沒登錄）
+function defaultSet(key, fmt) {
+  const use = useOf(key, fmt);
+  if (!use) return null;
+  const s = emptySet();
+  byUse(use.moves).slice(0, 4).forEach(([k], n) => { s.moves[n] = k; });
+  if (!MON[key].base) { s.ab = byUse(use.abils)[0]?.[0] || ''; s.item = topItem(key, fmt); }
+  return setFilled(s) ? s : null;
+}
 function attacksOf(key, defs, fmt, set) {
   const use = key && useOf(key, fmt, set);
   if (!use || !use.moves.length) return defs.map(ty => ({ ty, zh: null }));

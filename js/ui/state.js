@@ -1,14 +1,15 @@
 // ---------- 狀態存網址＋本機（可存書籤、重新整理不清空） ----------
 // 格式：#分頁?m=招式,招式&t=屬性,屬性&a=特性&p=隊員1屬性.屬性,@寶可夢key,...&f=d（雙打，單打不寫）&o=對手寶可夢key,...
-//   &ps=隊員 1 的配招,隊員 2 的配招,...（每格「招式+招式+招式+招式.道具.特性.HP+攻擊+防禦+特攻+特防+速度 的能力點數.↑能力+↓能力」，沒登錄的空白）
+//   &ps=隊員 1 的配招,隊員 2 的配招,...（每格「招式+招式+招式+招式.道具.特性.HP+攻擊+防禦+特攻+特防+速度 的能力點數.↑能力+↓能力」；
+//   挑了寶可夢但配招全部清空的寫 -，沒寫的（舊網址）讀進來時填預設配招 defaultSet）
 //   傷害計算：ca=攻擊方key&cd=防守方key&ce=攻擊方投資.HP投資.防禦投資.攻擊方速度投資.防守方速度投資（每個是能力點數，＋性格接 +、−性格接 -；
 //   舊網址的 cv 是快選檔位的索引，讀得到但不再寫）
-//   &cs=攻擊.特攻.防禦.特防.攻擊方速度.防守方速度能力變化&ci=攻擊方道具.防守方道具&cb=攻擊方特性.防守方特性&cw=天氣&cc=1（急所）&cx=加算招式
+//   &cs=攻擊.特攻.防禦.特防.攻擊方速度.防守方速度能力變化&ci=攻擊方道具.防守方道具（和預設相同的空白，選了不帶寫 -）&cb=攻擊方特性.防守方特性&cw=天氣&cc=1（急所）&cx=加算招式
 //   &ct=場地&ch=1（幫助）&cl=牆.牆&cn=1（灼傷）&cg=有順風的一方（a.d）&cz=麻痺的一方（a.d）&cr=1（戲法空間）
 //   &cu=關掉「套用登錄配招」的一方（a.d）（和預設相同的不寫）
 //   對戰中：bm＝我方場上位置 1.位置 2 的隊伍格子索引、bo＝對手場上位置的對手格子索引（空的位置空白）、bh＝我方各格剩下的 HP（全滿空白）、
 //   bp＝對手各格剩下的 HP %（100 空白）、bs＝場上位置的能力變化（我方位置 1, 我方位置 2, 對手位置 1, 對手位置 2，每個「攻擊.防禦.特攻.特防.速度」，都 0 空白）、
-//   bi＝對手各格看到的道具、bb＝對手各格選的特性、bx／by＝我方／對手各格選的型態、bw＝天氣、bf＝場地、br=1（戲法空間）、bg＝有順風的一方（me.opp）
+//   bi＝對手各格標的道具（沒標的空白、用預設，沒有道具寫 -）、bb＝對手各格選的特性、bx／by＝我方／對手各格選的型態、bw＝天氣、bf＝場地、br=1（戲法空間）、bg＝有順風的一方（me.opp）
 const STATE_KEY = 'pkmn-champions-state';
 // 各格的值用逗號接起來，尾端空白的不寫
 const joinTrim = a => { const s = a.slice(); while (s.length && !s[s.length - 1]) s.pop(); return s.join(','); };
@@ -20,7 +21,7 @@ function stateQuery() {
   const p = team.slots.map((s, i) => team.mons[i] ? '@' + team.mons[i] : s.join('.'));
   while (p.length && !p[p.length - 1]) p.pop();
   if (p.length) q.push('p=' + p.join(','));
-  const ps = team.sets.map((s, i) => team.mons[i] && s ? [s.moves.join('+'), s.item, s.ab, s.sp.join('+'), s.nat.join('+')].join('.') : '');
+  const ps = team.sets.map((s, i) => !team.mons[i] ? '' : s ? [s.moves.join('+'), s.item, s.ab, s.sp.join('+'), s.nat.join('+')].join('.') : '-');
   while (ps.length && !ps[ps.length - 1]) ps.pop();
   if (ps.length) q.push('ps=' + ps.join(','));
   if (team.fmt === 'd') q.push('f=d');
@@ -32,7 +33,9 @@ function stateQuery() {
   const ce = c => INVS.map(([k]) => c[k][0] + (c[k][1] === 11 ? '+' : c[k][1] === 9 ? '-' : '')).join('.');
   if (ce(calc) !== ce(CALC0)) q.push('ce=' + ce(calc));
   if (calc.st.some(Boolean)) q.push('cs=' + calc.st.join('.'));
-  if (calc.aItem || calc.dItem) q.push('ci=' + calc.aItem + '.' + calc.dItem);
+  // 道具和預設（defItem）不同才寫，選了不帶寫 -
+  const ci = [['a', calc.atk, calc.aItem], ['d', calc.def, calc.dItem]].map(([s, k, v]) => k && v !== defItem(s, k) ? v || '-' : '');
+  if (ci.some(Boolean)) q.push('ci=' + ci.join('.'));
   if (calc.aAb || calc.dAb) q.push('cb=' + calc.aAb + '.' + calc.dAb);
   if (calc.weather) q.push('cw=' + calc.weather);
   if (calc.crit) q.push('cc=1');
@@ -82,9 +85,9 @@ function loadState(q) {
     team.slots[i] = m ? m.types.slice() : ids(s, '.', 2);
     team.mons[i] = m ? m.key : '';
   });
-  const ps = (kv.ps || '').split(',');
-  team.sets = team.mons.map((k, i) => k ? parseSet(ps[i] || '', k) : null);
   team.fmt = kv.f === 'd' ? 'd' : 's';
+  const ps = (kv.ps || '').split(',');
+  team.sets = team.mons.map((k, i) => !k || ps[i] === '-' ? null : ps[i] ? parseSet(ps[i], k) : defaultSet(k, team.fmt));
   (kv.o || '').split(',').slice(0, 6).forEach((k, i) => { bring.opp[i] = MON[k] ? k : ''; });
   calc.atk = MON[kv.ca] ? kv.ca : '';
   calc.def = MON[kv.cd] ? kv.cd : '';
@@ -96,9 +99,10 @@ function loadState(q) {
   });
   const st = (kv.cs || '').split('.').map(Number);
   calc.st = CALC0.st.map((_, i) => Number.isInteger(st[i]) && Math.abs(st[i]) <= 6 ? st[i] : 0);
-  const [ia, id] = (kv.ci || '').split('.');
-  calc.aItem = itemOK('a', calc.atk, ia) ? ia : '';
-  calc.dItem = itemOK('d', calc.def, id) ? id : '';
+  // 道具：- 是選了不帶，沒寫的用預設（defItem）
+  const [ia = '', id = ''] = (kv.ci || '').split('.'), itemIn = (s, k, v) => v === '-' ? '' : v ? (itemOK(s, k, v) ? v : '') : defItem(s, k);
+  calc.aItem = itemIn('a', calc.atk, ia);
+  calc.dItem = itemIn('d', calc.def, id);
   // 特性只要是資料裡有的 key 就收，實際用哪個由 abOf 依這隻的常用特性決定
   const [ba, bd] = (kv.cb || '').split('.'), abKey = k => ABILS[k] || ABIL_ZH[k] ? k : '';
   calc.aAb = abKey(ba);
@@ -127,6 +131,7 @@ function loadState(q) {
   battle.st = { me: [stOf(sts[0]), stOf(sts[1])], opp: [stOf(sts[2]), stOf(sts[3])] };
   const seen = new Set();
   battle.item = cells(kv.bi).map((k, i) => {
+    if (bring.opp[i] && k === '-') return k;
     if (!bring.opp[i] || !Object.hasOwn(ITEMS, k) || isStone(k) || seen.has(k)) return '';
     seen.add(k);
     return k;

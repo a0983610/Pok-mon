@@ -3,7 +3,7 @@
 // st：能力變化 [攻擊方攻擊, 攻擊方特攻, 防守方防禦, 防守方特防, 攻擊方速度, 防守方速度]；aItem／dItem：道具 key；aAb／dAb：選的特性（空＝用 abOf 的預設）；
 // weather：天氣；crit：急所；extra：加算的招式；terrain：場地；hh：隊友用了幫助（只在雙打算）；walls：防守方的牆（WALLS 的 key）；burn：攻擊方灼傷；
 // sa、sd：攻擊方、防守方速度投資；tw：有順風的一方、par：麻痺的一方（'a' 攻擊方／'d' 防守方）；tr：戲法空間；
-// noSet：關掉「套用登錄配招」的一方（預設有登錄就套用，鏡像對戰時對手是同一隻可以關掉）
+// noSet：關掉「套用登錄配招」的一方（預設有登錄就套用；從「對手」帶進來的鏡像對手自動關掉，也可以自己關）
 const CALC0 = { atk: '', def: '', ai: [32, 11], hi: [0, 10], di: [0, 10], st: [0, 0, 0, 0, 0, 0], aItem: '', dItem: '', aAb: '', dAb: '', weather: '', crit: false, extra: '',
   terrain: '', hh: false, walls: [], burn: false, sa: [32, 11], sd: [32, 11], tw: [], par: [], tr: false, noSet: [] };
 // 我方隊伍裡寶可夢 key 登錄的配招（見 useOf；沒在隊上或沒登錄是 null）；calcSet＝這一方（'a'／'d'）實際套用的配招（關掉了就是 null）
@@ -46,6 +46,10 @@ function itemNote(v) {
 const itemRank = v => v.type || v.berry ? 1 + IDS.indexOf(v.type || v.berry) : 0;
 // 這一方（side a 攻擊方／d 防守方）的寶可夢 key 能不能帶道具 item：超級進化要帶超級石，電氣球限皮卡丘
 const itemOK = (side, key, item) => { const v = DMG_ITEMS[item], m = MON[key]; return !!v?.side.includes(side) && !m?.base && (!v.mon || (m && family(m) === v.mon)); };
+// 這一方的寶可夢 key 預設的道具：OP.GG 最常帶的（topItem）；這一方帶了沒作用（不影響傷害或速度）的算不帶
+const defItem = (side, key) => { const k = topItem(key, team.fmt); return itemOK(side, key, k) ? k : ''; };
+// 換邊後的道具：原本那邊的道具換邊後還有作用就留著，不然用這一邊的預設
+const swapItem = (side, key, cur) => itemOK(side, key, cur) ? cur : defItem(side, key);
 // 道具選單：只列影響傷害或速度的道具，這隻 OP.GG 常帶的排前面
 function itemOptions(side, key, cur) {
   if (MON[key]?.base) return '<option value="">超級進化（帶超級石）</option>';
@@ -84,10 +88,10 @@ function intimidateOn(ab) {
 // 快選：我方隊伍（隊伍分析）挑了的寶可夢和對手（出戰選角）
 // 對手後面接著列出牠常帶超級石的超級進化型態（megaInfo 算進去的，同出戰選角的對位判斷）
 function quickHTML(side) {
-  const btn = (k, tip = '') => `<button class="mini" data-side="${side}" data-k="${k}" aria-pressed="${calc[side] === k}"${tip ? ` title="${tip}"` : ''}>${MON[k].zh}</button>`;
+  const btn = (k, tip = '', opp = false) => `<button class="mini" data-side="${side}" data-k="${k}"${opp ? ' data-opp' : ''} aria-pressed="${calc[side] === k}"${tip ? ` title="${tip}"` : ''}>${MON[k].zh}</button>`;
   const mine = team.mons.filter(Boolean), opp = bring.opp.filter(Boolean);
-  const oppBtns = opp.flatMap(k => [btn(k), ...megaInfo(MON[k], team.fmt).filter(x => x.counted)
-    .map(x => btn(x.mon.key, `${MON[k].zh}${x.p != null ? `有 ${x.p}% 帶超級石` : '可能超級進化'}`))]);
+  const oppBtns = opp.flatMap(k => [btn(k, '', true), ...megaInfo(MON[k], team.fmt).filter(x => x.counted)
+    .map(x => btn(x.mon.key, `${MON[k].zh}${x.p != null ? `有 ${x.p}% 帶超級石` : '可能超級進化'}`, true))]);
   return (mine.length ? `<span class="meta">我方</span>${mine.map(k => btn(k)).join('')}` : '') + (opp.length ? `<span class="meta">對手</span>${oppBtns.join('')}` : '');
 }
 // 攻擊方／防守方各自的屬性篩選（不存網址，選好寶可夢就清掉）；有選屬性才列出符合的寶可夢
@@ -121,10 +125,11 @@ function calcHTML() {
   const o = { fmt: team.fmt, weather: calc.weather, crit: calc.crit, terrain: calc.terrain, hh, walls: calc.walls, burn: calc.burn };
   const fw = dmgRows(a, d, o, calc.extra), { use, ok, why } = fw;
   // 反擊＝防守方打攻擊方，和按「⇄ 對調」看到的一樣：特性跟著寶可夢、投資檔位不動（攻擊投資套在防守方、HP／防禦投資套在攻擊方），
-  // 道具（對調後兩邊都能帶的只有講究圍巾，不影響傷害）、能力變化、加算招式、灼傷、幫助、牆不算；天氣、場地、急所照舊。
+  // 道具照對調後的（swapItem：原本的道具換邊後還有作用就留著，不然用那一邊的預設），能力變化、加算招式、灼傷、幫助、牆不算；天氣、場地、急所照舊。
   // 套用登錄配招的一方，投資和道具照登錄的（道具是那隻自己帶的，反過來打也一樣）
-  const bk = dmgRows({ key: calc.def, inv: calc.ai, ...spD, st: { atk: 0, spa: 0 }, item: itemFor('a', sd, calc.def, ''), ab: dab, set: sd },
-    { key: calc.atk, hp: calc.hi, inv: calc.di, ...spA, st: { def: 0, spd: 0 }, item: itemFor('d', sa, calc.atk, ''), ab: aab }, { ...o, hh: false, walls: [], burn: false }, '');
+  const bk = dmgRows({ key: calc.def, inv: calc.ai, ...spD, st: { atk: 0, spa: 0 }, item: itemFor('a', sd, calc.def, swapItem('a', calc.def, calc.dItem)), ab: dab, set: sd },
+    { key: calc.atk, hp: calc.hi, inv: calc.di, ...spA, st: { def: 0, spd: 0 }, item: itemFor('d', sa, calc.atk, swapItem('d', calc.atk, calc.aItem)), ab: aab },
+    { ...o, hh: false, walls: [], burn: false }, '');
   const sps = [spA, spD];
   const { spd, first } = speedPair(...SIDES.map((s, i) => ({ key: [calc.atk, calc.def][i], inv: [calc.sa, calc.sd][i], ...sps[i], st: calc.st[4 + i], item: [aItem, dItem][i],
     ab: [aab, dab][i], tw: calc.tw.includes(s), par: calc.par.includes(s), status: calc.par.includes(s) || (!i && calc.burn) })), { weather: calc.weather, terrain: calc.terrain, tr: calc.tr });
@@ -187,6 +192,7 @@ function calcHTML() {
     + '雙打範圍招式 ×0.75、天氣、急所 ×1.5、能力變化、特性、道具。投資套在這招用到的那項能力：物理招看攻擊打防禦、特殊招看特攻打特防（精神衝擊打防禦、撲擊用自己的防禦）；'
     + '「滿投資」＝能力點數 32，「＋性格」再 ×1.1；也可以在檔位旁直接輸入能力點數（每項 0～32，六項合計最多 66）並選性格'
     + '（＋性格 ×1.1、−性格 ×0.9；HP 沒有性格），超過 66 時結果上方會提示。上方能力值是投資後、能力變化前的數字。列出的招式是 OP.GG 常用招式裡的攻擊招式，依傷害由高到低排。'
+    + '道具預設這隻 OP.GG 最常帶的（帶在這一方沒作用、不影響傷害或速度的算不帶），可在選單改。'
     + '特性：超級進化用固定特性，其他預設用 OP.GG 使用率最高的，可在選單改；要看場上狀況的不算（如猛火、引火的強化、正電／負電、分析、大將、鬥爭心、畫皮），'
     + '毅力在勾「灼傷」時算（攻擊 ×1.5、不減半）。開天氣、開場地的特性和威嚇不會自動套用，結果上方會提示。破格會無視防守方的特性。電光束出招前特攻 +1 已算進去。'
     + '幫助（雙打才有）威力 ×1.5；灼傷時物理招式傷害 ×½。反射壁擋物理、光牆擋特殊、極光幕兩種都擋（不和前兩者疊加），單打 ×½、雙打 ×⅔；'
@@ -200,9 +206,9 @@ function calcHTML() {
     + '勾「戲法空間」時速度慢的先動（同 Pokémon Showdown，同速仍各 50%、先制招式仍優先）；不含加速這類回合中的變化。'
     + `快選的「對手」會接著列出牠 OP.GG 道具統計有 ${ROLE_PCT}% 以上帶超級石的超級進化型態（同出戰選角的判斷）。`
     + '「反擊」＝防守方打攻擊方最痛的一招，和按「⇄ 對調」看到的相同：投資檔位不動'
-    + '（上方的攻擊投資套在防守方、HP／防禦投資套在攻擊方），能力變化、道具、灼傷、幫助、牆不算。'
+    + '（上方的攻擊投資套在防守方、HP／防禦投資套在攻擊方），道具照對調後的（原本的道具換邊後沒作用就用那一邊的預設），能力變化、灼傷、幫助、牆不算。'
     + '選到「隊伍分析」登錄了配招的我方隊員時，預設套用登錄的招式、特性、道具、能力點數與性格（反擊也照登錄的投資與道具；沒填的欄位照這頁的設定），'
-    + '列出的招式標「登錄」；對手剛好是同一隻（鏡像對戰）時，把那一方的「套用」關掉。</p>';
+    + '列出的招式標「登錄」；從「對手」快選或出戰選角帶進來的對手剛好和我方隊員是同一隻（鏡像對戰）時，那一方自動關掉「套用」，其他情況可以自己關。</p>';
 }
 function renderCalc() {
   [['atk', 'aItem', 'a', '#cAtk', '#cAtkQ', '#cAItem', 'aAb', '#cAAb', ATK_REL], ['def', 'dItem', 'd', '#cDef', '#cDefQ', '#cDItem', 'dAb', '#cDAb', DEF_REL]]
@@ -253,22 +259,22 @@ function renderCalc() {
     : '<p class="empty">選好攻擊方和防守方後，這裡會列出攻擊方常用攻擊招式打過去的傷害、佔防守方 HP 的比例，以及幾下會被打倒。</p>';
   saveState();
 }
-// 換寶可夢時清掉那一方的道具、選的特性和麻痺；換攻擊方也清掉加算招式和灼傷（灼傷、麻痺是那一隻的狀態；幫助、牆、順風、天氣、場地是場上的，留著）。
-// 選好就清掉那一方的屬性篩選，收起清單
-function setCalcMon(side, key) {
+// 換寶可夢時那一方的道具改成這隻的預設（defItem），清掉選的特性和麻痺；換攻擊方也清掉加算招式和灼傷（灼傷、麻痺是那一隻的狀態；幫助、牆、順風、天氣、場地是場上的，留著）。
+// 選好就清掉那一方的屬性篩選，收起清單。opp＝從「對手」帶進來的：我方隊伍剛好也有這隻（鏡像）時，這一方不套我方登錄的配招
+function setCalcMon(side, key, opp = false) {
   calcPick[side] = [];
   if (calc[side] !== key) {
     calc[side] = key;
-    if (side === 'atk') { calc.aItem = calc.aAb = calc.extra = ''; calc.burn = false; } else calc.dItem = calc.dAb = '';
+    if (side === 'atk') { calc.aItem = defItem('a', key); calc.aAb = calc.extra = ''; calc.burn = false; } else { calc.dItem = defItem('d', key); calc.dAb = ''; }
     calc.par = calc.par.filter(s => s !== side[0]);
-    calc.noSet = calc.noSet.filter(s => s !== side[0]);
   }
+  calc.noSet = SIDES.filter(s => s === side[0] ? opp && !!teamSetOf(key) : calc.noSet.includes(s));
   renderCalc();
 }
 $('#p-calc').addEventListener('click', e => {
   const b = e.target.closest('button'), seg = b?.closest('.seg')?.id;
   if (!b) return;
-  if (b.dataset.k) setCalcMon(b.dataset.side, b.dataset.k);
+  if (b.dataset.k) setCalcMon(b.dataset.side, b.dataset.k, b.dataset.opp != null);
   else if (b.classList.contains('tbtn')) { toggleSel(calcPick[b.closest('.c-pick').dataset.side], b.dataset.id, 2); renderCalc(); }
   else if (INVS.some(x => x[1] === seg)) { const [k, , list] = INVS.find(x => x[1] === seg); calc[k] = list[+b.dataset.v].slice(0, 2); renderCalc(); }
   else if (seg === 'cW') { calc.weather = b.dataset.w; renderCalc(); }
@@ -307,13 +313,13 @@ $('#p-calc').addEventListener('input', e => {
   renderCalc();
 });
 $('#cFmt').addEventListener('click', setFmt);
-// 對調：特性和速度相關的（速度投資、速度變化、麻痺、那一方的順風）跟著寶可夢走；道具只留換邊後還能帶的（兩邊都能帶的只有講究圍巾）；
-// 攻擊／防禦類能力變化、加算招式和只屬於某一方的灼傷、幫助、牆清掉（天氣、場地、戲法空間留著）
+// 對調：特性和速度相關的（速度投資、速度變化、麻痺、那一方的順風）跟著寶可夢走；道具換邊後還有作用就留著（兩邊都有作用的只有講究圍巾），
+// 不然用那一邊的預設（swapItem）；攻擊／防禦類能力變化、加算招式和只屬於某一方的灼傷、幫助、牆清掉（天氣、場地、戲法空間留著）
 $('#cSwap').addEventListener('click', () => {
   const [ai, di] = [calc.aItem, calc.dItem], flip = list => SIDES.filter(s => list.includes(s === 'a' ? 'd' : 'a'));
   [calc.atk, calc.def, calc.aAb, calc.dAb] = [calc.def, calc.atk, calc.dAb, calc.aAb];
-  calc.aItem = itemOK('a', calc.atk, di) ? di : '';
-  calc.dItem = itemOK('d', calc.def, ai) ? ai : '';
+  calc.aItem = swapItem('a', calc.atk, di);
+  calc.dItem = swapItem('d', calc.def, ai);
   calc.extra = '';
   [calc.sa, calc.sd] = [calc.sd, calc.sa];
   calc.st = [0, 0, 0, 0, calc.st[5], calc.st[4]];

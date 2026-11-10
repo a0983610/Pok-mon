@@ -356,10 +356,11 @@ function dmgRows(a, d, o, extra) {
   return { use, ok, why, kos: ok.filter(x => x.r.ko?.[0] > 1e-9), top: ok.find(x => x.r.ko) };
 }
 // 對位的一方（出招表、對戰中共用）：寶可夢 key、fmt；set＝我方登錄的配招（對手不傳）。
-// 沒登錄的欄位照傷害計算的預設（CALC0）：攻擊／特攻 32＋性格、速度 32＋性格、HP／防禦／特防 0、不帶道具、特性用 defAbOf
+// 沒登錄的欄位照傷害計算的預設（CALC0）：攻擊／特攻 32＋性格、速度 32＋性格、HP／防禦／特防 0、特性用 defAbOf；
+// 道具：登錄了就用登錄的，沒有就帶 OP.GG 最常帶的（topItem，同傷害計算的預設）
 function battler(key, fmt, set) {
   const sp = set && hasSpread(set) ? { sp: set.sp, nat: set.nat } : {};
-  return { key, set, ab: set?.ab || defAbOf(key, fmt), item: set?.item || '', ...sp, atkInv: [32, 11], hp: [0, 10], defInv: [0, 10], speInv: [32, 11] };
+  return { key, set, ab: set?.ab || defAbOf(key, fmt), item: set?.item || topItem(key, fmt), ...sp, atkInv: [32, 11], hp: [0, 10], defInv: [0, 10], speInv: [32, 11] };
 }
 // battler b 的最大 HP
 const hpOf = b => statOf(MON[b.key].bs[0], invAt(b, 0, b.hp)[0], 0);
@@ -374,16 +375,4 @@ function duel(x, y, f) {
   const def = b => ({ key: b.key, hp: b.hp, inv: b.defInv, sp: b.sp, nat: b.nat, st: { def: st(b, 'def'), spd: st(b, 'spd') }, item: b.item, ab: b.ab, cur: b.cur });
   const spe = b => ({ key: b.key, inv: b.speInv, sp: b.sp, nat: b.nat, st: st(b, 'spe'), item: b.item, ab: b.ab, tw: !!b.tw });
   return { xy: dmgRows(atk(x), def(y), o), yx: dmgRows(atk(y), def(x), o), ...speedPair(spe(x), spe(y), { weather: o.weather, terrain: o.terrain, tr: !!f.tr }) };
-}
-// 對戰中對手 y 的道具還不知道時（y.item 空），牠可能帶的道具 items [[道具 key, 使用率]] 裡，帶了會讓 duel(x, y, f) 的結果 base 翻盤的：
-// first＝變成 y 先動、ko＝變成 y 一擊打得倒 x（打得倒的第一招）、hold＝x 原本一擊打得倒 y、帶了就打不倒（原本打得倒的第一招）。
-// 只看影響傷害或速度的道具（DMG_ITEMS）；回傳 [{ k, p, first, ko, hold, d 帶了的 duel }]
-function itemFlips(x, y, f, items, base) {
-  return items.filter(([k]) => DMG_ITEMS[k]).flatMap(([k, p]) => {
-    const d = duel(x, { ...y, item: k }, f);
-    const first = base.first !== 1 && d.first === 1;
-    const ko = !base.yx.kos.length && d.yx.kos[0];
-    const hold = !d.xy.kos.length && base.xy.kos[0];
-    return first || ko || hold ? [{ k, p, first, ko, hold, d }] : [];
-  });
 }

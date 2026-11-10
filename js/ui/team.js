@@ -1,5 +1,5 @@
 // ---------- 隊伍分析 ----------
-// mons：每格選的寶可夢 key（只選屬性時為空字串）；sets：每格登錄的配招（見 useOf；沒登錄是 null，換寶可夢就清掉）；
+// mons：每格選的寶可夢 key（只選屬性時為空字串）；sets：每格登錄的配招（見 useOf；挑寶可夢時填 defaultSet，全部清空或沒有統計是 null）；
 // fmt：排名依據 s 單打、d 雙打
 const team = { slots: [[], [], [], [], [], []], mons: ['', '', '', '', '', ''], sets: [null, null, null, null, null, null], cur: 0, fmt: 's' };
 // 隊上成員 key → 登錄的配招（recommendMon、traitScan 用）
@@ -296,7 +296,8 @@ function setEditorHTML() {
       + `<optgroup label="${top.length ? '其他' : '全部'}">${rest.map(k => opt(k, dict[k][0], cur)).join('')}</optgroup>`;
   };
   const sum = s.sp.reduce((a, v) => a + v, 0), nat = s.nat[0] ? s.nat.join('+') : '';
-  return `<div class="set-ed"><div class="b-label">第 ${i + 1} 隻 ${m.zh} 的配招<span class="muted small">沒填的欄位照 OP.GG ${fz}統計；登錄後隊伍分析、出戰選角都照這份判斷</span></div>`
+  return `<div class="set-ed"><div class="b-label">第 ${i + 1} 隻 ${m.zh} 的配招<span class="muted small">挑好寶可夢時先填好 OP.GG ${fz}使用率前 4 招、最常用的特性與道具，照自己的配招改；`
+    + `清空的欄位照 OP.GG 統計；各分頁都照這份判斷</span></div>`
     + `<div class="c-f"><span class="c-l">招式</span>${s.moves.map((k, n) => `<select class="sel" data-mv="${n}" aria-label="招式 ${n + 1}">${opts(MOVES, use?.moves || [], k)}</select>`).join('')}</div>`
     + `<div class="c-f"><span class="c-l">特性</span>${m.base ? `<span>${m.megaAbils.map(abilZh).join('、')}<span class="meta">（超級進化後固定）</span></span>`
       : `<select class="sel" data-ab aria-label="特性">${opts(ABILS, use?.abils || [], s.ab)}</select>`}</div>`
@@ -307,7 +308,7 @@ function setEditorHTML() {
     + `<span class="${sum > 66 ? 'x-msg' : 'muted small'}">${sum > 66 ? '⚠ ' : ''}合計 ${sum}／66${sum > 66 ? '，超過上限' : ''}</span></div></div>`
     + `<div class="c-f"><span class="c-l">性格</span><select class="sel" data-nat aria-label="性格">${opt('', '不加減', nat)}`
     + NATURES.map(([u, d]) => opt(`${u}+${d}`, `${STAT_ZH[u]} ↑・${STAT_ZH[d]} ↓`, nat)).join('') + '</select></div>'
-    + `<div class="c-f"><button class="mini" data-setclear${team.sets[i] ? '' : ' disabled'}>清除配招</button></div></div>`;
+    + `<div class="c-f"><button class="mini" data-setreset>恢復預設</button><span class="muted small">改回使用率前 4 招、最常用的特性與道具（能力點數、性格清空）</span></div></div>`;
 }
 // 實戰：OP.GG 對手 m 的敗於／勝於名單裡有我方挑了寶可夢的隊員（named 是格子索引，同家族算）；
 // 兩份名單都有的不列（名單依次數排，兩隻都熱門時常常兩邊都上榜，看不出誰剋誰）。熱門威脅和出戰選角共用
@@ -432,9 +433,9 @@ function pickTeamType(id) {
   toggleSel(team.slots[team.cur], id, 2);
   renderTeam();
 }
-// 把寶可夢放進目前格子，再跳到後面的空格
+// 把寶可夢放進目前格子，再跳到後面的空格；換了寶可夢就登錄預設配招（defaultSet：使用率前 4 招、最常用的特性與道具）
 function pickTeamMon(key) {
-  if (team.mons[team.cur] !== key) team.sets[team.cur] = null;
+  if (team.mons[team.cur] !== key) team.sets[team.cur] = defaultSet(key, team.fmt);
   team.slots[team.cur] = MON[key].types.slice();
   team.mons[team.cur] = key;
   const n = team.slots.findIndex((x, i) => i > team.cur && !x.length);
@@ -459,7 +460,7 @@ $('#tPick').addEventListener('click', e => {
 $('#tList').addEventListener('click', e => {
   const b = e.target.closest('[data-mon]');
   if (b) pickTeamMon(b.dataset.mon);
-  if (e.target.closest('[data-setclear]')) { team.sets[team.cur] = null; renderTeam(); }
+  if (e.target.closest('[data-setreset]')) { team.sets[team.cur] = defaultSet(team.mons[team.cur], team.fmt); renderTeam(); }
 });
 // 配招登錄：同一招選到另一格時，原本那格清掉；點數限 0～32；什麼都沒填就當沒登錄
 $('#tList').addEventListener('change', e => {

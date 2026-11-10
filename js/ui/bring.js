@@ -78,7 +78,8 @@ function moveTableHTML(members, opps, best, alt, oppMegas) {
         + best.idx.map(j => {
           const k = keyIn(j), slot = members[j][1];
           if (!k) return `<div class="x-line"><b>${slot + 1} ${slotName(slot)}</b><span class="meta">只選屬性，沒有能力值可以算</span></div>`;
-          const d = duel(battler(k, fmt, team.sets[slot]), opp, { fmt });
+          // 不進化而以原型上場的，帶的是自己的超級石（不影響計算），不套最常帶的道具
+          const d = duel({ ...battler(k, fmt, team.sets[slot]), ...(k !== team.mons[slot] && { item: '' }) }, opp, { fmt });
           const order = d.first < 0 ? '同速' : d.first ? '後動' : '先動';
           // 帶到傷害計算（不進化而以原型上場的不帶：傷害計算只會對隊上的型態套用登錄配招）
           return `<div class="x-line"><b>${slot + 1} ${MON[k].zh}</b><span class="meta">${order}（${d.spd[0].v}／${d.spd[1].v}）</span>`
@@ -87,7 +88,7 @@ function moveTableHTML(members, opps, best, alt, oppMegas) {
         }).join('') + '</div>';
     }).join('')
     + '<p class="note">※ 我方有在「隊伍分析」登錄配招的照登錄的招式、特性、道具、能力點數與性格算；沒登錄的欄位和對手都照「傷害計算」的預設：'
-    + '攻擊／特攻 32＋性格、速度 32＋性格、HP／防禦／特防 0、不帶道具、特性用 OP.GG 最常見的（超級進化用固定特性）。'
+    + '攻擊／特攻 32＋性格、速度 32＋性格、HP／防禦／特防 0、道具帶 OP.GG 最常帶的（超級進化帶超級石）、特性用 OP.GG 最常見的（超級進化用固定特性）。'
     + '招式看登錄的或 OP.GG 常用招式裡的攻擊招式，列傷害最高的一招；幾擊＝連續用同一招幾次打倒。'
     + '先動看實際速度（括號是我方／對手的速度；同速各 50%，先制招式不看速度）。不含天氣、場地、能力變化與出場特性（如威嚇、日照）。'
     + '對手常帶超級石的另列「超級進化後」；一場只能超級進化一隻，第 1 名組合裡不進化的隊員以原型計。按「傷害計算」看每一招的細節。</p>';
@@ -168,7 +169,7 @@ $('#pResult').addEventListener('click', e => {
   const b = e.target.closest('[data-ca]');
   if (!b) return;
   setCalcMon('atk', b.dataset.ca);
-  setCalcMon('def', b.dataset.cd);
+  setCalcMon('def', b.dataset.cd, true);
   showTab('calc');
   $('#p-calc').scrollIntoView({ block: 'start' });
 });
