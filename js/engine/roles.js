@@ -60,8 +60,11 @@ const FIXED_DMG = new Set(['counter', 'mirror-coat', 'metal-burst', 'comeuppance
 // set：我方登錄的配招 { moves: [招式 key ×4], item, ab, sp: [HP, 攻擊, 防禦, 特攻, 特防, 速度 的能力點數], nat: [↑能力索引, ↓能力索引] }
 // （沒填的是空字串／0）。有填的招式／特性／道具當成使用率 100% 蓋過統計的同一欄，沒填的照舊看統計；
 // 只有我方隊員會傳，對手一律看統計（鏡像對戰也不會混用）。有蓋過時多回傳 reg { moves, abils, items }＝哪幾欄是登錄的（畫面上登錄的不標使用率）
+// 超級進化型態的道具固定是自己的超級石（stoneOf；資料裡沒有就是空的），不沿用原型的道具統計，多回傳 fixedItem 給畫面標「超級進化固定」
 function useOf(key, fmt, set) {
-  const use = USAGE[family(MON[key])]?.[fmt], moves = set ? set.moves.filter(Boolean) : [];
+  let use = USAGE[family(MON[key])]?.[fmt];
+  if (use && MON[key].base) { const st = stoneOf(MON[key]); use = { ...use, items: st ? [[st, 100]] : [], fixedItem: true }; }
+  const moves = set ? set.moves.filter(Boolean) : [];
   if (!moves.length && !set?.ab && !set?.item) return use;
   return { ...(use || { moves: [], abils: [], items: [], mates: [], win: [], lose: [] }),
     ...(moves.length && { moves: moves.map(k => [k, 100]) }), ...(set.ab && { abils: [[set.ab, 100]] }), ...(set.item && { items: [[set.item, 100]] }),

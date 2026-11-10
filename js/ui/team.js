@@ -88,9 +88,12 @@ const byText = by => by.length ? `（${by.map(([zh, p]) => `${zh} ${p}%`).join('
 const STAT_ZH = ['HP', '攻擊', '防禦', '特攻', '特防', '速度'];
 const statsHTML = m => `<div class="bst">${m.bs.map((v, k) => `<span${(k === 1 || k === 3) && v === Math.max(m.bs[1], m.bs[3]) ? ' class="hi"' : ''}>`
   + `${STAT_ZH[k]} <b>${v}</b></span>`).join('')}<span>合計 <b>${m.bs.reduce((s, v) => s + v, 0)}</b></span></div>`;
-// OP.GG 常帶道具（前 3；登錄的不標使用率）與常見隊友（前 6）；fams 是隊上成員的家族，已在隊上的隊友標 ✔
-const kitHTML = (use, fams) => use.items.length || use.mates.length ? '<div class="bst">'
-  + (use.items.length ? `<span>道具 ${use.items.slice(0, 3).map(([k, p]) => `<b>${ITEMS[k]?.[0] ?? k}</b>` + (use.reg?.items ? '（登錄）' : ` ${p}%`)).join('・')}</span>` : '')
+// 超級進化型態的道具：固定是自己的超級石（useOf 的 fixedItem；資料裡沒有這顆的寫「專屬的超級石」）
+const megaItemHTML = use => `<span>道具 <b>${use.items[0] ? ITEMS[use.items[0][0]][0] : '專屬的超級石'}</b>（超級進化固定）</span>`;
+// OP.GG 常帶道具（前 3；登錄的不標使用率，超級進化只有固定的超級石）與常見隊友（前 6）；fams 是隊上成員的家族，已在隊上的隊友標 ✔
+const kitHTML = (use, fams) => use.items.length || use.mates.length || use.fixedItem ? '<div class="bst">'
+  + (use.fixedItem ? megaItemHTML(use)
+    : use.items.length ? `<span>道具 ${use.items.slice(0, 3).map(([k, p]) => `<b>${ITEMS[k]?.[0] ?? k}</b>` + (use.reg?.items ? '（登錄）' : ` ${p}%`)).join('・')}</span>` : '')
   + (use.mates.length ? `<span>常見隊友 ${use.mates.slice(0, 6).map(k => fams.includes(family(MON[k])) ? `<b>✔${MON[k].zh}</b>` : MON[k].zh).join('・')}</span>` : '')
   + '</div>' : '';
 // 常用招式（摘要列前 5 招）、特性、超級進化後特性、道具的完整清單與效果（r 是 roleOf 的結果；我方登錄的欄位標「登錄」、不標使用率）；
@@ -105,7 +108,7 @@ const useDetailsHTML = r => {
     }).join('')
     + r.use.abils.map(([k, p]) => `<div class="mv-row"><span class="mv-p">${pc(p, g.abils)}</span><b>特性：${ABILS[k][0]}</b><span class="mv-e">${ABILS[k][1]}</span></div>`).join('')
     + r.mega.map(k => `<div class="mv-row"><span class="mv-p">固定</span><b>超級進化後特性：${ABILS[k][0]}</b><span class="mv-e">${ABILS[k][1]}</span></div>`).join('')
-    + r.use.items.filter(([k]) => ITEMS[k]).map(([k, p]) => `<div class="mv-row"><span class="mv-p">${pc(p, g.items)}</span><b>道具：${ITEMS[k][0]}</b><span class="mv-e">${ITEMS[k][1]}</span></div>`).join('')
+    + r.use.items.filter(([k]) => ITEMS[k]).map(([k, p]) => `<div class="mv-row"><span class="mv-p">${r.use.fixedItem ? '固定' : pc(p, g.items)}</span><b>道具：${ITEMS[k][0]}</b><span class="mv-e">${ITEMS[k][1]}</span></div>`).join('')
     + '</details>';
 };
 function roleHTML(members) {
@@ -136,7 +139,7 @@ function roleHTML(members) {
     + `功能標籤要使用率 ${ROLE_PCT}% 以上才標，打 ★ 的算輔助招：<br>`
     + ROLES.map(r => `<b>${r.sup ? '★' : ''}${r.zh}</b>：${names(r.moves, MOVES)}${r.abils && names(r.abils, ABILS) ? '；特性 ' + names(r.abils, ABILS) : ''}`).join('<br>')
     + `<br>「隊伍該有」＝物攻、特攻輸出各一，加上${fz}排名前 30 名裡至少兩成有的功能。`
-    + '<br>道具、常見隊友也是 OP.GG 的統計（道具只收使用率 5% 以上；隊友是 OP.GG「隊友」名單的前幾名，標 ✔ 的已在隊上）。</p></details>';
+    + '<br>道具、常見隊友也是 OP.GG 的統計（道具只收使用率 5% 以上，超級進化型態的道具固定是自己的超級石、不看統計；隊友是 OP.GG「隊友」名單的前幾名，標 ✔ 的已在隊上）。</p></details>';
 }
 // 隊伍特性與場地招式：挑了寶可夢的隊員依常用特性、招式（使用率 ROLE_PCT% 以上，同功能標籤）分類，再做搭配檢查；只看我方。
 // 清單可含目前資料還沒有的特性／招式（如薄霧製造者、沙暴），之後更新資料出現了就會算進去

@@ -80,11 +80,11 @@ function oppInfoHTML(opps) {
       if (!r) return `${head}<div class="bst"><span>${fz}沒有統計資料，對位表看本系</span></div>${realLine}</div>`;
       const abils = [top(r.use.abils.filter(([k]) => !r.mega.includes(k)), ABILS, 2), ...r.mega.map(k => `<b>${ABILS[k][0]}</b> 超級進化後固定`)].filter(Boolean).join('・');
       return head + `<div class="bst"><span>常帶攻擊 <b>${oppAtkText(monUnit(m, team.fmt))}</b></span></div>`
-        + `<div class="bst">${abils ? `<span>特性 ${abils}</span>` : ''}${r.use.items.length ? `<span>道具 ${top(r.use.items, ITEMS, 3)}</span>` : ''}</div>`
+        + `<div class="bst">${abils ? `<span>特性 ${abils}</span>` : ''}${r.use.fixedItem ? megaItemHTML(r.use) : r.use.items.length ? `<span>道具 ${top(r.use.items, ITEMS, 3)}</span>` : ''}</div>`
         + realLine + useDetailsHTML(r) + '</div>';
     }).join('')
     + `<p class="note">※「常帶攻擊」＝同屬性招式使用率加總 ${ROLE_PCT}% 以上的攻擊招式（輔助用、固定傷害、反擊類不算），對位表的「不怕」就是看這些；`
-    + '特性列前 2 名、道具列前 3 名，「實戰」同「隊伍分析」熱門威脅檢查的說明。'
+    + '特性列前 2 名、道具列前 3 名（超級進化型態的道具固定是自己的超級石，不看統計），「實戰」同「隊伍分析」熱門威脅檢查的說明。'
     + `「可能超級進化」＝選的是一般型態、但 OP.GG 道具統計有 ${ROLE_PCT}% 以上帶這顆超級石（% 是超級石使用率；沒有道具統計的每種都算），`
     + '對位表會連進化後的屬性一起看；確定牠會進化就直接選超級進化型態。</p>';
 }
