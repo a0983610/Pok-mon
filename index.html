@@ -3308,25 +3308,29 @@ function threatHTML(members) {
     + '「實戰」＝OP.GG 這隻的「敗於」「勝於」前 10 名裡有我方隊員（超級進化看原型）；名單依次數排，熱門寶可夢容易上榜，'
     + '兩份名單都有的不列，只供參考，不影響有解／沒解。</p>';
 }
-// 速度線：我方（挑了寶可夢的才有速度）和熱門寶可夢依速度種族值由快到慢排，同速時我方排前面
+// 速度線：我方（挑了寶可夢的才有速度）和熱門寶可夢依速度種族值由快到慢排，同速時我方排前面。
+// 熱門寶可夢常帶超級石的（megaInfo 算進去的），超級進化型態另列一行；比幾隻快／慢時取進化前後較快的
 // 帶講究圍巾的使用率（OP.GG 道具統計）；超級進化要帶超級石，不標
 const scarf = m => { const p = !m.base && useOf(m.key, team.fmt)?.items.find(([k]) => k === 'choice-scarf')?.[1]; return p ? `・講究圍巾 ${p}%` : ''; };
 function speedHTML(members) {
-  const top = topMons(team.fmt, THREAT_N);
+  const top = topMons(team.fmt, THREAT_N), megas = new Map(top.map(m => [m, megaInfo(m, team.fmt).filter(x => x.counted)]));
+  const fastest = m => Math.max(m.spe, ...megas.get(m).map(x => x.mon.spe));
   const mine = members.filter(([, i]) => team.mons[i]).map(([, i]) => ({ i, mon: MON[team.mons[i]] }));
-  const rows = [...mine, ...top.map(mon => ({ mon }))]
+  const rows = [...mine, ...top.flatMap(mon => [{ mon }, ...megas.get(mon).map(x => ({ mon: x.mon, p: x.p, mega: true }))])]
     .sort((x, y) => y.mon.spe - x.mon.spe || (y.i != null) - (x.i != null) || x.mon.rank[team.fmt] - y.mon.rank[team.fmt]);
   return `<div class="res-head">速度線<span class="muted small">（速度種族值：我方＋${FMT_ZH[team.fmt]}排名前 ${THREAT_N}）</span></div>`
     + mine.map(({ i, mon }) => {
-      const n = f => top.filter(t => f(t.spe, mon.spe)).length;
+      const n = f => top.filter(t => f(fastest(t), mon.spe)).length;
       return `<div class="x-line"><b>${i + 1} ${mon.zh}</b><span class="x-msg">速度 ${mon.spe}：比 ${n((t, m) => t < m)} 隻快、`
         + `同速 ${n((t, m) => t === m)} 隻、比 ${n((t, m) => t > m)} 隻慢</span></div>`;
     }).join('')
     + (members.some(([, i]) => !team.mons[i]) ? '<p class="muted small b-intro">只選屬性的格子沒有速度資料，挑了寶可夢才會列進速度線。</p>' : '')
     + `<div style="margin-top:8px">${rows.map(x => `<div class="spd${x.i != null ? ' me' : ''}"><b class="v">${x.mon.spe}</b><b>${x.mon.zh}</b>${chips(x.mon.types)}`
-      + `<span class="meta">${x.i != null ? `我方第 ${x.i + 1} 隻` : `#${x.mon.rank[team.fmt]}`}${scarf(x.mon)}</span></div>`).join('')}</div>`
+      + `<span class="meta">${x.i != null ? `我方第 ${x.i + 1} 隻` : `#${x.mon.rank[team.fmt]}`}`
+      + `${x.mega ? `・超級進化${x.p != null ? `（帶超級石 ${x.p}%）` : ''}` : ''}${scarf(x.mon)}</span></div>`).join('')}</div>`
     + '<p class="note">※ 只比速度種族值，不含性格、能力投資、道具、特性與場地（如順風、戲法空間）；'
-    + '種族值相同時實際誰快要看投資，所以算同速。我方超級進化看超級進化後的速度，熱門寶可夢以原型計。'
+    + '種族值相同時實際誰快要看投資，所以算同速。我方超級進化看超級進化後的速度；'
+    + `熱門寶可夢 OP.GG 道具統計有 ${ROLE_PCT}% 以上帶超級石的，超級進化型態另列一行（標「超級進化」），上方「比幾隻快／慢」取進化前後較快的那個。`
     + `「講究圍巾 N%」＝OP.GG ${FMT_ZH[team.fmt]}統計有 N% 的人帶講究圍巾（速度 ×1.5），帶的話實際會更快；超級進化要帶超級石，不標。</p>`;
 }
 function renderTeam() {
@@ -3443,7 +3447,8 @@ function bringHTML(members, opps) {
   let t = '<thead><tr><th class="corner">我方 ↓<br>對手 →</th>'
     + opps.map(([m, i], o) => `<th title="${m.zh}${oppMegas[o].length ? `（可能超級進化成${oppMegas[o].map(x => x.zh).join('、')}）` : ''}">`
       + `<span class="tcol"><span class="slot-n">${i + 1}${oppMegas[o].length ? '・超' : ''}</span><span class="duo">`
-      + `${m.types.map(id => `<span class="vchip" style="${style(id)}">${T[id].zh}</span>`).join('')}</span><span class="slot-n">${m.spe}</span></span></th>`).join('')
+      + `${m.types.map(id => `<span class="vchip" style="${style(id)}">${T[id].zh}</span>`).join('')}</span>`
+      + `<span class="slot-n">${[m.spe, ...oppMegas[o].filter(x => x.spe !== m.spe).map(x => `超${x.spe}`)].join('<br>')}</span></span></th>`).join('')
     + '</tr></thead><tbody>';
   // 挑了寶可夢的隊員，格子可以點：帶到傷害計算算「我方打牠」（只選屬性的隊員沒有能力值，不能點）
   members.forEach((_, j) => {
@@ -3470,7 +3475,8 @@ function bringHTML(members, opps) {
     + '點格子會帶到「傷害計算」算我方打牠的傷害（按「⇄ 對調」看牠打我方；只選屬性的隊員不能點）。'
     + `對手選一般型態、但 OP.GG 道具統計有 ${ROLE_PCT}% 以上帶超級石的（表頭標「超」，如噴火龍多半帶噴火龍進化石Ｙ），`
     + '「不怕」「剋得到」要對進化前後每種型態都成立才算；各型態的超級石使用率見下方「對手情報」。'
-    + '★＝第 1 名組合的成員；名字旁和表頭下方的數字是速度種族值。帶幾隻依攻略網站整理的排位規則（單打 6 選 3、雙打 6 選 4），'
+    + '★＝第 1 名組合的成員；名字旁和表頭下方的數字是速度種族值（對手超級進化後速度不同的，下面多一行「超」和進化後的速度）。'
+    + '帶幾隻依攻略網站整理的排位規則（單打 6 選 3、雙打 6 選 4），'
     + '一場只能超級進化一隻也是同一來源：組合裡有 2 隻以上超級進化時，逐一試只進化其中一隻、其他以原型的屬性計，取結果最好的並標出進化哪隻'
     + '（對位表的每一列仍是進化後的樣子）。只看屬性、常用攻擊招式與速度種族值，不含特性、道具、能力投資。</p>';
 }
@@ -3639,10 +3645,13 @@ function intimidateOn(ab) {
   return ab === 'simple' ? [-2, 0] : ab === 'competitive' ? [-1, 2] : [-1, 0];
 }
 // 快選：我方隊伍（隊伍分析）挑了的寶可夢和對手（出戰選角）
+// 對手後面接著列出牠常帶超級石的超級進化型態（megaInfo 算進去的，同出戰選角的對位判斷）
 function quickHTML(side) {
-  const btn = k => `<button class="mini" data-side="${side}" data-k="${k}" aria-pressed="${calc[side] === k}">${MON[k].zh}</button>`;
+  const btn = (k, tip = '') => `<button class="mini" data-side="${side}" data-k="${k}" aria-pressed="${calc[side] === k}"${tip ? ` title="${tip}"` : ''}>${MON[k].zh}</button>`;
   const mine = team.mons.filter(Boolean), opp = bring.opp.filter(Boolean);
-  return (mine.length ? `<span class="meta">我方</span>${mine.map(btn).join('')}` : '') + (opp.length ? `<span class="meta">對手</span>${opp.map(btn).join('')}` : '');
+  const oppBtns = opp.flatMap(k => [btn(k), ...megaInfo(MON[k], team.fmt).filter(x => x.counted)
+    .map(x => btn(x.mon.key, `${MON[k].zh}${x.p != null ? `有 ${x.p}% 帶超級石` : '可能超級進化'}`))]);
+  return (mine.length ? `<span class="meta">我方</span>${mine.map(k => btn(k)).join('')}` : '') + (opp.length ? `<span class="meta">對手</span>${oppBtns.join('')}` : '');
 }
 // 攻擊方／防守方各自的屬性篩選（不存網址，選好寶可夢就清掉）；有選屬性才列出符合的寶可夢
 const calcPick = { atk: [], def: [] };
@@ -3749,6 +3758,7 @@ function calcHTML() {
     + '速度也照 Smogon 冠軍版：速度投資（預設 32＋性格，即最速）→ 能力變化 → 順風 ×2、葉綠素／悠游自如／撥沙／撥雪在對應天氣與衝浪之尾在電氣場地 ×2、'
     + '飛毛腿在麻痺或灼傷時 ×1.5、講究圍巾 ×1.5 → 麻痺 ×½（飛毛腿不減）；同速時誰先動各 50%。先制招式（標「先制」）不看速度；'
     + '勾「戲法空間」時速度慢的先動（同 Pokémon Showdown，同速仍各 50%、先制招式仍優先）；不含加速這類回合中的變化。'
+    + `快選的「對手」會接著列出牠 OP.GG 道具統計有 ${ROLE_PCT}% 以上帶超級石的超級進化型態（同出戰選角的判斷）。`
     + '「反擊」＝防守方打攻擊方最痛的一招，和按「⇄ 對調」看到的相同：投資檔位不動'
     + '（上方的攻擊投資套在防守方、HP／防禦投資套在攻擊方），能力變化、道具、灼傷、幫助、牆不算。</p>';
 }
