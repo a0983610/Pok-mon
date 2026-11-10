@@ -276,6 +276,35 @@ table.matrix { border-collapse: separate; border-spacing: 0; margin: 0 auto; }
 .qpick .chip { font-size: 11px; padding: 0 6px; }
 .qpick .meta { font-size: 12px; font-weight: 500; }
 
+/* ---------- 傷害計算 ---------- */
+.c-vs { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px 16px; align-items: start; }
+.c-vs .b-label { margin-top: 0; }
+.c-swap { align-self: center; }
+.c-name { width: 100%; }
+.c-quick { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; }
+.c-quick:empty { display: none; }
+.mini[aria-pressed="true"] { border-color: var(--accent); background: var(--good-bg); }
+.c-f { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 10px; font-size: 14px; }
+.c-l { min-width: 4.5em; font-weight: 700; font-size: 13px; color: var(--muted); }
+.c-f .seg button { padding: 4px 10px; font-size: 13px; }
+.c-f .sel { padding: 4px 8px; }
+.c-field { margin: 14px 0 0; }
+.c-field .check { margin-top: 0; }
+.c-sum { padding: 8px 12px; border-radius: 10px; margin: 8px 0; font-size: 14px; }
+.c-sum.bad { background: var(--bad-bg); }
+.c-sum.good { background: var(--good-bg); }
+.dmg { padding: 8px 0; border-top: 1px solid var(--border); font-size: 14px; }
+.dmg-h { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.dmg-h .chip { font-size: 11px; padding: 0 6px; }
+.dmg-h .mtag { font-size: 12px; min-width: 28px; padding: 0 5px; }
+.ko { margin-left: auto; font-weight: 800; color: var(--muted); }
+.ko.k1 { color: var(--nve); }
+.ko.k2 { color: var(--accent); }
+@media (prefers-color-scheme: dark) { .ko.k1 { color: #ff7a7f; } }
+.dmg-bar { display: flex; height: 10px; margin: 6px 0 2px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.dmg-bar span { background: var(--accent); }
+.dmg-bar .rng { opacity: .35; }
+
 /* ---------- 考試 ---------- */
 .field { margin-top: 16px; }
 .field-label { font-weight: 700; margin-bottom: 8px; }
@@ -347,6 +376,8 @@ footer a { color: inherit; }
   .tabs button { flex: 1; padding: 8px 2px; font-size: 13px; }
   .slots { grid-template-columns: repeat(3, 1fr); }
   .rg { grid-template-columns: 1fr; gap: 6px; }
+  .c-vs { grid-template-columns: 1fr; }
+  .c-swap { justify-self: center; }
   .opts.n4 { grid-template-columns: repeat(2, 1fr); }
   .opts.n6 { grid-template-columns: repeat(3, 1fr); }
   .q-prompt { font-size: 17px; }
@@ -363,7 +394,7 @@ footer a { color: inherit; }
     </svg>
     <div>
       <h1>寶可夢冠軍 屬性克制表</h1>
-      <div class="sub">Pokémon Champions · 18 種屬性相剋 · 快速查詢 · 配招分析 · 隊伍分析 · 出戰選角 · 隨機考試</div>
+      <div class="sub">Pokémon Champions · 18 種屬性相剋 · 快速查詢 · 配招分析 · 隊伍分析 · 出戰選角 · 傷害計算 · 隨機考試</div>
     </div>
   </header>
 
@@ -373,6 +404,7 @@ footer a { color: inherit; }
     <button role="tab" data-tab="build" aria-selected="false">配招分析</button>
     <button role="tab" data-tab="team" aria-selected="false">隊伍分析</button>
     <button role="tab" data-tab="bring" aria-selected="false">出戰選角</button>
+    <button role="tab" data-tab="calc" aria-selected="false">傷害計算</button>
     <button role="tab" data-tab="quiz" aria-selected="false">屬性考試</button>
   </nav>
 
@@ -472,6 +504,46 @@ footer a { color: inherit; }
     <div class="card b-card" id="pResult"></div>
   </section>
 
+  <!-- 傷害計算 -->
+  <section id="p-calc" role="tabpanel" hidden>
+    <div class="card">
+      <div class="look-top">
+        <p class="muted small b-intro">選攻擊方和防守方，列出攻擊方常用攻擊招式打過去會扣多少 HP、幾下會被打倒。按「⇄ 對調」切換看我打牠還是牠打我。</p>
+        <div class="top-actions"><button class="btn ghost" data-copy>複製連結</button><button class="btn ghost" id="cClear">清除</button></div>
+      </div>
+      <div class="c-vs">
+        <div class="c-side">
+          <div class="b-label">⚔ 攻擊方</div>
+          <input class="sel c-name" id="cAtk" list="tMons" placeholder="輸入寶可夢名字" autocomplete="off" aria-label="攻擊方寶可夢">
+          <div class="c-quick" id="cAtkQ"></div>
+          <div class="c-f"><span class="c-l">投資</span><div class="seg" id="cAi"></div></div>
+          <div class="c-f"><span class="c-l">能力變化</span><label>攻擊 <select class="sel" id="cSt0"></select></label><label>特攻 <select class="sel" id="cSt1"></select></label></div>
+          <div class="c-f"><span class="c-l">道具</span><select class="sel" id="cAItem" aria-label="攻擊方道具"></select></div>
+          <div class="c-f"><span class="c-l">加算招式</span><select class="sel" id="cExtra" aria-label="常用招式以外再多算一招"></select></div>
+        </div>
+        <button class="btn c-swap" id="cSwap" title="攻擊方和防守方對調">⇄ 對調</button>
+        <div class="c-side">
+          <div class="b-label">🛡 防守方</div>
+          <input class="sel c-name" id="cDef" list="tMons" placeholder="輸入寶可夢名字" autocomplete="off" aria-label="防守方寶可夢">
+          <div class="c-quick" id="cDefQ"></div>
+          <div class="c-f"><span class="c-l">HP 投資</span><div class="seg" id="cHi"></div></div>
+          <div class="c-f"><span class="c-l">防禦／特防投資</span><div class="seg" id="cDi"></div></div>
+          <div class="c-f"><span class="c-l">能力變化</span><label>防禦 <select class="sel" id="cSt2"></select></label><label>特防 <select class="sel" id="cSt3"></select></label></div>
+          <div class="c-f"><span class="c-l">道具</span><select class="sel" id="cDItem" aria-label="防守方道具"></select></div>
+        </div>
+      </div>
+      <div class="t-row c-field">
+        <div class="seg" id="cW" aria-label="天氣"></div>
+        <label class="check"><input type="checkbox" id="cCrit"> 急所（擊中要害）</label>
+        <div class="seg" id="cFmt" aria-label="對戰形式">
+          <button data-fmt="s" aria-pressed="true">單打</button>
+          <button data-fmt="d" aria-pressed="false">雙打</button>
+        </div>
+      </div>
+    </div>
+    <div class="card b-card" id="cResult"></div>
+  </section>
+
   <!-- 屬性考試 -->
   <section id="p-quiz" role="tabpanel" hidden>
     <div class="card" id="qSetup">
@@ -525,7 +597,10 @@ footer a { color: inherit; }
     已對照 <a href="https://pokesynergy.app/type-chart" target="_blank" rel="noopener">PokeSynergy · Pokémon Champions Type Chart</a>、
     <a href="https://gamewith.jp/pokemon-champions/546446" target="_blank" rel="noopener">GameWith · ポケモンチャンピオンズ タイプ相性表</a>，
     中文屬性名稱依 <a href="https://wiki.52poke.com/zh-hant/%E5%B1%AC%E6%80%A7%E7%9B%B8%E5%89%8B%E8%A1%A8" target="_blank" rel="noopener">神奇寶貝百科 屬性相剋表</a>。<br>
-    隊伍分析的寶可夢名單、種族值、單打／雙打排名，常用招式／特性／道具的使用率與效果說明，以及隊友、勝於、敗於名單擷取自 <a href="https://op.gg/zh-tw/pokemon-champions/pokedex" target="_blank" rel="noopener">OP.GG 寶可夢冠軍圖鑑</a>（<span id="monsDate"></span>）。
+    隊伍分析的寶可夢名單、種族值、單打／雙打排名，常用招式／特性／道具的使用率與效果說明，以及隊友、勝於、敗於名單擷取自 <a href="https://op.gg/zh-tw/pokemon-champions/pokedex" target="_blank" rel="noopener">OP.GG 寶可夢冠軍圖鑑</a>（<span id="monsDate"></span>）。<br>
+    傷害計算的能力值公式依 <a href="https://gamewith.jp/pokemon-champions/546449" target="_blank" rel="noopener">GameWith · 対戦の用語一覧</a>，
+    傷害公式、取整順序與天氣、道具倍率依 <a href="https://github.com/smogon/damage-calc/blob/master/calc/src/mechanics/champions.ts" target="_blank" rel="noopener">Smogon damage-calc 寶可夢冠軍版</a>，
+    急所 ×1.5 依 <a href="https://gamewith.jp/pokemon-champions/560317" target="_blank" rel="noopener">GameWith · 急所の確率と効果</a>。
   </footer>
 </div>
 
@@ -2300,6 +2375,132 @@ function nextQuestion(kinds, recent = [], rng = Math.random) {
   }
   return q;
 }
+
+// ---------- 傷害計算 ----------
+// 寶可夢冠軍固定 Lv50、個體值 31，用能力點數（每項 0～32、合計 66，1 點＝能力值 +1）代替努力值。
+// 能力值：HP＝種族值＋能力點數＋75；其他＝⌊(種族值＋能力點數＋20)×性格⌋（GameWith「対戦の用語一覧」，
+//   和 Smogon damage-calc stats.ts 的 calcStatChampions 相同）。nat 是性格倍率 ×10（9／10／11），用整數算免得有小數誤差
+const statOf = (base, sp, i, nat = 10) => i ? Math.floor((base + sp + 20) * nat / 10) : base + sp + 75;
+// 以下照 Smogon damage-calc 寶可夢冠軍版（mechanics/champions.ts、mechanics/util.ts）的順序與取整：
+// 威力修正 → 攻擊／防禦（能力變化、道具、天氣）→ 基礎傷害 → 範圍招式 ×0.75 → 天氣 → 急所 ×1.5
+// → 亂數 85～100%（16 段）→ 本系 ×1.5 → 屬性相剋 → 最終修正（道具、樹果）
+const pokeRound = n => n % 1 > 0.5 ? Math.ceil(n) : Math.floor(n);
+// 4096 制倍率依序連乘（每乘一次四捨五入），再夾在 lo～hi
+const chainMods = (mods, lo, hi) => Math.max(lo, Math.min(hi, mods.reduce((M, m) => (M * m + 2048) >> 12, 4096)));
+// 能力變化 st（−6～+6）後的能力值
+const stageStat = (s, st) => st >= 0 ? Math.floor(s * (2 + st) / 2) : Math.floor(s * 2 / (2 - st));
+// 雙打時同時打對面兩隻（或場上全部）的招式，傷害 ×0.75（Smogon moves.ts 的 target 是 allAdjacent／allAdjacentFoes，取本資料有的）
+const SPREAD = new Set(['air-cutter', 'blizzard', 'boomburst', 'brutal-swing', 'bulldoze', 'burning-jealousy', 'clanging-scales', 'dazzling-gleam',
+  'discharge', 'earthquake', 'electroweb', 'eruption', 'explosion', 'heat-wave', 'hyper-voice', 'icy-wind', 'lava-plume', 'make-it-rain',
+  'matcha-gotcha', 'misty-explosion', 'mortal-spin', 'muddy-water', 'overdrive', 'parabolic-charge', 'rock-slide', 'self-destruct', 'sludge-wave',
+  'snarl', 'sparkling-aria', 'struggle-bug', 'surf', 'water-spout']);
+// 連續攻擊：[打幾下, 說明]（Smogon moves.ts 的 multihit）；2～5 下的照 Smogon 預設以 3 下計，三旋擊威力每下 20、40、60
+const VAR_HITS = '2～5 下，以 3 下計';
+const HITS = { 'dragon-darts': [2], 'dual-wingbeat': [2], 'twin-beam': [2], 'triple-axel': [3, '威力 20→40→60'], 'population-bomb': [10, '最多 10 下，以全中計'],
+  'bullet-seed': [3, VAR_HITS], 'icicle-spear': [3, VAR_HITS], 'pin-missile': [3, VAR_HITS], 'rock-blast': [3, VAR_HITS], 'scale-shot': [3, VAR_HITS], 'water-shuriken': [3, VAR_HITS] };
+// 特殊招式但打對手防禦的（Smogon 的 overrideDefensiveStat）；撲擊用自己的防禦當攻擊
+const HIT_DEF = new Set(['psyshock', 'psystrike', 'secret-sword']);
+// 不算的攻擊招式與原因；威力是 null 的（看體重、HP、速度，或固定傷害、一擊必殺）也不算
+const NO_CALC = { 'foul-play': '用對手的攻擊計算' };
+const canCalc = k => MOVES[k][2] !== 'status' && MOVES[k][3] != null && !NO_CALC[k];
+// 必定急所的招式（說明寫「必定／一定會擊中要害」，同 Smogon moves.ts 的 willCrit）
+const ALWAYS_CRIT = new Set(Object.keys(MOVES).filter(k => /(必定|一定)會?擊中要害/.test(MOVES[k][4])));
+// 天氣：晴天火 ×1.5、水 ×½；下雨水 ×1.5、火 ×½；沙暴岩石屬性特防 ×1.5；下雪冰屬性防禦 ×1.5；
+// 氣象球有天氣時變成對應屬性、威力 ×2；日光束／日光刃在下雨、沙暴、下雪時威力 ×½
+const WEATHER_MOD = { sun: { fire: 6144, water: 2048 }, rain: { water: 6144, fire: 2048 } };
+const WB_TYPE = { sun: 'fire', rain: 'water', sand: 'rock', snow: 'ice' };
+// 影響傷害的道具（只收 ITEMS 裡有的，也就是 OP.GG 有人帶的），從說明文字判斷效果，倍率照 Smogon 冠軍版：
+// 攻擊方 side a：屬性強化道具該屬性威力 ×1.2（4915）、力量頭帶／博識眼鏡物理／特殊威力 ×1.1（4505）、寶石該屬性威力 ×1.3（5325）、
+//   生命寶珠 ×1.3（5324）、達人帶效果絕佳時 ×1.2（4915）、電氣球皮卡丘攻擊特攻 ×2；
+// 防守方 side d：抗性樹果受到效果絕佳的該屬性招式傷害減半（只擋第一下）、氣勢披帶 HP 全滿時撐住會倒下的一擊（剩 1 HP）
+const TYPE_BY_ZH = Object.fromEntries(TYPES.map(t => [t.zh, t.id]));
+const DMG_ITEMS = {};
+Object.entries(ITEMS).forEach(([k, [, e]]) => {
+  let m;
+  if ((m = e.match(/^(.+?)屬性招式威力會變為1\.2倍/)) && TYPE_BY_ZH[m[1]]) DMG_ITEMS[k] = { side: 'a', type: TYPE_BY_ZH[m[1]], bp: 4915 };
+  else if ((m = e.match(/^(物理|特殊)招式威力會變為1\.1倍/))) DMG_ITEMS[k] = { side: 'a', cat: m[1] === '物理' ? 'physical' : 'special', bp: 4505 };
+  else if ((m = e.match(/^(.+?)屬性的寶石/)) && TYPE_BY_ZH[m[1]]) DMG_ITEMS[k] = { side: 'a', type: TYPE_BY_ZH[m[1]], bp: 5325, gem: true };
+  else if ((m = e.match(/^受到效果絕佳的(.+?)屬性招式時，傷害會減半/)) && TYPE_BY_ZH[m[1]]) DMG_ITEMS[k] = { side: 'd', berry: TYPE_BY_ZH[m[1]] };
+});
+[['life-orb', { side: 'a', final: 5324 }], ['expert-belt', { side: 'a', se: 4915 }], ['light-ball', { side: 'a', mon: 'pikachu', atk: 8192 }],
+  ['focus-sash', { side: 'd', sash: true }]].forEach(([k, v]) => { if (ITEMS[k]) DMG_ITEMS[k] = v; });
+// 投資檔位，套在這招用到的那項能力（物理看攻擊／防禦、特殊看特攻／特防）：[能力點數, 性格 ×10, 名稱]
+const ATK_INV = [[0, 10, '無投資'], [32, 10, '滿投資'], [32, 11, '滿投資＋性格']];
+const HP_INV = [[0, 10, '0'], [32, 10, '32']];
+const DEF_INV = [[0, 10, '0'], [32, 10, '32'], [32, 11, '32＋性格']];
+// 攻擊方 a：{ key, inv 投資檔位, st { atk, spa } 能力變化, item }；防守方 d：{ key, hp／inv 投資檔位, st { def, spd }, item }；
+// o：{ fmt 's'／'d', weather, crit }（必定急所的招式不管 crit 都算急所）。不算的招式回傳 { skip 原因 }；沒有效果的回傳 eff 0（沒有 hp 以後的欄位）；
+// 其餘回傳 hp 防守方 HP、min／max 用一次的傷害（多段攻擊是各下加總）、ko[n] 連用 n＋1 次被打倒的機率（n＝0～3）、
+// sashed 氣勢披帶撐住了會倒下的第一下、berry 抗性樹果有減半
+function damageCalc(a, d, mk, o) {
+  const [, mtype, cat, power0] = MOVES[mk];
+  if (NO_CALC[mk]) return { skip: NO_CALC[mk] };
+  if (power0 == null) return { skip: '威力會變動或固定傷害' };
+  const A = MON[a.key], D = MON[d.key];
+  const wb = mk === 'weather-ball' && o.weather, type = wb ? WB_TYPE[o.weather] : mtype, power = wb ? power0 * 2 : power0;
+  const [hits, hitNote] = HITS[mk] || [1];
+  const r = { type, cat, power, hits, hitNote, eff: eff(type, D.types), spread: o.fmt === 'd' && SPREAD.has(mk), stab: A.types.includes(type),
+    crit: o.crit || ALWAYS_CRIT.has(mk) };
+  if (!r.eff) return r;
+  const ai = mk === 'body-press' ? 2 : cat === 'physical' ? 1 : 3, di = cat === 'physical' || HIT_DEF.has(mk) ? 2 : 4;
+  const [asp, anat] = ATK_INV[a.inv], [dsp, dnat] = DEF_INV[d.inv];
+  const ait = DMG_ITEMS[a.item] || {}, dit = DMG_ITEMS[d.item] || {};
+  r.hp = statOf(D.bs[0], HP_INV[d.hp][0], 0);
+  // 能力變化：急所時不計攻擊方的下降、防守方的上升
+  const ast = ai === 1 ? a.st.atk : ai === 3 ? a.st.spa : 0, dst = di === 2 ? d.st.def : d.st.spd;
+  let atk = statOf(A.bs[ai], asp, ai, anat);
+  if (ast && !(r.crit && ast < 0)) atk = stageStat(atk, ast);
+  if (ait.atk && family(A) === ait.mon) atk = Math.max(1, pokeRound(atk * ait.atk / 4096));
+  let def = statOf(D.bs[di], dsp, di, dnat);
+  if (dst && !(r.crit && dst > 0)) def = stageStat(def, dst);
+  if ((o.weather === 'sand' && di === 4 && D.types.includes('rock')) || (o.weather === 'snow' && di === 2 && D.types.includes('ice'))) def = pokeRound(def * 3 / 2);
+  const bpMods = [];
+  if ((mk === 'solar-beam' || mk === 'solar-blade') && ['rain', 'sand', 'snow'].includes(o.weather)) bpMods.push(2048);
+  if (ait.bp && (ait.type ? ait.type === type : ait.cat === cat)) bpMods.push(ait.bp);
+  const finalMods = ait.final ? [ait.final] : ait.se && r.eff > 1 ? [ait.se] : [];
+  r.berry = dit.berry === type && r.eff > 1;
+  const wx = WEATHER_MOD[o.weather]?.[type];
+  // 威力 p 打一下的 16 個亂數傷害（由小到大）；first＝整場第一下（樹果只擋這下）
+  const rollsOf = (p, first) => {
+    const bp = Math.max(1, pokeRound(p * chainMods(bpMods, 41, 2097152) / 4096));
+    let b = Math.floor(Math.floor(22 * bp * atk / def) / 50 + 2);
+    if (r.spread) b = pokeRound(b * 3072 / 4096);
+    if (wx) b = pokeRound(b * wx / 4096);
+    if (r.crit) b = Math.floor(b * 1.5);
+    const fm = chainMods(first && r.berry ? [...finalMods, 2048] : finalMods, 41, 131072);
+    return Array.from({ length: 16 }, (_, i) => {
+      let x = Math.floor(b * (85 + i) / 100);
+      if (r.stab) x = x * 6144 / 4096;
+      x = Math.floor(pokeRound(x) * r.eff);
+      return pokeRound(Math.max(1, x * fm / 4096));
+    });
+  };
+  const pw = h => mk === 'triple-axel' ? 20 * (h + 1) : power;
+  const first = Array.from({ length: hits }, (_, h) => rollsOf(pw(h), !h));
+  const later = r.berry ? Array.from({ length: hits }, (_, h) => rollsOf(pw(h), false)) : first;
+  r.min = first.reduce((s, x) => s + x[0], 0);
+  r.max = first.reduce((s, x) => s + x[15], 0);
+  r.sashed = !!dit.sash && hits === 1 && r.max >= r.hp;
+  // 累計傷害的機率分布（超過 HP 的都併在 HP）；氣勢披帶讓整場第一下最多打到剩 1 HP
+  let dist = new Map([[0, 1]]);
+  r.ko = [0, 1, 2, 3].map(n => {
+    (n ? later : first).forEach((rs, h) => {
+      const xs = dit.sash && !n && !h ? rs.map(x => Math.min(x, r.hp - 1)) : rs, nd = new Map();
+      dist.forEach((p, v) => xs.forEach(x => { const s = Math.min(r.hp, v + x); nd.set(s, (nd.get(s) || 0) + p / 16); }));
+      dist = nd;
+    });
+    return dist.get(r.hp) || 0;
+  });
+  return r;
+}
+// 幾擊打倒：ko 是 damageCalc 的 ko
+const NUM_ZH = ['一', '二', '三', '四'];
+function koText(ko) {
+  const n = ko.findIndex(p => p > 1e-9);
+  if (n < 0) return { n: 5, text: '四擊打不倒' };
+  if (ko[n] > 1 - 1e-9) return { n: n + 1, text: `確定${NUM_ZH[n]}擊` };
+  return { n: n + 1, text: `亂數${NUM_ZH[n]}擊（${Math.min(99.9, Math.max(0.1, Math.round(ko[n] * 1000) / 10))}%）` };
+}
 // ===== LOGIC END =====
 
 // ===== 畫面 =====
@@ -2326,14 +2527,15 @@ const MCLS = { 4: 'm4', 2: 'm2', 1: 'm1', 0.5: 'mh', 0.25: 'mq', 0.125: 'mq', 0:
 const mtag = m => `<span class="mtag ${MCLS[m]}">${fmt(m)}</span>`;
 
 // ---------- 分頁 ----------
-const TABS = ['table', 'lookup', 'build', 'team', 'bring', 'quiz'];
+const TABS = ['table', 'lookup', 'build', 'team', 'bring', 'calc', 'quiz'];
 let curTab = 'table';
 function showTab(name) {
   curTab = name;
   document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === name));
   TABS.forEach(n => { $('#p-' + n).hidden = n !== name; });
-  // 出戰選角沿用隊伍分析的隊伍，切過來時重畫
+  // 出戰選角沿用隊伍分析的隊伍、傷害計算的快選列出隊伍與對手，切過來時重畫
   if (name === 'bring') renderBring();
+  if (name === 'calc') renderCalc();
   saveState();
 }
 $('.tabs').addEventListener('click', e => {
@@ -2938,10 +3140,10 @@ function nameInput(e) {
 }
 $('#tName').addEventListener('input', nameInput);
 $('#tName').addEventListener('change', nameInput);
-// 單打／雙打：隊伍分析的排名依據和出戰選角的帶幾隻共用
+// 單打／雙打：隊伍分析的排名依據、出戰選角的帶幾隻和傷害計算的常用招式、範圍招式共用
 function setFmt(e) {
   const b = e.target.closest('button[data-fmt]');
-  if (b) { team.fmt = b.dataset.fmt; renderTeam(); renderBring(); }
+  if (b) { team.fmt = b.dataset.fmt; renderTeam(); renderBring(); renderCalc(); }
 }
 $('#tFmt').addEventListener('click', setFmt);
 $('#tSlots').addEventListener('click', e => {
@@ -3055,8 +3257,159 @@ $('#pOpp').addEventListener('click', e => {
 $('#pFmt').addEventListener('click', setFmt);
 $('#pClear').addEventListener('click', () => { bring.opp = bring.opp.map(() => ''); renderBring(); });
 
+// ---------- 傷害計算 ----------
+// atk／def：攻擊方／防守方寶可夢 key；ai：攻擊方投資（ATK_INV 的索引）；hi、di：防守方 HP、防禦／特防投資（HP_INV、DEF_INV 的索引）；
+// st：能力變化 [攻擊方攻擊, 攻擊方特攻, 防守方防禦, 防守方特防]；aItem／dItem：道具 key；weather：天氣；crit：急所；extra：加算的招式
+const CALC0 = { atk: '', def: '', ai: 2, hi: 0, di: 0, st: [0, 0, 0, 0], aItem: '', dItem: '', weather: '', crit: false, extra: '' };
+const calc = structuredClone(CALC0);
+const CALC_MOVES = Object.keys(MOVES).filter(canCalc);
+['cSt0', 'cSt1', 'cSt2', 'cSt3'].forEach(id => {
+  $('#' + id).innerHTML = [6, 5, 4, 3, 2, 1, 0, -1, -2, -3, -4, -5, -6].map(v => `<option value="${v}">${v > 0 ? '+' + v : v < 0 ? '−' + -v : '0'}</option>`).join('');
+});
+$('#cExtra').innerHTML = '<option value="">（不加）</option>' + TYPES.map(t => {
+  const ks = CALC_MOVES.filter(k => MOVES[k][1] === t.id).sort((x, y) => MOVES[y][3] - MOVES[x][3]);
+  return ks.length ? `<optgroup label="${t.zh}">${ks.map(k => `<option value="${k}">${MOVES[k][0]}（${CAT_ZH[MOVES[k][2]]} ${MOVES[k][3]}）</option>`).join('')}</optgroup>` : '';
+}).join('');
+const segHTML = (list, cur) => list.map((x, i) => `<button data-v="${i}" aria-pressed="${i === cur}">${x[2]}</button>`).join('');
+// 道具選單上的效果說明；排序：通用的在前，屬性道具和樹果依屬性順序
+function itemNote(v) {
+  if (v.berry) return `${T[v.berry].zh}招式效果絕佳時減半`;
+  if (v.sash) return 'HP 全滿時撐住一擊';
+  if (v.type) return `${T[v.type].zh}招式 ×${v.gem ? '1.3，限一次' : '1.2'}`;
+  if (v.cat) return `${CAT_ZH[v.cat]}招式 ×1.1`;
+  if (v.final) return '×1.3';
+  if (v.se) return '效果絕佳時 ×1.2';
+  return '皮卡丘攻擊、特攻 ×2';
+}
+const itemRank = v => v.type || v.berry ? 1 + IDS.indexOf(v.type || v.berry) : 0;
+// 這一方（side a 攻擊方／d 防守方）的寶可夢 key 能不能帶道具 item：超級進化要帶超級石，電氣球限皮卡丘
+const itemOK = (side, key, item) => { const v = DMG_ITEMS[item], m = MON[key]; return v?.side === side && !m?.base && (!v.mon || (m && family(m) === v.mon)); };
+// 道具選單：只列影響傷害的道具，這隻 OP.GG 常帶的排前面
+function itemOptions(side, key, cur) {
+  if (MON[key]?.base) return '<option value="">超級進化（帶超級石）</option>';
+  const use = Object.fromEntries((key && useOf(key, team.fmt)?.items) || []);
+  const list = Object.entries(DMG_ITEMS).filter(([k]) => itemOK(side, key, k)).sort(([, x], [, y]) => itemRank(x) - itemRank(y));
+  const opt = ([k, v]) => `<option value="${k}"${k === cur ? ' selected' : ''}>${ITEMS[k][0]}（${itemNote(v)}${use[k] ? `・這隻 ${use[k]}% 帶` : ''}）</option>`;
+  const top = list.filter(([k]) => use[k]).sort(([x], [y]) => use[y] - use[x]), rest = list.filter(([k]) => !use[k]);
+  return '<option value="">不帶影響傷害的道具</option>'
+    + (top.length ? `<optgroup label="這隻常帶">${top.map(opt).join('')}</optgroup>` : '')
+    + `<optgroup label="${top.length ? '其他' : '影響傷害的道具'}">${rest.map(opt).join('')}</optgroup>`;
+}
+// 快選：我方隊伍（隊伍分析）和對手（出戰選角）用名字選的寶可夢
+function quickHTML(side) {
+  const btn = k => `<button class="mini" data-side="${side}" data-k="${k}" aria-pressed="${calc[side] === k}">${MON[k].zh}</button>`;
+  const mine = team.mons.filter(Boolean), opp = bring.opp.filter(Boolean);
+  return (mine.length ? `<span class="meta">我方</span>${mine.map(btn).join('')}` : '') + (opp.length ? `<span class="meta">對手</span>${opp.map(btn).join('')}` : '');
+}
+function calcHTML() {
+  const A = MON[calc.atk], D = MON[calc.def];
+  const a = { key: calc.atk, inv: calc.ai, st: { atk: calc.st[0], spa: calc.st[1] }, item: calc.aItem };
+  const d = { key: calc.def, hp: calc.hi, inv: calc.di, st: { def: calc.st[2], spd: calc.st[3] }, item: calc.dItem };
+  const o = { fmt: team.fmt, weather: calc.weather, crit: calc.crit };
+  const use = useOf(calc.atk, team.fmt)?.moves || [];
+  const list = use.filter(([k]) => MOVES[k][2] !== 'status');
+  if (calc.extra && !list.some(([k]) => k === calc.extra)) list.push([calc.extra, 0]);
+  const rows = list.map(([k, p]) => ({ k, p, r: damageCalc(a, d, k, o) }));
+  const ok = rows.filter(x => !x.r.skip).sort((x, y) => (y.r.max || 0) - (x.r.max || 0)), why = {};
+  rows.filter(x => x.r.skip).forEach(x => (why[x.r.skip] ||= []).push(MOVES[x.k][0]));
+  const [asp, anat, aname] = ATK_INV[calc.ai], [dsp, dnat, dname] = DEF_INV[calc.di];
+  const pct = (v, hp) => Math.floor(v * 1000 / hp) / 10;
+  const stg = (v, zh) => v ? `<span>${zh} ${v > 0 ? '+' + v : '−' + -v}</span>` : '';
+  const kos = ok.filter(x => x.r.ko?.[0] > 1e-9), top = ok.find(x => x.r.ko);
+  const row = ({ k, p, r }) => {
+    const head = `<b>${MOVES[k][0]}</b>${chip(r.type)}${mtag(r.eff)}<span class="meta">${CAT_ZH[r.cat]} ${r.power}`
+      + `${r.hits > 1 ? ` ×${r.hits} 下${r.hitNote ? `（${r.hitNote}）` : ''}` : ''}${r.stab ? '・本系' : ''}${r.spread ? '・範圍 ×0.75' : ''}`
+      + `${ALWAYS_CRIT.has(k) ? '・必定急所' : ''}・${p ? `使用率 ${p}%` : '加算'}</span>`;
+    if (!r.eff) return `<div class="dmg"><div class="dmg-h">${head}<span class="ko">沒有效果</span></div></div>`;
+    const lo = pct(r.min, r.hp), hi = pct(r.max, r.hp), kt = koText(r.ko);
+    return `<div class="dmg"><div class="dmg-h">${head}<span class="ko k${kt.n}">${kt.text}</span></div>`
+      + `<div class="dmg-bar"><span style="width:${Math.min(100, lo)}%"></span><span class="rng" style="width:${Math.min(100, hi) - Math.min(100, lo)}%"></span></div>`
+      + `<div class="meta">${lo}～${hi}%（${r.min}～${r.max}／HP ${r.hp}）${r.berry ? `・${ITEMS[calc.dItem][0]}減半第一下` : ''}${r.sashed ? '・氣勢披帶撐住第一下' : ''}</div></div>`;
+  };
+  return `<div class="res-head">${A.zh}${chips(A.types)} → ${D.zh}${chips(D.types)}`
+    + `<span class="muted small">（${[FMT_ZH[team.fmt], FIELD_ZH[calc.weather], calc.crit && '急所'].filter(Boolean).join('・')}）</span></div>`
+    + `<div class="bst">攻擊方（${aname}）<span>攻擊 <b>${statOf(A.bs[1], asp, 1, anat)}</b></span><span>特攻 <b>${statOf(A.bs[3], asp, 3, anat)}</b></span>`
+    + `${stg(calc.st[0], '攻擊')}${stg(calc.st[1], '特攻')}${calc.aItem ? `<span>${ITEMS[calc.aItem][0]}</span>` : ''}</div>`
+    + `<div class="bst">防守方（HP ${HP_INV[calc.hi][2]}・防禦／特防 ${dname}）<span>HP <b>${statOf(D.bs[0], HP_INV[calc.hi][0], 0)}</b></span>`
+    + `<span>防禦 <b>${statOf(D.bs[2], dsp, 2, dnat)}</b></span><span>特防 <b>${statOf(D.bs[4], dsp, 4, dnat)}</b></span>`
+    + `${stg(calc.st[2], '防禦')}${stg(calc.st[3], '特防')}${calc.dItem ? `<span>${ITEMS[calc.dItem][0]}</span>` : ''}</div>`
+    + (kos.length ? `<div class="c-sum bad">${D.zh}會被一擊打倒：${kos.map(x => `<b>${MOVES[x.k][0]}</b> ${koText(x.r.ko).text}`).join('、')}</div>`
+      : top ? `<div class="c-sum good">${D.zh}不會被一擊打倒；最痛的是 <b>${MOVES[top.k][0]}</b> ${pct(top.r.min, top.r.hp)}～${pct(top.r.max, top.r.hp)}%，${koText(top.r.ko).text}</div>`
+      : ok.length ? `<div class="c-sum good">${A.zh}的招式對${D.zh}都沒有效果。</div>` : '')
+    + (use.length ? '' : `<p class="muted small b-intro">${A.zh}在${FMT_ZH[team.fmt]}沒有 OP.GG 常用招式統計，用上面的「加算招式」選一招來算。</p>`)
+    + ok.map(row).join('')
+    + Object.entries(why).map(([w, ns]) => `<div class="x-line"><span class="x-msg">不算（${w}）：</span>${ns.join('、')}</div>`).join('')
+    + '<p class="note">※ 公式照 Smogon damage-calc 的寶可夢冠軍版：Lv50、個體值 31，算進能力值與投資、本系 ×1.5、屬性相剋、亂數 85～100%（16 段）、'
+    + '雙打範圍招式 ×0.75、天氣、急所 ×1.5、能力變化、道具。投資套在這招用到的那項能力：物理招看攻擊打防禦、特殊招看特攻打特防（精神衝擊打防禦、撲擊用自己的防禦）；'
+    + '「滿投資」＝能力點數 32，「＋性格」再 ×1.1。上方能力值是投資後、能力變化前的數字。列出的招式是 OP.GG 常用招式裡的攻擊招式，依傷害由高到低排。'
+    + '不含特性（如飄浮、適應力、多重鱗片；被威嚇請把攻擊調 −1）、反射壁／光牆、灼傷與場地。威力有條件會變的招式（如拍落、雜技、憤怒之拳）以基本威力計，噴火／噴水以 HP 全滿計。'
+    + '幾擊＝連續用同一招幾次打倒，不含回復、吃剩的東西、文柚果；抗性樹果只擋第一下，氣勢披帶只在 HP 全滿時撐住一下。</p>';
+}
+function renderCalc() {
+  [['atk', 'aItem', 'a', '#cAtk', '#cAtkQ', '#cAItem'], ['def', 'dItem', 'd', '#cDef', '#cDefQ', '#cDItem']].forEach(([side, it, s, inp, q, sel]) => {
+    if (calc[it] && !itemOK(s, calc[side], calc[it])) calc[it] = '';
+    $(inp).value = calc[side] ? MON[calc[side]].zh : '';
+    $(q).innerHTML = quickHTML(side);
+    $(sel).innerHTML = itemOptions(s, calc[side], calc[it]);
+    $(sel).disabled = !!MON[calc[side]]?.base;
+  });
+  $('#cAi').innerHTML = segHTML(ATK_INV, calc.ai);
+  $('#cHi').innerHTML = segHTML(HP_INV, calc.hi);
+  $('#cDi').innerHTML = segHTML(DEF_INV, calc.di);
+  calc.st.forEach((v, i) => { $('#cSt' + i).value = v; });
+  $('#cExtra').value = calc.extra;
+  $('#cW').innerHTML = [['', '無天氣'], ...WEATHERS.map(w => [w, FIELD_ZH[w]])].map(([w, zh]) => `<button data-w="${w}" aria-pressed="${calc.weather === w}">${zh}</button>`).join('');
+  $('#cCrit').checked = calc.crit;
+  document.querySelectorAll('#cFmt button').forEach(b => b.setAttribute('aria-pressed', b.dataset.fmt === team.fmt));
+  $('#cResult').innerHTML = calc.atk && calc.def ? calcHTML()
+    : '<p class="empty">選好攻擊方和防守方後，這裡會列出攻擊方常用攻擊招式打過去的傷害、佔防守方 HP 的比例，以及幾下會被打倒。</p>';
+  saveState();
+}
+// 換寶可夢時清掉那一方的道具；換攻擊方也清掉加算招式
+function setCalcMon(side, key) {
+  if (calc[side] !== key) {
+    calc[side] = key;
+    if (side === 'atk') { calc.aItem = ''; calc.extra = ''; } else calc.dItem = '';
+  }
+  renderCalc();
+}
+// 從清單點選就直接帶入；手打的等按 Enter 或離開輸入框（change）才比對，對不到就還原
+function calcName(e) {
+  const key = MON_BY_ZH[e.target.value.trim()];
+  if (key && (e.type === 'change' || !e.inputType || e.inputType === 'insertReplacementText')) setCalcMon(e.target.id === 'cAtk' ? 'atk' : 'def', key);
+  else if (e.type === 'change') renderCalc();
+}
+['#cAtk', '#cDef'].forEach(s => { $(s).addEventListener('input', calcName); $(s).addEventListener('change', calcName); });
+$('#p-calc').addEventListener('click', e => {
+  const b = e.target.closest('button'), seg = b?.closest('.seg')?.id;
+  if (!b) return;
+  if (b.dataset.k) setCalcMon(b.dataset.side, b.dataset.k);
+  else if (seg === 'cAi' || seg === 'cHi' || seg === 'cDi') { calc[{ cAi: 'ai', cHi: 'hi', cDi: 'di' }[seg]] = +b.dataset.v; renderCalc(); }
+  else if (seg === 'cW') { calc.weather = b.dataset.w; renderCalc(); }
+});
+$('#p-calc').addEventListener('change', e => {
+  const id = e.target.id;
+  if (/^cSt\d$/.test(id)) calc.st[+id[3]] = +e.target.value;
+  else if (id === 'cAItem') calc.aItem = e.target.value;
+  else if (id === 'cDItem') calc.dItem = e.target.value;
+  else if (id === 'cExtra') calc.extra = e.target.value;
+  else if (id === 'cCrit') calc.crit = e.target.checked;
+  else return;
+  renderCalc();
+});
+$('#cFmt').addEventListener('click', setFmt);
+$('#cSwap').addEventListener('click', () => {
+  [calc.atk, calc.def] = [calc.def, calc.atk];
+  calc.aItem = calc.dItem = calc.extra = '';
+  calc.st = [0, 0, 0, 0];
+  renderCalc();
+});
+$('#cClear').addEventListener('click', () => { Object.assign(calc, structuredClone(CALC0)); renderCalc(); });
+
 // ---------- 狀態存網址＋本機（可存書籤、重新整理不清空） ----------
 // 格式：#分頁?m=招式,招式&t=屬性,屬性&a=特性&p=隊員1屬性.屬性,@寶可夢key,...&f=d（雙打，單打不寫）&o=對手寶可夢key,...
+//   傷害計算：ca=攻擊方key&cd=防守方key&cv=攻擊方投資.HP投資.防禦投資&cs=攻擊.特攻.防禦.特防能力變化&ci=攻擊方道具.防守方道具
+//   &cw=天氣&cc=1（急所）&cx=加算招式（和預設相同的不寫）
 const STATE_KEY = 'pkmn-champions-state';
 function stateQuery() {
   const q = [];
@@ -3070,6 +3423,15 @@ function stateQuery() {
   const o = bring.opp.slice();
   while (o.length && !o[o.length - 1]) o.pop();
   if (o.length) q.push('o=' + o.join(','));
+  if (calc.atk) q.push('ca=' + calc.atk);
+  if (calc.def) q.push('cd=' + calc.def);
+  const cv = [calc.ai, calc.hi, calc.di].join('.');
+  if (cv !== [CALC0.ai, CALC0.hi, CALC0.di].join('.')) q.push('cv=' + cv);
+  if (calc.st.some(Boolean)) q.push('cs=' + calc.st.join('.'));
+  if (calc.aItem || calc.dItem) q.push('ci=' + calc.aItem + '.' + calc.dItem);
+  if (calc.weather) q.push('cw=' + calc.weather);
+  if (calc.crit) q.push('cc=1');
+  if (calc.extra) q.push('cx=' + calc.extra);
   return q.join('&');
 }
 const stateHash = () => { const q = stateQuery(); return '#' + curTab + (q ? '?' + q : ''); };
@@ -3090,6 +3452,20 @@ function loadState(q) {
   });
   team.fmt = kv.f === 'd' ? 'd' : 's';
   (kv.o || '').split(',').slice(0, 6).forEach((k, i) => { bring.opp[i] = MON[k] ? k : ''; });
+  calc.atk = MON[kv.ca] ? kv.ca : '';
+  calc.def = MON[kv.cd] ? kv.cd : '';
+  const [ai, hi, di] = kv.cv ? kv.cv.split('.').map(Number) : [CALC0.ai, CALC0.hi, CALC0.di];
+  calc.ai = ATK_INV[ai] ? ai : CALC0.ai;
+  calc.hi = HP_INV[hi] ? hi : CALC0.hi;
+  calc.di = DEF_INV[di] ? di : CALC0.di;
+  const st = (kv.cs || '').split('.').map(Number);
+  calc.st = [0, 1, 2, 3].map(i => Number.isInteger(st[i]) && Math.abs(st[i]) <= 6 ? st[i] : 0);
+  const [ia, id] = (kv.ci || '').split('.');
+  calc.aItem = itemOK('a', calc.atk, ia) ? ia : '';
+  calc.dItem = itemOK('d', calc.def, id) ? id : '';
+  calc.weather = WEATHERS.includes(kv.cw) ? kv.cw : '';
+  calc.crit = kv.cc === '1';
+  calc.extra = CALC_MOVES.includes(kv.cx) ? kv.cx : '';
 }
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-copy]');
