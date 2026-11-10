@@ -2349,23 +2349,40 @@ function bringCombos(members, opps, k, alt = []) {
 }
 // 雙打先發的輔助：這幾種功能標籤（ROLES）的招式／特性，如順風、戲法空間、擊掌奇襲、跟我來、幫助、威嚇、開天氣／場地
 const LEAD_SUP = ['speed', 'disrupt', 'redirect', 'ally', 'weaken', 'field'];
-// 雙打先發：從組合 c（bringCombos 的結果）任挑兩隻，依序比
-//   1. cover：兩隻合起來能兩者兼具（有解）的對手數（多→少）
-//   2. weak：共同弱點＝對手常帶的攻擊屬性（含算進去的超級進化型態）裡兩隻都受到 ×2 以上的（少→多）
-//   3. sup：有沒有先發輔助（LEAD_SUP，看 fmt 的 OP.GG 常用招式／特性；只選屬性的隊員沒有）
-//   4. 兩隻的速度種族值加總（高→低）
+// 反制強化的招式：挑釁、再來一次、黑霧、清除之煙、吼叫、吹飛、龍尾、巴投（另外特性純樸也算）
+const ANTI_SETUP = ['taunt', 'encore', 'haze', 'clear-smog', 'roar', 'whirlwind', 'dragon-tail', 'circle-throw'];
+// 寶可夢 key 在 fmt 能反制強化的招式／特性（使用率 ROLE_PCT% 以上；超級進化看固定特性），寫成「挑釁 45%」
+function antiSetupOf(key, fmt) {
+  const m = MON[key], use = useOf(key, fmt);
+  const moves = (use?.moves || []).filter(([k, p]) => p >= ROLE_PCT && ANTI_SETUP.includes(k)).map(([k, p]) => `${MOVES[k][0]} ${p}%`);
+  const abils = m.base ? (m.megaAbils.includes('unaware') ? [`超級進化後特性${abilZh('unaware')}`] : [])
+    : (use?.abils || []).filter(([k, p]) => k === 'unaware' && p >= ROLE_PCT).map(([k, p]) => `特性${abilZh(k)} ${p}%`);
+  return [...moves, ...abils];
+}
+// 先發：從組合 c（bringCombos 的結果）任挑 n 隻（單打 1 隻、雙打 2 隻），依序比
+//   1. noAtk：都是輔助手（隊伍角色的 main 是 sup）的排最後；只選屬性、沒有統計的隊員當打手
+//   2. cover：合起來能兩者兼具（有解）的對手數（多→少）
+//   3. loose：壓不住的對手強化手（setups 裡的對手索引；都剋不到、也都沒有 antiSetupOf 的招式／特性）（少→多）
+//   4. weak：共同弱點＝對手常帶的攻擊屬性（含算進去的超級進化型態）裡兩隻都受到 ×2 以上的（少→多；雙打才看）
+//   5. sup：有沒有先發輔助（LEAD_SUP，看 fmt 的 OP.GG 常用招式／特性，寫成「順風 57%」；雙打才看，只選屬性的隊員沒有）
+//   6. 速度種族值加總（高→低）
 // uOf、sOf、kOf：members 索引 → unit（不進化的超級進化用原型）、速度、寶可夢 key；opps 是對手的 unit（oppUnit）
-function leadPair(c, uOf, sOf, kOf, opps, fmt) {
+function leadPick(c, n, uOf, sOf, kOf, opps, setups, fmt) {
   const atk = [...new Set(opps.flatMap(u => [u, ...(u.megas || [])].flatMap(f => f.atk.map(a => a.ty))))];
-  const supOf = j => { const r = kOf(j) && roleOf(kOf(j), fmt); return r ? [...new Set(r.tags.filter(t => LEAD_SUP.includes(t.id)).flatMap(t => t.by.map(([zh]) => zh)))] : []; };
-  const list = [];
-  c.idx.forEach((a, p) => c.idx.forEach((b, q) => {
-    if (p >= q) return;
-    list.push({ js: [a, b], cover: c.res.filter(r => [p, q].some(x => r.safe.includes(x) && r.hit.includes(x))).length,
-      weak: atk.filter(ty => [a, b].every(j => eff(ty, uOf(j).defs) >= 2)),
-      sup: [a, b].map(j => [j, supOf(j)]).filter(([, by]) => by.length), spe: sOf(a) + sOf(b) });
-  }));
-  return list.sort((x, y) => y.cover - x.cover || x.weak.length - y.weak.length || (y.sup.length > 0) - (x.sup.length > 0) || y.spe - x.spe)[0];
+  const roleIn = j => kOf(j) && roleOf(kOf(j), fmt);
+  const supOf = j => { const r = roleIn(j); return r ? [...new Set(r.tags.filter(t => LEAD_SUP.includes(t.id)).flatMap(t => t.by.map(([zh, p]) => `${zh} ${p}%`)))] : []; };
+  const antiOf = j => kOf(j) ? antiSetupOf(kOf(j), fmt) : [];
+  // 組合裡任挑 n 隻的位置（c.idx 的索引）
+  const sets = n === 1 ? c.idx.map((_, p) => [p]) : c.idx.flatMap((_, p) => c.idx.slice(p + 1).map((__, d) => [p, p + 1 + d]));
+  return sets.map(ps => {
+    const js = ps.map(p => c.idx[p]), anti = js.some(j => antiOf(j).length);
+    return { js, noAtk: js.every(j => roleIn(j)?.main === 'sup'),
+      cover: c.res.filter(r => ps.some(x => r.safe.includes(x) && r.hit.includes(x))).length,
+      loose: anti ? [] : setups.filter(o => !ps.some(x => c.res[o].hit.includes(x))),
+      weak: n === 2 ? atk.filter(ty => js.every(j => eff(ty, uOf(j).defs) >= 2)) : [],
+      sup: n === 2 ? js.map(j => [j, supOf(j)]).filter(([, by]) => by.length) : [], spe: js.reduce((s, j) => s + sOf(j), 0) };
+  }).sort((x, y) => x.noAtk - y.noAtk || y.cover - x.cover || x.loose.length - y.loose.length || x.weak.length - y.weak.length
+    || (y.sup.length > 0) - (x.sup.length > 0) || y.spe - x.spe)[0];
 }
 
 const pick = (arr, rng) => arr[Math.floor(rng() * arr.length)];
@@ -3465,14 +3482,22 @@ function bringHTML(members, opps) {
   const combos = bringCombos(units, oppUnits, k, alt), best = combos[0];
   const name = j => `${members[j][1] + 1} ${slotName(members[j][1])}`;
   const spe = j => monOf(j)?.spe || 0;
-  // 先發（不進化的超級進化看原型的屬性和速度）：單打取第 1 名組合裡能兩者兼具的對手數最多的，同數比速度種族值；
-  // 雙打兩隻一起看搭配（leadPair）
+  // 先發（不進化的超級進化看原型的屬性和速度）：從第 1 名組合挑（leadPick；單打 1 隻，雙打 2 隻一起看搭配）
   const speIn = (c, j) => alt[j] && c.evo != null && j !== c.evo ? MON[monOf(j).base].spe : spe(j);
   const unitIn = (c, j) => alt[j] && c.evo != null && j !== c.evo ? alt[j] : units[j];
-  const pair = lead === 2 ? leadPair(best, j => unitIn(best, j), j => speIn(best, j), j => team.mons[members[j][1]], oppUnits, team.fmt) : null;
-  const leads = pair ? pair.js : best.idx.map((j, p) => ({ j, n: best.full[p] })).sort((x, y) => y.n - x.n || speIn(best, y.j) - speIn(best, x.j)).slice(0, lead).map(x => x.j);
-  const pairText = !pair ? '' : `（兩隻合起來有解 ${pair.cover}／${opps.length} 隻・${pair.weak.length ? `共同弱點 ${pair.weak.map(ty => T[ty].zh).join('、')}` : '沒有共同弱點'}`
-    + `${pair.sup.length ? `・輔助 ${pair.sup.map(([j, by]) => `${slotName(members[j][1])}（${by.join('、')}）`).join('、')}` : ''}）`;
+  // 對手的強化手：常帶強化招式（隊伍角色的「強化」標籤，如劍舞、詭計、龍之舞）的，存對手索引和撐起標籤的招式
+  const setupBy = opps.map(([m]) => roleOf(m.key, team.fmt)?.tags.find(t => t.id === 'setup')?.by || []);
+  const setups = setupBy.map((by, o) => by.length ? o : -1).filter(o => o >= 0);
+  const pick = leadPick(best, lead, j => unitIn(best, j), j => speIn(best, j), j => team.mons[members[j][1]], oppUnits, setups, team.fmt);
+  const leads = pick.js;
+  const setupText = o => `${opps[o][0].zh}（${setupBy[o].map(([zh, p]) => `${zh} ${p}%`).join('、')}）`;
+  const leadInfo = [lead === 2 && `兩隻合起來有解 ${pick.cover}／${opps.length} 隻`,
+    lead === 2 && (pick.weak.length ? `共同弱點 ${pick.weak.map(ty => T[ty].zh).join('、')}` : '沒有共同弱點'),
+    pick.sup.length && `輔助 ${pick.sup.map(([j, by]) => `${slotName(members[j][1])}（${by.join('、')}）`).join('、')}`,
+    setups.length && `強化手壓得住 ${setups.length - pick.loose.length}／${setups.length} 隻`].filter(Boolean);
+  const pairText = leadInfo.length ? `（${leadInfo.join('・')}）` : '';
+  const pairWarn = (pick.noAtk ? `<span class="who x-msg">⚠ 這組沒有打手，先發${lead === 2 ? '兩隻都是' : '是'}輔助手，對手強化後容易被打穿</span>` : '')
+    + (pick.loose.length ? `<span class="who x-msg">⚠ 先發壓不住的強化手：${pick.loose.map(setupText).join('、')}，留後排或換人處理</span>` : '');
   const evoText = c => c.evo == null ? '' : `<span class="who">一場只能超級進化一隻：進化 ${name(c.evo)}，`
     + `${c.idx.filter(j => alt[j] && j !== c.evo).map(j => MON[monOf(j).base].zh).join('、')}以原型上場</span>`;
   const cell = (safe, hit) => safe && hit ? ['✔', 'm2'] : hit ? ['剋', 'm1'] : safe ? ['擋', 'm1'] : ['✘', 'mh'];
@@ -3494,12 +3519,16 @@ function bringHTML(members, opps) {
   return `<div class="res-head">建議出戰<span class="muted small">（${FMT_ZH[team.fmt]}帶 ${k} 隻，共 ${combos.length} 種帶法）</span></div>`
     + (members.length < BRING_N[team.fmt] ? `<p class="muted small b-intro">我方只有 ${members.length} 隻，全部帶上。</p>` : '')
     + '<p class="muted small b-intro">依對手裡「沒解」的數量由少到多、「有解」的數量由多到少排序，再比同一隻兩者兼具的配對數。'
-    + (lead === 2 ? '先發從第 1 名組合裡挑兩隻一起看搭配：依序比兩隻合起來有解的對手數、共同弱點（對手常帶的攻擊屬性裡兩隻都怕的）少的、'
-      + '有沒有先發輔助（順風、戲法空間、擊掌奇襲、跟我來、幫助、威嚇、開天氣／場地等），最後比兩隻的速度種族值。</p>'
-      : '先發取第 1 名組合裡兩者兼具最多的，同數時速度種族值高的優先。</p>')
+    + (lead === 2 ? '先發從第 1 名組合裡挑兩隻一起看搭配：至少要有一隻打手（隊伍角色是物攻或特攻輸出；兩隻都是輔助手的排最後），'
+      + '再依序比兩隻合起來有解的對手數、壓不住的強化手少的、共同弱點（對手常帶的攻擊屬性裡兩隻都怕的）少的、'
+      + '有沒有先發輔助（順風、戲法空間、擊掌奇襲、跟我來、幫助、威嚇、開天氣／場地等），最後比兩隻的速度種族值。'
+      : '先發從第 1 名組合裡挑打手（隊伍角色是物攻或特攻輸出；輔助手排最後），再依序比兩者兼具的對手數、壓不住的強化手少的，'
+      + '同數時速度種族值高的優先。')
+    + `強化手＝常帶劍舞、詭計、龍之舞這類強化招式（使用率 ${ROLE_PCT}% 以上）的對手；先發有一隻招式剋得到牠，`
+    + `或常帶挑釁、再來一次、黑霧、清除之煙、吼叫、吹飛、龍尾、巴投，或特性是純樸，就算壓得住。${lead === 2 ? '輔助後面的 % 是 OP.GG 使用率。' : ''}</p>`
     + combos.slice(0, 3).map((c, r) => `<div class="combo${r ? '' : ' top'}"><span class="rank">${r + 1}</span><b>${c.idx.map(name).join('、')}</b>`
       + `<span class="meta">沒解 ${c.none}・半解 ${opps.length - c.none - c.solved}・有解 ${c.solved}</span>`
-      + (r ? '' : `<span class="who">先發：${leads.map(name).join('、')}${pairText}</span>`) + evoText(c)
+      + (r ? '' : `<span class="who">先發：${leads.map(name).join('、')}${pairText}</span>${pairWarn}`) + evoText(c)
       + (c.none ? `<span class="who x-msg">沒解：${c.res.map((x, o) => x.level ? '' : opps[o][0].zh).filter(Boolean).join('、')}</span>` : '')
       + '</div>').join('')
     + `<h3>對位表</h3><div class="mwrap cover"><table class="matrix vs">${t}</tbody></table></div>`
@@ -3765,6 +3794,11 @@ function calcHTML() {
     const txt = [im[0] && `攻擊 ${im[0] > 0 ? '+' : '−'}${Math.abs(im[0])}`, im[1] && `特攻 +${im[1]}`].filter(Boolean).join('、');
     hints.push(`<div class="x-line"><span class="x-msg">${D.zh}的${abilZh(dab)}出場會讓${A.zh}${txt}</span><button class="mini" data-im="${im.join('.')}">套用${txt}</button></div>`);
   }
+  // 能力點數合計超過 66（每隻六項合計的上限）：攻擊方算攻擊／特攻＋速度，防守方算 HP＋防禦／特防＋速度
+  [['攻擊方', A, [['攻擊／特攻', calc.ai], ['速度', calc.sa]]], ['防守方', D, [['HP', calc.hi], ['防禦／特防', calc.di], ['速度', calc.sd]]]].forEach(([side, m, parts]) => {
+    const sum = parts.reduce((s, [, v]) => s + v[0], 0);
+    if (sum > 66) hints.push(`<div class="x-line"><span class="x-msg">⚠ ${side}${m.zh}的能力點數 ${parts.map(([zh, v]) => `${zh} ${v[0]}`).join('＋')}＝${sum}，超過上限 66</span></div>`);
+  });
   return `<div class="res-head">${A.zh}${chips(A.types)} → ${D.zh}${chips(D.types)}`
     + `<span class="muted small">（${[FMT_ZH[team.fmt], FIELD_ZH[calc.weather], FIELD_ZH[calc.terrain], calc.tr && '戲法空間', hh && '幫助', calc.burn && '灼傷',
       ...calc.walls.map(w => MOVES[w][0]), calc.crit && '急所'].filter(Boolean).join('・')}）</span></div>`
@@ -3787,7 +3821,7 @@ function calcHTML() {
     + '<p class="note">※ 公式照 Smogon damage-calc 的寶可夢冠軍版：Lv50、個體值 31，算進能力值與投資、本系 ×1.5、屬性相剋、亂數 85～100%（16 段）、'
     + '雙打範圍招式 ×0.75、天氣、急所 ×1.5、能力變化、特性、道具。投資套在這招用到的那項能力：物理招看攻擊打防禦、特殊招看特攻打特防（精神衝擊打防禦、撲擊用自己的防禦）；'
     + '「滿投資」＝能力點數 32，「＋性格」再 ×1.1；也可以在檔位旁直接輸入能力點數（每項 0～32，六項合計最多 66）並選性格'
-    + '（＋性格 ×1.1、−性格 ×0.9；HP 沒有性格）。上方能力值是投資後、能力變化前的數字。列出的招式是 OP.GG 常用招式裡的攻擊招式，依傷害由高到低排。'
+    + '（＋性格 ×1.1、−性格 ×0.9；HP 沒有性格），超過 66 時結果上方會提示。上方能力值是投資後、能力變化前的數字。列出的招式是 OP.GG 常用招式裡的攻擊招式，依傷害由高到低排。'
     + '特性：超級進化用固定特性，其他預設用 OP.GG 使用率最高的，可在選單改；要看場上狀況的不算（如猛火、引火的強化、正電／負電、分析、大將、鬥爭心、畫皮），'
     + '毅力在勾「灼傷」時算（攻擊 ×1.5、不減半）。開天氣、開場地的特性和威嚇不會自動套用，結果上方會提示。破格會無視防守方的特性。電光束出招前特攻 +1 已算進去。'
     + '幫助（雙打才有）威力 ×1.5；灼傷時物理招式傷害 ×½。反射壁擋物理、光牆擋特殊、極光幕兩種都擋（不和前兩者疊加），單打 ×½、雙打 ×⅔；'
