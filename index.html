@@ -266,6 +266,8 @@ table.matrix { border-collapse: separate; border-spacing: 0; margin: 0 auto; }
 .combo .who { flex-basis: 100%; font-size: 13px; }
 .matrix.vs td { width: 46px; min-width: 46px; font-size: 14px; }
 .matrix.vs tbody th { text-align: left; font-size: 14px; white-space: nowrap; }
+.vs-go { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.vs-go:hover { text-decoration: underline; }
 .qpick { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 6px; margin-top: 6px; }
 .qpick button {
   display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 6px 8px; text-align: left;
@@ -2203,9 +2205,9 @@ function roleOf(key, fmt) {
   ] })).filter(t => t.by.length);
   return { use, mega, phys: phys / 100, spec: spec / 100, sup: sup / 100, main: sup >= Math.max(phys, spec) ? 'sup' : phys >= spec ? 'phys' : 'spec', tags };
 }
-// 防守屬性 defs 的隊員實際打得出的攻擊屬性 [{ ty 屬性, zh 招式中文名（本系時是 null） }]：
-// 挑了寶可夢、fmt 有統計的看常用攻擊招式（使用率 ROLE_PCT% 以上；輔助用的攻擊招式、固定傷害和反擊類不吃相剋，都不算），
-// 只選屬性或沒有統計的看本系
+// 防守屬性 defs 的寶可夢實際打得出的攻擊屬性 [{ ty 屬性, zh 該屬性的招式中文名（多招用「、」連起來；本系時是 null） }]：
+// 挑了寶可夢、fmt 有統計的看常用攻擊招式，同屬性的攻擊招式使用率加總 ROLE_PCT% 以上才算（同屬性常分散在幾招、單招沒到門檻，
+// 如烈咬陸鯊龍尾、流星群各 28%；輔助用的攻擊招式、固定傷害和反擊類不吃相剋，都不算）；只選屬性或沒有統計的看本系
 const FIXED_DMG = new Set(['counter', 'mirror-coat', 'metal-burst', 'comeuppance', 'endeavor', 'super-fang', 'ruination',
   'natures-madness', 'seismic-toss', 'night-shade', 'final-gambit', 'psywave']);
 // 寶可夢 key 在 fmt 的 OP.GG 統計（超級進化沿用原型）；沒有統計回傳 undefined
@@ -2213,15 +2215,16 @@ const useOf = (key, fmt) => USAGE[family(MON[key])]?.[fmt];
 function attacksOf(key, defs, fmt) {
   const use = key && USAGE[family(MON[key])]?.[fmt];
   if (!use || !use.moves.length) return defs.map(ty => ({ ty, zh: null }));
-  return use.moves.filter(([k, p]) => p >= ROLE_PCT && MOVES[k][2] !== 'status' && !SUP_MOVES.has(k) && !FIXED_DMG.has(k))
-    .map(([k]) => ({ ty: MOVES[k][1], zh: MOVES[k][0] }));
+  const by = {};
+  use.moves.filter(([k]) => MOVES[k][2] !== 'status' && !SUP_MOVES.has(k) && !FIXED_DMG.has(k)).forEach(([k, p]) => {
+    const g = by[MOVES[k][1]] ||= { p: 0, zh: [] };
+    g.p += p;
+    g.zh.push(MOVES[k][0]);
+  });
+  return Object.entries(by).filter(([, g]) => g.p >= ROLE_PCT).map(([ty, g]) => ({ ty, zh: g.zh.join('、') }));
 }
-// 對手（熱門寶可夢或出戰選角填的對手）→ answerOf 用的 { defs, atk }：常用攻擊招式再加上本系屬性。
-// 判斷「怕不怕牠」要從寬，本系招式常分散在幾招、單招沒到 ROLE_PCT%（如烈咬陸鯊龍尾、流星群各 28%），沒列到也算牠打得出來
-const monUnit = (m, fmt) => {
-  const atk = attacksOf(m.key, m.types, fmt);
-  return { defs: m.types, atk: [...atk, ...m.types.filter(ty => !atk.some(a => a.ty === ty)).map(ty => ({ ty, zh: null }))] };
-};
+// 對手（熱門寶可夢或出戰選角填的對手）→ answerOf 用的 { defs, atk }，攻擊屬性和我方同一套算法
+const monUnit = (m, fmt) => ({ defs: m.types, atk: attacksOf(m.key, m.types, fmt) });
 // 隊伍該有的角色：物攻、特攻輸出各一，再加上 2026-11-09 資料裡該形式排名前 30 名至少 6 隻（兩成）有的功能
 // （單打：強化 11、回復 9、換人 6 隻；雙打：速度控制 11、擾亂 6＋引誘 2、強化 6 隻）。tags 任一個有就算有
 const NEEDS = {
@@ -2283,7 +2286,8 @@ function stabGaps(members) {
 // 排名前 n 的熱門寶可夢（不含超級進化，超級進化沿用原型排名），依排名排序
 const topMons = (fmt, n) => MONS.filter(m => !m.base && m.rank[fmt] && m.rank[fmt] <= n).sort((x, y) => x.rank[fmt] - y.rank[fmt]);
 // 隊員 members（每隻 { defs 屬性, atk attacksOf 的攻擊屬性 }）對一隻對手 opp（同格式，monUnit）：safe＝對手的攻擊招式打這隻都 ×1 以下、
-// hit＝這隻的攻擊招式能剋對手（都是 members 的索引）；同一隻兩者兼具＝有解(2)，只有其一＝半解(1)，都沒有＝沒解(0)
+// hit＝這隻的攻擊招式能剋對手（都是 members 的索引）；同一隻兩者兼具＝有解(2)，只有其一＝半解(1)，都沒有＝沒解(0)。
+// 對手沒有常用攻擊招式（純輔助）時 bestEff 是 −Infinity，每隻都算 safe
 function answerOf(members, opp) {
   const safe = [], hit = [], oppAtk = opp.atk.map(a => a.ty);
   members.forEach(({ defs, atk }, i) => {
@@ -2483,7 +2487,7 @@ const ATK_ABILS = new Set(['aerilate', 'pixilate', 'refrigerate', 'dragonize', '
 const DEF_ABILS = new Set([...Object.keys(ABIL_IMMUNE), 'bulletproof', 'soundproof', 'queenly-majesty', 'armor-tail', 'thick-fat', 'heatproof',
   'water-bubble', 'purifying-salt', 'fur-coat', 'multiscale', 'filter', 'solid-rock', 'fluffy', 'aura-guard', 'punk-rock', 'shell-armor',
   'battle-armor', 'sturdy', 'unaware', 'ripen', 'fairy-aura', ...WEATHER_OFF, 'drought', 'drizzle', 'sand-stream', 'snow-warning', 'intimidate',
-  'grass-pelt', 'electric-surge', 'grassy-surge', 'misty-surge', 'psychic-surge']);
+  'grass-pelt', 'electric-surge', 'grassy-surge', 'misty-surge', 'psychic-surge', 'sticky-hold']);
 // 場地（算法在 damageCalc，照 Smogon 冠軍版）：在地面上（不是飛行屬性、沒有飄浮）的攻擊方用該屬性招式威力 ×1.3；
 // 打在地面上的防守方時，薄霧場地龍招式、青草場地地震／重踏威力 ×½，精神場地擋先制招式；大地波動有場地時變成對應屬性、威力 ×2
 const TERRAIN_TYPE = { electric: 'electric', grassy: 'grass', misty: 'fairy', psychic: 'psychic' };
@@ -2590,10 +2594,14 @@ function damageCalc(a, d, mk, o) {
   if (tMove) notes.add(`${FIELD_ZH[terr]}威力 ×1.5`);
   if (tBoost) notes.add(`${FIELD_ZH[terr]} ×1.3`);
   if (tCut) notes.add(`${FIELD_ZH[terr]}威力 ×½`);
-  // 威力修正（依 Smogon 的順序；技術高手看這一下的威力 p）
-  const bpModsOf = p => {
+  // 拍落：防守方有道具時威力 ×1.5（Smogon champions.ts）；超級進化帶的是自己的超級石，不算。一般寶可夢幾乎都帶道具，當作有帶；
+  // 第一下就把道具拍掉，之後連用不再加倍（黏著拍不掉，每下都加倍）
+  const knock = mk === 'knock-off' && !D.base, keep = knock && dab === 'sticky-hold';
+  if (knock) notes.add(keep ? `${abilZh(dab)}拍不掉道具，每下威力 ×1.5` : '第一下威力 ×1.5（對手有道具）');
+  // 威力修正（依 Smogon 的順序；技術高手看這一下的威力 p；first＝整場第一下）
+  const bpModsOf = (p, first) => {
     const m = [];
-    if (tMove) m.push(6144);
+    if (tMove || (knock && (first || keep))) m.push(6144);
     else if ((mk === 'solar-beam' || mk === 'solar-blade') && ['rain', 'sand', 'snow'].includes(wthr) && aab !== 'mega-sol') m.push(2048);
     if (o.hh) m.push(6144);
     if (tBoost) m.push(5325);
@@ -2646,7 +2654,7 @@ function damageCalc(a, d, mk, o) {
   };
   // 威力 p 打一下的 16 個亂數傷害（由小到大）；child＝親子愛的第 2 下（傷害 ¼）
   const rollsOf = (p, first, child) => {
-    const bp = Math.max(1, pokeRound(p * chainMods(bpModsOf(p), 41, 2097152) / 4096));
+    const bp = Math.max(1, pokeRound(p * chainMods(bpModsOf(p, first), 41, 2097152) / 4096));
     let b = Math.floor(Math.floor(22 * bp * atk / def) / 50 + 2);
     if (spread) b = pokeRound(b * 3072 / 4096);
     if (child) b = pokeRound(b * 1024 / 4096);
@@ -2663,7 +2671,7 @@ function damageCalc(a, d, mk, o) {
   };
   const pw = h => mk === 'triple-axel' ? 20 * (h + 1) : power;
   const first = Array.from({ length: hits }, (_, h) => rollsOf(pw(h), !h, pb && h === 1));
-  const later = r.berry || dab === 'multiscale' ? Array.from({ length: hits }, (_, h) => rollsOf(pw(h), false, pb && h === 1)) : first;
+  const later = r.berry || dab === 'multiscale' || (knock && !keep) ? Array.from({ length: hits }, (_, h) => rollsOf(pw(h), false, pb && h === 1)) : first;
   r.min = first.reduce((s, x) => s + x[0], 0);
   r.max = first.reduce((s, x) => s + x[15], 0);
   // 氣勢披帶、結實：HP 全滿時整場第一下最多打到剩 1 HP
@@ -3218,8 +3226,8 @@ function realHTML(m, named) {
   const lose = u ? pick(u.lose, u.win) : '', win = u ? pick(u.win, u.lose) : '';
   return lose || win ? `<span class="who">實戰：${[lose && `牠常敗給 ${lose}`, win && `牠常打倒 ${win}`].filter(Boolean).join('・')}</span>` : '';
 }
-// 對手的攻擊（monUnit 的 atk）寫成「地震、本系龍」
-const oppAtkText = u => [...new Set(u.atk.map(a => a.zh || `本系${T[a.ty].zh}`))].join('、');
+// 對手的攻擊（monUnit 的 atk）寫成「地震、龍尾、流星群」；沒有統計看本系的寫「本系龍」
+const oppAtkText = u => u.atk.length ? u.atk.map(a => a.zh || `本系${T[a.ty].zh}`).join('、') : '（沒有常用攻擊招式）';
 // 熱門威脅：沒解的排前面，同一級再依排名
 function threatHTML(members) {
   const units = members.map(unitOf);
@@ -3236,9 +3244,9 @@ function threatHTML(members) {
     + list.map(t => `<div class="threat lv${t.level}"><span class="lv">${LV[t.level]}</span><span class="meta">#${t.mon.rank[team.fmt]}</span>`
       + `<b>${t.mon.zh}</b>${chips(t.mon.types)}<span class="who">牠的攻擊：${oppAtkText(monUnit(t.mon, team.fmt))}</span>`
       + `<span class="who">不怕牠：${who(t.safe)}・招式剋牠：${whoHit(t.hit, t.mon.types)}</span>${realHTML(t.mon, named)}</div>`).join('')
-    + `<p class="note">※「不怕牠」＝牠${FMT_ZH[team.fmt]}常帶的攻擊招式和本系屬性打這隻都 ×1 以下（本系常分散在幾招、單招不一定到門檻，一律算進去）；`
-    + `「招式剋牠」＝這隻${FMT_ZH[team.fmt]}常帶的攻擊招式能對牠效果絕佳。`
-    + `常帶攻擊招式都只算使用率 ${ROLE_PCT}% 以上的，擊掌奇襲、冰凍之風這類輔助用的攻擊招式和固定傷害、反擊類招式不算；只選屬性或沒有統計的看本系。`
+    + `<p class="note">※「不怕牠」＝牠${FMT_ZH[team.fmt]}常帶的攻擊招式打這隻都 ×1 以下；「招式剋牠」＝這隻${FMT_ZH[team.fmt]}常帶的攻擊招式能對牠效果絕佳。`
+    + `兩邊算法相同：同屬性的攻擊招式使用率加總 ${ROLE_PCT}% 以上才算這個屬性（如龍尾、流星群各 28%，加起來 56% 就算龍），`
+    + '擊掌奇襲、冰凍之風這類輔助用的攻擊招式和固定傷害、反擊類招式不算；只選屬性或沒有統計的看本系。'
     + '有解＝同一隻兩者兼具，半解＝只有其中一種。招式屬性以招式本身的屬性計（氣象球、妖精皮膚等會改變屬性的不另算）；'
     + `不含特性、道具、能力值；排名與常用招式為 OP.GG 統計（${MONS_DATE} 擷取）。`
     + '「實戰」＝OP.GG 這隻的「敗於」「勝於」前 10 名裡有我方隊員（超級進化看原型）；名單依次數排，熱門寶可夢容易上榜，'
@@ -3373,9 +3381,14 @@ function bringHTML(members, opps) {
     + opps.map(([m, i]) => `<th title="${m.zh}"><span class="tcol"><span class="slot-n">${i + 1}</span><span class="duo">`
       + `${m.types.map(id => `<span class="vchip" style="${style(id)}">${T[id].zh}</span>`).join('')}</span><span class="slot-n">${m.spe}</span></span></th>`).join('')
     + '</tr></thead><tbody>';
+  // 挑了寶可夢的隊員，格子可以點：帶到傷害計算算「我方打牠」（只選屬性的隊員沒有能力值，不能點）
   members.forEach((_, j) => {
+    const me = team.mons[members[j][1]];
     t += `<tr><th>${best.idx.includes(j) ? '★ ' : ''}${name(j)}${spe(j) ? ` <span class="meta">${spe(j)}</span>` : ''}</th>`
-      + oppUnits.map(u => { const r = answerOf([units[j]], u), [v, c] = cell(r.safe.length > 0, r.hit.length > 0); return `<td class="${c}">${v}</td>`; }).join('') + '</tr>';
+      + oppUnits.map((u, o) => {
+        const r = answerOf([units[j]], u), [v, c] = cell(r.safe.length > 0, r.hit.length > 0), op = opps[o][0];
+        return `<td class="${c}">${me ? `<button class="vs-go" data-ca="${me}" data-cd="${op.key}" title="到傷害計算看${MON[me].zh}打${op.zh}">${v}</button>` : v}</td>`;
+      }).join('') + '</tr>';
   });
   return `<div class="res-head">建議出戰<span class="muted small">（${FMT_ZH[team.fmt]}帶 ${k} 隻，共 ${combos.length} 種帶法）</span></div>`
     + (members.length < BRING_N[team.fmt] ? `<p class="muted small b-intro">我方只有 ${members.length} 隻，全部帶上。</p>` : '')
@@ -3388,8 +3401,9 @@ function bringHTML(members, opps) {
       + '</div>').join('')
     + `<h3>對位表</h3><div class="mwrap cover"><table class="matrix vs">${t}</tbody></table></div>`
     + '<p class="note">※ ✔＝不怕牠的攻擊、招式又剋得到；剋＝招式剋得到，但會被牠的攻擊剋；擋＝不怕牠的攻擊，但剋不到；✘＝兩者都沒有。'
-    + `「剋得到」看我方${FMT_ZH[team.fmt]}常帶的攻擊招式，「不怕」看對手常帶的攻擊招式加上本系屬性（使用率 ${ROLE_PCT}% 以上，判斷方式同「隊伍分析」的熱門威脅檢查；`
+    + `「剋得到」看我方、「不怕」看對手${FMT_ZH[team.fmt]}常帶的攻擊招式（同屬性招式使用率加總 ${ROLE_PCT}% 以上，判斷方式同「隊伍分析」的熱門威脅檢查；`
     + '對手帶哪些見下方「對手情報」），只選屬性或沒有統計的看本系。'
+    + '點格子會帶到「傷害計算」算我方打牠的傷害（按「⇄ 對調」看牠打我方；只選屬性的隊員不能點）。'
     + '★＝第 1 名組合的成員；名字旁和表頭下方的數字是速度種族值。帶幾隻依攻略網站整理的排位規則（單打 6 選 3、雙打 6 選 4），'
     + '一場只能超級進化一隻也是同一來源。只看屬性、常用攻擊招式與速度種族值，不含特性、道具、能力投資。</p>';
 }
@@ -3411,7 +3425,7 @@ function oppInfoHTML(opps) {
         + `<div class="bst">${abils ? `<span>特性 ${abils}</span>` : ''}${r.use.items.length ? `<span>道具 ${top(r.use.items, ITEMS, 3)}</span>` : ''}</div>`
         + realLine + useDetailsHTML(r) + '</div>';
     }).join('')
-    + `<p class="note">※「常帶攻擊」＝使用率 ${ROLE_PCT}% 以上的攻擊招式（輔助用、固定傷害、反擊類不算），再加上沒列到的本系屬性，對位表的「不怕」就是看這些；`
+    + `<p class="note">※「常帶攻擊」＝同屬性招式使用率加總 ${ROLE_PCT}% 以上的攻擊招式（輔助用、固定傷害、反擊類不算），對位表的「不怕」就是看這些；`
     + '特性列前 2 名、道具列前 3 名，「實戰」同「隊伍分析」熱門威脅檢查的說明。</p>';
 }
 function renderBring() {
@@ -3458,6 +3472,15 @@ $('#pPick').addEventListener('click', e => {
 $('#pList').addEventListener('click', e => {
   const b = e.target.closest('[data-opp]');
   if (b) addOpp(b.dataset.opp);
+});
+// 對位表的格子：攻擊方放我方、防守方放對手，切到傷害計算並捲到最上面
+$('#pResult').addEventListener('click', e => {
+  const b = e.target.closest('.vs-go');
+  if (!b) return;
+  setCalcMon('atk', b.dataset.ca);
+  setCalcMon('def', b.dataset.cd);
+  showTab('calc');
+  $('#p-calc').scrollIntoView({ block: 'start' });
 });
 $('#pOpp').addEventListener('click', e => {
   const b = e.target.closest('.slot');
@@ -3616,7 +3639,8 @@ function calcHTML() {
     + '幫助（雙打才有）威力 ×1.5；灼傷時物理招式傷害 ×½。反射壁擋物理、光牆擋特殊、極光幕兩種都擋（不和前兩者疊加），單打 ×½、雙打 ×⅔；'
     + '急所、穿透無視牆，劈瓦、精神之牙、怒牛會先打破牆。場地：在地面上（不是飛行屬性、沒有飄浮）的攻擊方用電氣／青草／精神場地對應屬性的招式威力 ×1.3；'
     + '打在地面上的防守方時，薄霧場地讓龍招式、青草場地讓地震／重踏威力 ×½，精神場地擋下先制招式；大地波動、電力上升、廣域戰力、薄霧炸裂照場地改變威力或屬性，'
-    + '草之毛皮在青草場地防禦 ×1.5。威力有條件會變的招式（如拍落、雜技、憤怒之拳）以基本威力計，噴火／噴水以 HP 全滿計。'
+    + '草之毛皮在青草場地防禦 ×1.5。拍落當作對手有帶道具：第一下威力 ×1.5，道具被拍掉後連用不再加倍（超級進化帶的超級石拍不掉、不加倍；黏著每下都加倍）。'
+    + '其他威力有條件會變的招式（如雜技、憤怒之拳）以基本威力計，噴火／噴水以 HP 全滿計。'
     + '幾擊＝連續用同一招幾次打倒，不含回復、吃剩的東西、文柚果；抗性樹果、多重鱗片只算第一下，氣勢披帶、結實只在 HP 全滿時撐住一下。</p>';
 }
 function renderCalc() {
@@ -3650,12 +3674,13 @@ function renderCalc() {
     : '<p class="empty">選好攻擊方和防守方後，這裡會列出攻擊方常用攻擊招式打過去的傷害、佔防守方 HP 的比例，以及幾下會被打倒。</p>';
   saveState();
 }
-// 換寶可夢時清掉那一方的道具和選的特性；換攻擊方也清掉加算招式。選好就清掉那一方的屬性篩選，收起清單
+// 換寶可夢時清掉那一方的道具和選的特性；換攻擊方也清掉加算招式和灼傷（灼傷是那一隻的狀態；幫助、牆、天氣、場地是場上的，留著）。
+// 選好就清掉那一方的屬性篩選，收起清單
 function setCalcMon(side, key) {
   calcPick[side] = [];
   if (calc[side] !== key) {
     calc[side] = key;
-    if (side === 'atk') { calc.aItem = calc.aAb = calc.extra = ''; } else calc.dItem = calc.dAb = '';
+    if (side === 'atk') { calc.aItem = calc.aAb = calc.extra = ''; calc.burn = false; } else calc.dItem = calc.dAb = '';
   }
   renderCalc();
 }
