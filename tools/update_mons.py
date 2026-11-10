@@ -1,6 +1,7 @@
 # 從 OP.GG 寶可夢冠軍圖鑑頁擷取寶可夢名單（屬性、單打／雙打排名、超級進化原型），
 # 再逐隻抓有排名的寶可夢詳細頁，取單打／雙打的常用招式、特性使用率，以及招式／特性的中文名與效果，
-# 寫進 index.html 的 MONS START / MONS END 區塊之間。超級進化沒有獨立統計，網頁端沿用原型的。
+# 寫進 index.html 的 MONS START / MONS END 區塊之間。超級進化沒有獨立統計，網頁端沿用原型的；
+# 超級進化的特性是固定的，名單頁就有，另外存在名單裡。
 # 種族值不太會變，另外寫到 index.html 旁邊的 base-stats.js（不帶日期，資料沒變就不會有 diff）。
 # 用法：python tools/update_mons.py [index.html 路徑，預設為 repo 根目錄的 index.html]
 # 有排名的寶可夢約 250 隻要逐頁抓，跑一次約 3～5 分鐘。
@@ -99,7 +100,7 @@ def main(path):
         base = p.get('base_key') or ''
         rs = ranks['single'].get(p['key']) or ranks['single'].get(base) or 0
         rd = ranks['double'].get(p['key']) or ranks['double'].get(base) or 0
-        rows.append([p['key'], p['name'], '.'.join(p['types']), rs, rd, base])
+        rows.append([p['key'], p['name'], '.'.join(p['types']), rs, rd, base] + (['.'.join(p.get('abilities') or [])] if base else []))
         st = p['stats']
         stats[p['key']] = [st['hp'], st['attack'], st['defense'], st['spAttack'], st['spDefense'], st['speed']]
     if bad:
@@ -127,11 +128,16 @@ def main(path):
         if n % 25 == 0 or n == len(targets):
             print('詳細頁 %d/%d' % (n, len(targets)), flush=True)
         time.sleep(0.3)
+    # 超級進化的特性：中文名與效果只能從各詳細頁帶到的特性對照取（超級進化自己的詳細頁對照是空的），沒帶到的就沒有說明
+    mega_a = {r[0]: [a for a in r[6].split('.') if a] for r in rows if r[5]}
     used_m = {s.split(':')[0] for u in use.values() for s in ' '.join(u[:2]).split()}
-    used_a = {s.split(':')[0] for u in use.values() for s in ' '.join(u[2:]).split()}
+    used_a = {s.split(':')[0] for u in use.values() for s in ' '.join(u[2:]).split()} | {k for ks in mega_a.values() for k in ks}
     mv_out = {m['key']: [m['name'], m['type'], m['category'], m['power'], clean(m['effect'] or m['description'])]
               for m in moves.values() if m['key'] in used_m}
     ab_out = {a['key']: [a['name'], clean(a['description'])] for a in abils.values() if a['key'] in used_a}
+    miss = sorted({k for ks in mega_a.values() for k in ks} - set(ab_out))
+    if miss:
+        print('找不到這些超級進化特性的說明，網頁上會略過：%r' % miss)
 
     today = datetime.date.today().isoformat()
     dump = lambda o: json.dumps(o, ensure_ascii=False, separators=(',', ':'))
@@ -139,7 +145,8 @@ def main(path):
     block = ('// ----- MONS START -----\n'
              '// 寶可夢名單與常用招式：%s 擷取自 OP.GG 寶可夢冠軍圖鑑（含超級進化）；這段由 tools/update_mons.py 產生，勿手改\n'
              "const MONS_DATE = '%s';\n"
-             '// [key, 中文名, 屬性（. 分隔）, 單打排名, 雙打排名（0＝沒有排名）, 超級進化的原型 key]；種族值在 base-stats.js\n'
+             '// [key, 中文名, 屬性（. 分隔）, 單打排名, 雙打排名（0＝沒有排名）, 超級進化的原型 key, 超級進化後的特性 key（. 分隔，只有超級進化有）]；\n'
+             '// 種族值在 base-stats.js\n'
              'const MONS_RAW = [\n%s\n];\n'
              '// 常用招式／特性：寶可夢 key → [單打招式, 雙打招式, 單打特性, 雙打特性]，每項是「key:使用率%%」以空白分隔、\n'
              '// 依使用率高到低，低於 %d%% 的不收；沒有統計的是空字串，超級進化不在這裡（沿用原型）\n'
