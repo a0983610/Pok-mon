@@ -73,6 +73,8 @@ function useOf(key, fmt, set) {
 // 空的配招；setFilled＝有沒有填任何一欄（什麼都沒填就當沒登錄，存 null）
 const emptySet = () => ({ moves: ['', '', '', ''], item: '', ab: '', sp: [0, 0, 0, 0, 0, 0], nat: [0, 0] });
 const setFilled = s => s.moves.some(Boolean) || !!s.item || !!s.ab || s.sp.some(Boolean) || !!s.nat[0];
+// 配招有填能力點數或性格才用登錄的投資，不然照預設（傷害計算分頁是那頁的投資檔位）
+const hasSpread = set => set.sp.some(Boolean) || !!set.nat[0];
 function attacksOf(key, defs, fmt, set) {
   const use = key && useOf(key, fmt, set);
   if (!use || !use.moves.length) return defs.map(ty => ({ ty, zh: null }));

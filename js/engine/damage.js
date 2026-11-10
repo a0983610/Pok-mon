@@ -71,6 +71,14 @@ const FLAG = Object.fromEntries(Object.entries({
 const ABIL_ZH = { aerilate: '飛行皮膚', dragonize: '龍皮膚', eelevate: '鰻鰻高升', 'mega-sol': '超級日光', 'fire-mane': '火焰鬃毛',
   'aura-guard': '波導防護', 'parental-bond': '親子愛', 'fairy-aura': '妖精氣場' };
 const abilZh = k => ABILS[k]?.[0] || ABIL_ZH[k] || '';
+// 寶可夢 key 在 fmt 實際用的特性：超級進化用固定特性；其他用選的 cur，沒選或不在這隻的常用特性裡就用使用率最高的；沒有統計回傳 ''
+function defAbOf(key, fmt, cur = '') {
+  const m = MON[key];
+  if (!m) return '';
+  if (m.base) return m.megaAbils[0] || '';
+  const list = useOf(key, fmt)?.abils || [];
+  return list.some(([k]) => k === cur) ? cur : list[0]?.[0] || '';
+}
 // 一般屬性招式變成這個屬性、威力 ×1.2
 const ATE = { aerilate: 'flying', pixilate: 'fairy', refrigerate: 'ice', dragonize: 'dragon' };
 // 防守方特性讓這個屬性的招式沒有效果
@@ -343,4 +351,20 @@ function dmgRows(a, d, o, extra) {
   const ok = rows.filter(x => !x.r.skip).sort((x, y) => (y.r.max || 0) - (x.r.max || 0)), why = {};
   rows.filter(x => x.r.skip).forEach(x => (why[x.r.skip] ||= []).push(MOVES[x.k][0]));
   return { use, ok, why, kos: ok.filter(x => x.r.ko?.[0] > 1e-9), top: ok.find(x => x.r.ko) };
+}
+// 對位的一方（出招表、之後的對戰中共用）：寶可夢 key、fmt；set＝我方登錄的配招（對手不傳）。
+// 沒登錄的欄位照傷害計算的預設（CALC0）：攻擊／特攻 32＋性格、速度 32＋性格、HP／防禦／特防 0、不帶道具、特性用 defAbOf
+function battler(key, fmt, set) {
+  const sp = set && hasSpread(set) ? { sp: set.sp, nat: set.nat } : {};
+  return { key, set, ab: set?.ab || defAbOf(key, fmt), item: set?.item || '', ...sp, atkInv: [32, 11], hp: [0, 10], defInv: [0, 10], speInv: [32, 11] };
+}
+// 一對一對位：x、y 是 battler，f：{ fmt, weather, terrain, tr }（沒給的當沒有）；能力變化、灼傷、幫助、牆、開場特性都不算。
+// 道具兩個方向都帶著（damageCalc 只讀這個方向用得到的效果，如攻擊方不看樹果）。
+// 回傳 xy＝x 打 y、yx＝y 打 x（dmgRows 的結果）、spd／first（speedPair：first 0＝x 先動、1＝y 先動、-1＝同速）
+function duel(x, y, f) {
+  const o = { fmt: f.fmt, weather: f.weather || '', crit: false, terrain: f.terrain || '', hh: false, walls: [], burn: false };
+  const atk = b => ({ key: b.key, inv: b.atkInv, sp: b.sp, nat: b.nat, st: { atk: 0, spa: 0 }, item: b.item, ab: b.ab, set: b.set });
+  const def = b => ({ key: b.key, hp: b.hp, inv: b.defInv, sp: b.sp, nat: b.nat, st: { def: 0, spd: 0 }, item: b.item, ab: b.ab });
+  const spe = b => ({ key: b.key, inv: b.speInv, sp: b.sp, nat: b.nat, st: 0, item: b.item, ab: b.ab });
+  return { xy: dmgRows(atk(x), def(y), o), yx: dmgRows(atk(y), def(x), o), ...speedPair(spe(x), spe(y), { weather: o.weather, terrain: o.terrain, tr: !!f.tr }) };
 }

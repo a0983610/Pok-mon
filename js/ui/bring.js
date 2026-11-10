@@ -60,7 +60,37 @@ function bringHTML(members, opps) {
     + '★＝第 1 名組合的成員；名字旁和表頭下方的數字是速度種族值（對手超級進化後速度不同的，下面多一行「超」和進化後的速度）。'
     + '帶幾隻依攻略網站整理的排位規則（單打 6 選 3、雙打 6 選 4），'
     + '一場只能超級進化一隻也是同一來源：組合裡有 2 隻以上超級進化時，逐一試只進化其中一隻、其他以原型的屬性計，取結果最好的並標出進化哪隻'
-    + '（對位表的每一列仍是進化後的樣子）。只看屬性、常用攻擊招式與速度種族值，不含特性、道具、能力投資。</p>';
+    + '（對位表的每一列仍是進化後的樣子）。只看屬性、常用攻擊招式與速度種族值，不含特性、道具、能力投資。</p>'
+    + moveTableHTML(members, opps, best, alt, oppMegas);
+}
+// 出招表：第 1 名組合 best 的每隻（一場只能超級進化一隻，不進化的用原型）對上每隻對手（常帶超級石的另列超級進化後），
+// 用 duel 算誰先動、我方最痛的一招、對手打回來最痛的一招；我方有登錄配招的照登錄的算
+function moveTableHTML(members, opps, best, alt, oppMegas) {
+  const fmt = team.fmt;
+  const keyIn = j => { const k = team.mons[members[j][1]]; return k && alt[j] && best.evo != null && j !== best.evo ? MON[k].base : k; };
+  const hit = rows => rows.top ? `${mvName(rows.top.k)} ${hpPct(rows.top.r.min, rows.top.r.hp)}～${hpPct(rows.top.r.max, rows.top.r.hp)}%（${koText(rows.top.r.ko).text}）`
+    : rows.ok.length ? '招式都沒有效果' : rows.use.length ? '沒有能算傷害的攻擊招式' : '沒有招式資料';
+  const forms = opps.flatMap(([m, i], o) => [[m, i, false], ...oppMegas[o].map(x => [x, i, true])]);
+  return `<h3>出招表</h3><p class="muted small b-intro">第 1 名組合的每隻對上每隻對手：誰先動、我方最痛的一招、對手打回來最痛的一招（% 是佔對方 HP 的比例）。</p>`
+    + forms.map(([m, i, mega]) => {
+      const opp = battler(m.key, fmt);
+      return `<div class="mrole"><div class="mrole-h"><b>${i + 1} ${m.zh}</b>${chips(m.types)}${mega ? '<span class="meta">超級進化後</span>' : ''}</div>`
+        + best.idx.map(j => {
+          const k = keyIn(j), slot = members[j][1];
+          if (!k) return `<div class="x-line"><b>${slot + 1} ${slotName(slot)}</b><span class="meta">只選屬性，沒有能力值可以算</span></div>`;
+          const d = duel(battler(k, fmt, team.sets[slot]), opp, { fmt });
+          const order = d.first < 0 ? '同速' : d.first ? '後動' : '先動';
+          // 帶到傷害計算（不進化而以原型上場的不帶：傷害計算只會對隊上的型態套用登錄配招）
+          return `<div class="x-line"><b>${slot + 1} ${MON[k].zh}</b><span class="meta">${order}（${d.spd[0].v}／${d.spd[1].v}）</span>`
+            + `<span>我打：${hit(d.xy)}</span><span>牠打：${hit(d.yx)}</span>`
+            + (k === team.mons[slot] ? `<button class="mini" data-ca="${k}" data-cd="${m.key}">傷害計算</button>` : '') + '</div>';
+        }).join('') + '</div>';
+    }).join('')
+    + '<p class="note">※ 我方有在「隊伍分析」登錄配招的照登錄的招式、特性、道具、能力點數與性格算；沒登錄的欄位和對手都照「傷害計算」的預設：'
+    + '攻擊／特攻 32＋性格、速度 32＋性格、HP／防禦／特防 0、不帶道具、特性用 OP.GG 最常見的（超級進化用固定特性）。'
+    + '招式看登錄的或 OP.GG 常用招式裡的攻擊招式，列傷害最高的一招；幾擊＝連續用同一招幾次打倒。'
+    + '先動看實際速度（括號是我方／對手的速度；同速各 50%，先制招式不看速度）。不含天氣、場地、能力變化與出場特性（如威嚇、日照）。'
+    + '對手常帶超級石的另列「超級進化後」；一場只能超級進化一隻，第 1 名組合裡不進化的隊員以原型計。按「傷害計算」看每一招的細節。</p>';
 }
 // 對手情報：每隻對手的角色、種族值、帶講究圍巾的比例、常帶攻擊招式（對位表看的就是這些）、常用特性與道具，
 // 以及 OP.GG 實戰勝敗裡有沒有我方隊員；點開看常用招式、特性、道具的效果。超級進化沿用原型的統計（同隊伍角色）
@@ -133,9 +163,9 @@ $('#pList').addEventListener('click', e => {
   const b = e.target.closest('[data-opp]');
   if (b) addOpp(b.dataset.opp);
 });
-// 對位表的格子：攻擊方放我方、防守方放對手，切到傷害計算並捲到最上面
+// 對位表的格子、出招表的「傷害計算」：攻擊方放我方、防守方放對手，切到傷害計算並捲到最上面
 $('#pResult').addEventListener('click', e => {
-  const b = e.target.closest('.vs-go');
+  const b = e.target.closest('[data-ca]');
   if (!b) return;
   setCalcMon('atk', b.dataset.ca);
   setCalcMon('def', b.dataset.cd);

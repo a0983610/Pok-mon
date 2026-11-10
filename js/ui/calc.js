@@ -9,8 +9,6 @@ const CALC0 = { atk: '', def: '', ai: [32, 11], hi: [0, 10], di: [0, 10], st: [0
 // 我方隊伍裡寶可夢 key 登錄的配招（見 useOf；沒在隊上或沒登錄是 null）；calcSet＝這一方（'a'／'d'）實際套用的配招（關掉了就是 null）
 const teamSetOf = key => { const i = key ? team.mons.indexOf(key) : -1; return i >= 0 ? team.sets[i] : null; };
 const calcSet = s => calc.noSet.includes(s) ? null : teamSetOf(calc[s === 'a' ? 'atk' : 'def']);
-// 配招有填能力點數或性格才用登錄的投資，不然照這頁的投資檔位
-const hasSpread = set => set.sp.some(Boolean) || !!set.nat[0];
 // 套用配招時這一方的道具：登錄了就用登錄的（這一方帶不了、或不影響傷害／速度的算沒帶），沒登錄照這頁選的 cur
 const itemFor = (side, set, key, cur) => set?.item ? (itemOK(side, key, set.item) ? set.item : '') : cur;
 const WALLS = ['reflect', 'light-screen', 'aurora-veil'], SIDES = ['a', 'd'];
@@ -59,14 +57,8 @@ function itemOptions(side, key, cur) {
     + (top.length ? `<optgroup label="這隻常帶">${top.map(opt).join('')}</optgroup>` : '')
     + `<optgroup label="${top.length ? '其他' : '影響傷害或速度的道具'}">${rest.map(opt).join('')}</optgroup>`;
 }
-// 寶可夢 key 實際用的特性：超級進化用固定特性；其他用選的 cur，沒選或不在這隻的常用特性裡就用使用率最高的；沒有統計回傳 ''
-function abOf(key, cur) {
-  const m = MON[key];
-  if (!m) return '';
-  if (m.base) return m.megaAbils[0] || '';
-  const list = useOf(key, team.fmt)?.abils || [];
-  return list.some(([k]) => k === cur) ? cur : list[0]?.[0] || '';
-}
+// 寶可夢 key 實際用的特性（見 defAbOf，看目前的單打／雙打）
+const abOf = (key, cur) => defAbOf(key, team.fmt, cur);
 // 特性選單上算「影響這裡的計算」的：傷害（ATK_ABILS／DEF_ABILS）加上速度（speedOf）
 const SPE_ABIL_KEYS = [...Object.keys(SPE_ABILS), 'quick-feet'];
 const ATK_REL = new Set([...ATK_ABILS, ...SPE_ABIL_KEYS]), DEF_REL = new Set([...DEF_ABILS, ...SPE_ABIL_KEYS]);
