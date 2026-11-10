@@ -4,7 +4,7 @@ const bring = { opp: ['', '', '', '', '', ''], pick: [] };
 // members：[[屬性, 格子索引]...]；opps：[[寶可夢, 格子索引]...]
 function bringHTML(members, opps) {
   const { k, lead, units, alt, oppUnits, oppMegas, setupBy, setups, combos, pick } =
-    bringPlan(members.map(([s, i]) => ({ defs: s, key: team.mons[i] })), opps.map(([m]) => m), team.fmt);
+    bringPlan(members.map(([s, i]) => ({ defs: s, key: team.mons[i], set: team.sets[i] })), opps.map(([m]) => m), team.fmt);
   const best = combos[0], monOf = j => MON[team.mons[members[j][1]]];
   const name = j => `${members[j][1] + 1} ${slotName(members[j][1])}`;
   const spe = j => monOf(j)?.spe || 0;

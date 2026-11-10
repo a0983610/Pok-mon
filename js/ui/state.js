@@ -1,5 +1,6 @@
 // ---------- 狀態存網址＋本機（可存書籤、重新整理不清空） ----------
 // 格式：#分頁?m=招式,招式&t=屬性,屬性&a=特性&p=隊員1屬性.屬性,@寶可夢key,...&f=d（雙打，單打不寫）&o=對手寶可夢key,...
+//   &ps=隊員 1 的配招,隊員 2 的配招,...（每格「招式+招式+招式+招式.道具.特性.HP+攻擊+防禦+特攻+特防+速度 的能力點數.↑能力+↓能力」，沒登錄的空白）
 //   傷害計算：ca=攻擊方key&cd=防守方key&ce=攻擊方投資.HP投資.防禦投資.攻擊方速度投資.防守方速度投資（每個是能力點數，＋性格接 +、−性格接 -；
 //   舊網址的 cv 是快選檔位的索引，讀得到但不再寫）
 //   &cs=攻擊.特攻.防禦.特防.攻擊方速度.防守方速度能力變化&ci=攻擊方道具.防守方道具&cb=攻擊方特性.防守方特性&cw=天氣&cc=1（急所）&cx=加算招式
@@ -13,6 +14,9 @@ function stateQuery() {
   const p = team.slots.map((s, i) => team.mons[i] ? '@' + team.mons[i] : s.join('.'));
   while (p.length && !p[p.length - 1]) p.pop();
   if (p.length) q.push('p=' + p.join(','));
+  const ps = team.sets.map((s, i) => team.mons[i] && s ? [s.moves.join('+'), s.item, s.ab, s.sp.join('+'), s.nat.join('+')].join('.') : '');
+  while (ps.length && !ps[ps.length - 1]) ps.pop();
+  if (ps.length) q.push('ps=' + ps.join(','));
   if (team.fmt === 'd') q.push('f=d');
   const o = bring.opp.slice();
   while (o.length && !o[o.length - 1]) o.pop();
@@ -41,6 +45,17 @@ function saveState() {
   try { history.replaceState(null, '', stateHash()); } catch (e) { /* file:// 某些瀏覽器不允許 */ }
   try { localStorage.setItem(STATE_KEY, stateQuery()); } catch (e) { /* 無痕或封鎖儲存時略過 */ }
 }
+// 網址 ps 的一格 → 寶可夢 key 的配招（見 useOf）：資料裡沒有的招式／道具／特性、超出範圍的點數不收，超級進化的特性是固定的也不收，
+// 性格要 ↑↓ 兩項都有才收；什麼都沒填就是 null（沒登錄）
+function parseSet(s, key) {
+  const [mv = '', item = '', ab = '', sp = '', nat = ''] = s.split('.');
+  const num = (v, lo, hi) => { const n = Number(v); return Number.isInteger(n) && n >= lo && n <= hi ? n : 0; };
+  const ms = mv.split('+'), pts = sp.split('+'), ns = nat.split('+').map(v => num(v, 1, 5));
+  const set = { moves: [0, 1, 2, 3].map(n => Object.hasOwn(MOVES, ms[n] || '') ? ms[n] : ''), item: Object.hasOwn(ITEMS, item) ? item : '',
+    ab: !MON[key].base && (Object.hasOwn(ABILS, ab) || Object.hasOwn(ABIL_ZH, ab)) ? ab : '',
+    sp: [0, 1, 2, 3, 4, 5].map(n => num(pts[n], 0, 32)), nat: ns[0] && ns[1] ? [ns[0], ns[1]] : [0, 0] };
+  return set.moves.some(Boolean) || set.item || set.ab || set.sp.some(Boolean) || set.nat[0] ? set : null;
+}
 function loadState(q) {
   const kv = Object.fromEntries(q.split('&').map(s => s.split('=')));
   const ids = (s, sep, max) => [...new Set((s || '').split(sep).filter(id => IDS.includes(id)))].slice(0, max);
@@ -52,6 +67,8 @@ function loadState(q) {
     team.slots[i] = m ? m.types.slice() : ids(s, '.', 2);
     team.mons[i] = m ? m.key : '';
   });
+  const ps = (kv.ps || '').split(',');
+  team.sets = team.mons.map((k, i) => k ? parseSet(ps[i] || '', k) : null);
   team.fmt = kv.f === 'd' ? 'd' : 's';
   (kv.o || '').split(',').slice(0, 6).forEach((k, i) => { bring.opp[i] = MON[k] ? k : ''; });
   calc.atk = MON[kv.ca] ? kv.ca : '';

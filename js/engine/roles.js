@@ -32,9 +32,9 @@ const SUP_ABILS = new Set(ROLES.filter(r => r.sup).flatMap(r => r.abils || []));
 // 寶可夢 key（超級進化沿用原型的統計）在 fmt 的角色；沒有統計資料回傳 null。
 // 超級進化另外加上超級進化後的固定特性（mega，算 100%；和原型常用特性相同的只算一次，沒有中文說明的略過）。
 // phys／spec／sup＝平均帶幾招物攻、特攻、輔助招（使用率加總 ÷ 100），main＝三者最多的那類（輔助同分算輔助），
-// tags＝有的功能標籤，by 是撐起標籤的招式／特性 [中文名, 使用率]
-function roleOf(key, fmt) {
-  const use = USAGE[family(MON[key])]?.[fmt];
+// tags＝有的功能標籤，by 是撐起標籤的招式／特性 [中文名, 使用率]。set：我方登錄的配招（見 useOf）
+function roleOf(key, fmt, set) {
+  const use = useOf(key, fmt, set);
   if (!use || !use.moves.length) return null;
   const mega = MON[key].megaAbils.filter(k => ABILS[k]);
   const abils = [...use.abils.filter(([k]) => !mega.includes(k)), ...mega.map(k => [k, 100, true])];
@@ -56,10 +56,18 @@ function roleOf(key, fmt) {
 // 如烈咬陸鯊龍尾、流星群各 28%；輔助用的攻擊招式、固定傷害和反擊類不吃相剋，都不算）；只選屬性或沒有統計的看本系
 const FIXED_DMG = new Set(['counter', 'mirror-coat', 'metal-burst', 'comeuppance', 'endeavor', 'super-fang', 'ruination',
   'natures-madness', 'seismic-toss', 'night-shade', 'final-gambit', 'psywave']);
-// 寶可夢 key 在 fmt 的 OP.GG 統計（超級進化沿用原型）；沒有統計回傳 undefined
-const useOf = (key, fmt) => USAGE[family(MON[key])]?.[fmt];
-function attacksOf(key, defs, fmt) {
-  const use = key && USAGE[family(MON[key])]?.[fmt];
+// 寶可夢 key 在 fmt 的 OP.GG 統計（超級進化沿用原型）；沒有統計回傳 undefined。
+// set：我方登錄的配招 { moves: [招式 key ×4], item, ab, sp: [HP, 攻擊, 防禦, 特攻, 特防, 速度 的能力點數], nat: [↑能力索引, ↓能力索引] }
+// （沒填的是空字串／0）。有填的招式／特性／道具當成使用率 100% 蓋過統計的同一欄，沒填的照舊看統計；
+// 只有我方隊員會傳，對手一律看統計（鏡像對戰也不會混用）
+function useOf(key, fmt, set) {
+  const use = USAGE[family(MON[key])]?.[fmt], moves = set ? set.moves.filter(Boolean) : [];
+  if (!moves.length && !set?.ab && !set?.item) return use;
+  return { ...(use || { moves: [], abils: [], items: [], mates: [], win: [], lose: [] }),
+    ...(moves.length && { moves: moves.map(k => [k, 100]) }), ...(set.ab && { abils: [[set.ab, 100]] }), ...(set.item && { items: [[set.item, 100]] }) };
+}
+function attacksOf(key, defs, fmt, set) {
+  const use = key && useOf(key, fmt, set);
   if (!use || !use.moves.length) return defs.map(ty => ({ ty, zh: null }));
   const by = {};
   use.moves.filter(([k]) => MOVES[k][2] !== 'status' && !SUP_MOVES.has(k) && !FIXED_DMG.has(k)).forEach(([k, p]) => {
@@ -113,16 +121,17 @@ const lackNeeds = (roles, fmt) => roles.length ? NEEDS[fmt].filter(n => !roles.s
 //   4. recommendMember 的屬性評分，最後看排名（沒排名的排最後）
 // 搭配、角色、隊友只在隊上已有挑了寶可夢的隊員、候選有排名時比（候選在 fmt 沒排名時，OP.GG 仍可能有零星統計，樣本太少不採用）。
 // 超級進化和原型屬性一樣、比較結果也一樣時只留原型。fix 每項是 { w 解決的提醒, by 候選撐起它的特性／招式（traitScan 的 has 項目）}
-function recommendMon(others, base, fmt, onTeam = [], units = []) {
+// sets：隊上成員 key → 登錄的配招（見 useOf；候選不會在隊上，所以不受影響）
+function recommendMon(others, base, fmt, onTeam = [], units = [], sets = {}) {
   const rk = m => m.rank[fmt] || Infinity, fams = onTeam.map(k => family(MON[k]));
-  const lack = lackNeeds(onTeam.map(k => roleOf(k, fmt)).filter(Boolean), fmt);
-  const scan = onTeam.length ? traitScan(onTeam, fmt) : null, before = scan ? scan.warns : [], me = onTeam.length;
+  const lack = lackNeeds(onTeam.map(k => roleOf(k, fmt, sets[k])).filter(Boolean), fmt);
+  const scan = onTeam.length ? traitScan(onTeam, fmt, sets) : null, before = scan ? scan.warns : [], me = onTeam.length;
   const top = scan && scan.has([], ['trick-room']).length ? topMons(fmt, THREAT_N) : null;
   const none = units.length ? threatCheck(units, fmt, THREAT_N).filter(t => !t.level).map(t => t.mon) : [];
   const list = MONS.filter(m => base.every(t => m.types.includes(t)) && !fams.includes(family(m)))
     .map(m => {
       const role = m.rank[fmt] ? roleOf(m.key, fmt) : null;
-      const after = role && onTeam.length ? traitScan([...onTeam, m.key], fmt) : null;
+      const after = role && onTeam.length ? traitScan([...onTeam, m.key], fmt, sets) : null;
       // 「戲法空間下偏快」改由慢的攻擊手加分處理：一隻慢的加進來，偏快的比例常常還降不到一半
       const fix = after ? before.filter(w => w.kind !== 'trfast' && !after.warns.some(a => a.id === w.id))
         .map(w => ({ w, by: w.kind === 'need' ? after.set.filter(s => s.j === me && FIELD_SET[s.k] === w.f) : [] })) : [];
@@ -187,9 +196,9 @@ function bringCombos(members, opps, k, alt = []) {
 const LEAD_SUP = ['speed', 'disrupt', 'redirect', 'ally', 'weaken', 'field'];
 // 反制強化的招式：挑釁、再來一次、黑霧、清除之煙、吼叫、吹飛、龍尾、巴投（另外特性純樸也算）
 const ANTI_SETUP = ['taunt', 'encore', 'haze', 'clear-smog', 'roar', 'whirlwind', 'dragon-tail', 'circle-throw'];
-// 寶可夢 key 在 fmt 能反制強化的招式／特性（使用率 ROLE_PCT% 以上；超級進化看固定特性），寫成「挑釁 45%」
-function antiSetupOf(key, fmt) {
-  const m = MON[key], use = useOf(key, fmt);
+// 寶可夢 key 在 fmt 能反制強化的招式／特性（使用率 ROLE_PCT% 以上；超級進化看固定特性），寫成「挑釁 45%」；set 見 useOf
+function antiSetupOf(key, fmt, set) {
+  const m = MON[key], use = useOf(key, fmt, set);
   const moves = (use?.moves || []).filter(([k, p]) => p >= ROLE_PCT && ANTI_SETUP.includes(k)).map(([k, p]) => `${MOVES[k][0]} ${p}%`);
   const abils = m.base ? (m.megaAbils.includes('unaware') ? [`超級進化後特性${abilZh('unaware')}`] : [])
     : (use?.abils || []).filter(([k, p]) => k === 'unaware' && p >= ROLE_PCT).map(([k, p]) => `特性${abilZh(k)} ${p}%`);
@@ -202,12 +211,12 @@ function antiSetupOf(key, fmt) {
 //   4. weak：共同弱點＝對手常帶的攻擊屬性（含算進去的超級進化型態）裡兩隻都受到 ×2 以上的（少→多；雙打才看）
 //   5. sup：有沒有先發輔助（LEAD_SUP，看 fmt 的 OP.GG 常用招式／特性，寫成「順風 57%」；雙打才看，只選屬性的隊員沒有）
 //   6. 速度種族值加總（高→低）
-// uOf、sOf、kOf：members 索引 → unit（不進化的超級進化用原型）、速度、寶可夢 key；opps 是對手的 unit（oppUnit）
-function leadPick(c, n, uOf, sOf, kOf, opps, setups, fmt) {
+// uOf、sOf、kOf、setOf：members 索引 → unit（不進化的超級進化用原型）、速度、寶可夢 key、登錄的配招（見 useOf）；opps 是對手的 unit（oppUnit）
+function leadPick(c, n, uOf, sOf, kOf, opps, setups, fmt, setOf = () => undefined) {
   const atk = [...new Set(opps.flatMap(u => [u, ...(u.megas || [])].flatMap(f => f.atk.map(a => a.ty))))];
-  const roleIn = j => kOf(j) && roleOf(kOf(j), fmt);
+  const roleIn = j => kOf(j) && roleOf(kOf(j), fmt, setOf(j));
   const supOf = j => { const r = roleIn(j); return r ? [...new Set(r.tags.filter(t => LEAD_SUP.includes(t.id)).flatMap(t => t.by.map(([zh, p]) => `${zh} ${p}%`)))] : []; };
-  const antiOf = j => kOf(j) ? antiSetupOf(kOf(j), fmt) : [];
+  const antiOf = j => kOf(j) ? antiSetupOf(kOf(j), fmt, setOf(j)) : [];
   // 組合裡任挑 n 隻的位置（c.idx 的索引）
   const sets = n === 1 ? c.idx.map((_, p) => [p]) : c.idx.flatMap((_, p) => c.idx.slice(p + 1).map((__, d) => [p, p + 1 + d]));
   return sets.map(ps => {
@@ -222,18 +231,18 @@ function leadPick(c, n, uOf, sOf, kOf, opps, setups, fmt) {
 }
 // 出戰選角：帶幾隻、先發幾隻依攻略網站整理的排位規則（單打 6 選 3、雙打 6 選 4）
 const BRING_N = { s: 3, d: 4 }, LEAD_N = { s: 1, d: 2 };
-// 我方 mems（[{ defs 屬性, key 寶可夢 key（只選屬性的是空字串）}...]）對上對手 opps（寶可夢）在 fmt 該帶誰、誰先發。回傳
+// 我方 mems（[{ defs 屬性, key 寶可夢 key（只選屬性的是空字串）, set 登錄的配招（見 useOf）}...]）對上對手 opps（寶可夢）在 fmt 該帶誰、誰先發。回傳
 //   k 帶幾隻、lead 先發幾隻、units 我方的 unit、alt 超級進化不進化時的原型 unit、oppUnits 對手的 unit（oppUnit）、
 //   oppMegas 對手可能超級進化成的寶可夢、setupBy 每隻對手撐起「強化」標籤的招式、setups 強化手的對手索引、
 //   combos 所有帶法（bringCombos，第一個最好）、pick 第 1 名組合的先發（leadPick）
 function bringPlan(mems, opps, fmt) {
   const k = Math.min(BRING_N[fmt], mems.length), lead = Math.min(LEAD_N[fmt], k);
-  const units = mems.map(x => ({ defs: x.defs, atk: attacksOf(x.key, x.defs, fmt) })), monOf = j => MON[mems[j].key];
+  const units = mems.map(x => ({ defs: x.defs, atk: attacksOf(x.key, x.defs, fmt, x.set) })), monOf = j => MON[mems[j].key];
   // 對手選一般型態、但常帶超級石的，進化前後都要看（oppUnit）
   const oppMegas = opps.map(m => megaInfo(m, fmt).filter(x => x.counted).map(x => x.mon));
   const oppUnits = opps.map(m => oppUnit(m, fmt));
-  // 我方超級進化不進化時的版本（原型），給 bringCombos 算「一場只能進化一隻」
-  const alt = mems.map((_, j) => monOf(j)?.base ? monUnit(MON[monOf(j).base], fmt) : null);
+  // 我方超級進化不進化時的版本（原型；招式不因進化改變，登錄的配招照用），給 bringCombos 算「一場只能進化一隻」
+  const alt = mems.map((x, j) => { const b = monOf(j)?.base && MON[monOf(j).base]; return b ? { defs: b.types, atk: attacksOf(b.key, b.types, fmt, x.set) } : null; });
   const combos = bringCombos(units, oppUnits, k, alt), best = combos[0];
   const spe = j => monOf(j)?.spe || 0;
   // 先發（不進化的超級進化看原型的屬性和速度）：從第 1 名組合挑（leadPick；單打 1 隻，雙打 2 隻一起看搭配）
@@ -242,6 +251,6 @@ function bringPlan(mems, opps, fmt) {
   // 對手的強化手：常帶強化招式（隊伍角色的「強化」標籤，如劍舞、詭計、龍之舞）的，存對手索引和撐起標籤的招式
   const setupBy = opps.map(m => roleOf(m.key, fmt)?.tags.find(t => t.id === 'setup')?.by || []);
   const setups = setupBy.map((by, o) => by.length ? o : -1).filter(o => o >= 0);
-  const pick = leadPick(best, lead, j => unitIn(best, j), j => speIn(best, j), j => mems[j].key, oppUnits, setups, fmt);
+  const pick = leadPick(best, lead, j => unitIn(best, j), j => speIn(best, j), j => mems[j].key, oppUnits, setups, fmt, j => mems[j].set);
   return { k, lead, units, alt, oppUnits, oppMegas, setupBy, setups, combos, pick };
 }

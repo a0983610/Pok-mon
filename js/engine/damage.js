@@ -121,13 +121,17 @@ const SPE_INV = DEF_INV;
 // 投資的名稱：和快選檔位一樣就用檔位名稱，不然寫「點數 20＋性格」
 const NAT_ZH = { 9: '−性格', 10: '', 11: '＋性格' };
 const invName = (list, [sp, nat]) => list.find(([s, n]) => s === sp && n === nat)?.[2] || `點數 ${sp}${NAT_ZH[nat]}`;
+// 我方登錄的配招：x.sp＝6 項能力點數 [HP, 攻擊, 防禦, 特攻, 特防, 速度]、x.nat＝性格 [↑能力索引, ↓能力索引]（1～5；有 0 或兩個相同＝不加減）。
+// 第 i 項能力的投資 [點數, 性格 ×10]；x 沒有 sp 時用 inv（傷害計算分頁的投資檔位）
+const natOf = ([u, d] = [], i) => u && d && u !== d ? (i === u ? 11 : i === d ? 9 : 10) : 10;
+const invAt = (x, i, inv) => x.sp ? [x.sp[i], natOf(x.nat, i)] : inv;
 // 速度（照 Smogon util.ts 的 getFinalSpeed，冠軍版）：速度能力值 → 能力變化 → 順風 ×2、天氣／場地加速特性 ×2（不然飛毛腿在異常狀態時 ×1.5）、
 // 講究圍巾 ×1.5 連乘後四捨五入 → 麻痺 ×½（飛毛腿不減）。SPE_ABILS：特性 → 要的天氣或場地（衝浪之尾看電氣場地）
 const SPE_ABILS = { chlorophyll: 'sun', 'swift-swim': 'rain', 'sand-rush': 'sand', 'slush-rush': 'snow', 'surge-surfer': 'electric' };
-// s：{ key, inv 速度投資 [點數, 性格], st 速度能力變化, item, ab 特性, tw 順風, par 麻痺, status 有異常狀態（麻痺或灼傷） }；
+// s：{ key, inv 速度投資 [點數, 性格]（或 sp／nat，見 invAt）, st 速度能力變化, item, ab 特性, tw 順風, par 麻痺, status 有異常狀態（麻痺或灼傷） }；
 // f：{ weather（已扣掉無關天氣／氣閘）, terrain }。回傳 { v 速度, notes 有作用的修正 }
 function speedOf(s, f) {
-  const [sp, nat] = s.inv, notes = [], mods = [];
+  const [sp, nat] = invAt(s, 5, s.inv), notes = [], mods = [];
   let v = stageStat(statOf(MON[s.key].bs[5], sp, 5, nat), s.st);
   if (s.tw) { mods.push(8192); notes.push('順風 ×2'); }
   const need = SPE_ABILS[s.ab];
@@ -145,7 +149,8 @@ function speedPair(x, y, f) {
   const spd = [x, y].map(s => speedOf(s, { weather, terrain: f.terrain }));
   return { spd, first: spd[0].v === spd[1].v ? -1 : (spd[0].v > spd[1].v) !== !!f.tr ? 0 : 1 };
 }
-// 攻擊方 a：{ key, inv 投資 [點數, 性格], st { atk, spa } 能力變化, item, ab 特性 }；防守方 d：{ key, hp／inv 投資 [點數, 性格], st { def, spd }, item, ab }；
+// 攻擊方 a：{ key, inv 投資 [點數, 性格], st { atk, spa } 能力變化, item, ab 特性 }；防守方 d：{ key, hp／inv 投資 [點數, 性格], st { def, spd }, item, ab }
+// （投資也可以改給 sp／nat，見 invAt；a 另外可帶 set 給 dmgRows 用登錄的招式）；
 // o：{ fmt 's'／'d', weather, crit, terrain, hh 幫助, walls 防守方的牆, burn 攻擊方灼傷 }（必定急所的招式不管 crit 都算急所）。不算的招式回傳 { skip 原因 }；
 // 沒有效果的回傳 eff 0（沒有 hp 以後的欄位；immuneBy＝讓招式無效的防守方特性，blockedBy＝其他原因的說明，如精神場地擋先制）；
 // 其餘回傳 hp 防守方 HP、min／max 用一次的傷害（多段攻擊是各下加總）、ko[n] 連用 n＋1 次被打倒的機率（n＝0～3）、stab 本系倍率（4096 制）、
@@ -189,9 +194,9 @@ function damageCalc(a, d, mk, o) {
   const own = A.types.includes(type);
   r.stab = 4096 + (own || (['protean', 'libero'].includes(aab) && use(aab)) ? 2048 : 0) + (aab === 'adaptability' && own && use(aab) ? 2048 : 0);
   const ai = mk === 'body-press' ? 2 : cat === 'physical' ? 1 : 3, di = cat === 'physical' || HIT_DEF.has(mk) ? 2 : 4;
-  const [asp, anat] = a.inv, [dsp, dnat] = d.inv;
+  const [asp, anat] = invAt(a, ai, a.inv), [dsp, dnat] = invAt(d, di, d.inv);
   const ait = DMG_ITEMS[a.item] || {}, dit = DMG_ITEMS[d.item] || {};
-  r.hp = statOf(D.bs[0], d.hp[0], 0);
+  r.hp = statOf(D.bs[0], invAt(d, 0, d.hp)[0], 0);
   // 能力變化：急所時不計攻擊方的下降、防守方的上升；對方是天然就不計
   let ast = ai === 1 ? a.st.atk : ai === 3 ? a.st.spa : 0;
   if (CHARGE_SPA.has(mk) && ai === 3) {
@@ -328,10 +333,10 @@ function koText(ko) {
   if (ko[n] > 1 - 1e-9) return { n: n + 1, text: `確定${NUM_ZH[n]}擊` };
   return { n: n + 1, text: `亂數${NUM_ZH[n]}擊（${Math.min(99.9, Math.max(0.1, Math.round(ko[n] * 1000) / 10))}%）` };
 }
-// 攻擊方 a 打防守方 d（damageCalc 的格式）：a 在 o.fmt 的常用攻擊招式（再加 extra）逐招算，ok 依最大傷害排序、why 是不算的招式依原因分組；
-// kos 會被一擊打倒的招式、top 最痛的一招
+// 攻擊方 a 打防守方 d（damageCalc 的格式）：a 在 o.fmt 的常用攻擊招式（a.set 有登錄招式就用登錄的，見 useOf；再加 extra）逐招算，
+// ok 依最大傷害排序、why 是不算的招式依原因分組；kos 會被一擊打倒的招式、top 最痛的一招
 function dmgRows(a, d, o, extra) {
-  const use = useOf(a.key, o.fmt)?.moves || [];
+  const use = useOf(a.key, o.fmt, a.set)?.moves || [];
   const list = use.filter(([k]) => MOVES[k][2] !== 'status');
   if (extra && !list.some(([k]) => k === extra)) list.push([extra, 0]);
   const rows = list.map(([k, p]) => ({ k, p, r: damageCalc(a, d, k, o) }));

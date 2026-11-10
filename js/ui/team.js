@@ -1,11 +1,14 @@
 // ---------- 隊伍分析 ----------
-// mons：每格選的寶可夢 key（只選屬性時為空字串）；fmt：排名依據 s 單打、d 雙打
-const team = { slots: [[], [], [], [], [], []], mons: ['', '', '', '', '', ''], cur: 0, fmt: 's' };
+// mons：每格選的寶可夢 key（只選屬性時為空字串）；sets：每格登錄的配招（見 useOf；沒登錄是 null，換寶可夢就清掉）；
+// fmt：排名依據 s 單打、d 雙打
+const team = { slots: [[], [], [], [], [], []], mons: ['', '', '', '', '', ''], sets: [null, null, null, null, null, null], cur: 0, fmt: 's' };
+// 隊上成員 key → 登錄的配招（recommendMon、traitScan 用）
+const teamSets = () => Object.fromEntries(team.mons.map((k, i) => [k, team.sets[i]]).filter(([k, s]) => k && s));
 const FMT_ZH = { s: '單打', d: '雙打' };
 const THREAT_N = 20;
 const slotName = i => team.mons[i] ? MON[team.mons[i]].zh : team.slots[i].map(id => T[id].zh).join('/');
 // 隊伍格子 [屬性, 格子索引] → 對位用的 { defs, atk }（answerOf 的格式）
-const unitOf = ([s, i]) => ({ defs: s, atk: attacksOf(team.mons[i], s, team.fmt) });
+const unitOf = ([s, i]) => ({ defs: s, atk: attacksOf(team.mons[i], s, team.fmt, team.sets[i]) });
 const rankText = m => `${FMT_ZH[team.fmt]}${m.rank[team.fmt] ? ' #' + m.rank[team.fmt] : '無排名'}`;
 // 目前格子的推薦，點了直接放進這格：屬性推薦前 5 名（空格推第一個屬性、已選一個就推第二個），再加推薦寶可夢前 5 名
 function teamRecHTML(gaps, warnNow) {
@@ -28,7 +31,7 @@ function teamRecHTML(gaps, warnNow) {
     + `<p class="muted small b-intro">從名單${base.length ? `裡有${T[base[0]].zh}屬性的` : ''}寶可夢挑，依序比：①搭配──能解決幾個「隊伍特性與場地招式」的提醒`
     + '（隊上有戲法空間時，慢的攻擊手也算），扣掉會新增的；②能補上幾個「隊伍角色」缺的角色，加上能當幾隻「沒解」熱門威脅的對策；'
     + `③是不是 OP.GG 上隊上成員的常見隊友（搭配、角色、隊友要隊上已有挑了寶可夢的隊員）；④加入後隊伍的 ⚠ 數、缺口數；⑤${FMT_ZH[team.fmt]}排名。點一下直接放進這格。</p><div class="b-rec">`
-    + recommendMon(others, base, team.fmt, team.mons.filter(Boolean), units).slice(0, 5).map((r, i) => `<button data-mon="${r.mon.key}"><span class="rank">${i + 1}</span>`
+    + recommendMon(others, base, team.fmt, team.mons.filter(Boolean), units, teamSets()).slice(0, 5).map((r, i) => `<button data-mon="${r.mon.key}"><span class="rank">${i + 1}</span>`
       + `${recInfo(r)}${delta(r)}<span class="meta">攻擊 ${r.mon.bs[1]}・特攻 ${r.mon.bs[3]}・${rankText(r.mon)}</span></button>`).join('')
     + '</div>';
 }
@@ -43,21 +46,21 @@ const recInfo = r => `<b>${r.mon.zh}</b>${chips(r.mon.types)}${r.role ? roleTags
 function summaryHTML(members) {
   const fmt = team.fmt, fz = FMT_ZH[fmt];
   const slots = members.filter(([, i]) => team.mons[i]).map(([, i]) => i), named = slots.map(i => team.mons[i]);
-  const units = members.map(unitOf), slot = team.slots.findIndex(s => !s.length);
-  const recs = slot >= 0 ? recommendMon(members.map(([s]) => s), [], fmt, named, units) : [];
+  const units = members.map(unitOf), slot = team.slots.findIndex(s => !s.length), sets = teamSets();
+  const recs = slot >= 0 ? recommendMon(members.map(([s]) => s), [], fmt, named, units, sets) : [];
   // cands：[[推薦項目, 按鈕上的補充說明]...]
   const picks = cands => slot < 0 || !cands.length ? '' : '<span class="x-msg">可以補：</span>'
     + cands.slice(0, 3).map(([r, note]) => `<button class="mini" data-mon="${r.mon.key}">${r.mon.zh}${note ? `<span class="meta">${note}</span>` : ''}</button>`).join('');
   const line = (label, body, cands = []) => `<div class="issue"><span class="need no">${label}</span><span>${body}</span>${picks(cands)}</div>`;
   const out = [];
   // 搭配：靠天氣／場地沒人開、戲法空間偏快可以靠加人補；兩種天氣、無關天氣、順風＋戲法空間要換人才解得掉
-  (named.length ? traitScan(named, fmt).warns : []).forEach(w => {
+  (named.length ? traitScan(named, fmt, sets).warns : []).forEach(w => {
     const who = w.h ? `${slots[w.h.j] + 1} ${MON[named[w.h.j]].zh}：` : '';
     const cands = w.kind === 'need' ? recs.filter(r => r.fix.some(f => f.w.id === w.id))
       : w.kind === 'trfast' ? recs.filter(r => r.fix.some(f => f.w.kind === 'trslow')) : [];
     out.push(line('⚠ 搭配', who + warnShort(w) + (['two', 'nowx', 'twtr'].includes(w.kind) ? '（要換掉其中一隻）' : ''), cands.map(r => [r])));
   });
-  lackNeeds(named.map(k => roleOf(k, fmt)).filter(Boolean), fmt).forEach(n =>
+  lackNeeds(named.map(k => roleOf(k, fmt, sets[k])).filter(Boolean), fmt).forEach(n =>
     out.push(line('✘ 缺角色', n.zh, recs.filter(r => r.fills.includes(n)).map(r => [r]))));
   const none = threatCheck(units, fmt, THREAT_N).filter(t => !t.level).map(t => t.mon);
   if (none.length) out.push(line('✘ 熱門威脅沒解', none.map(m => m.zh).join('、'),
@@ -103,7 +106,7 @@ const useDetailsHTML = r => `<details class="mv"><summary>常用：${r.use.moves
   + '</details>';
 function roleHTML(members) {
   const fz = FMT_ZH[team.fmt];
-  const rows = members.map(([, i]) => ({ i, key: team.mons[i], r: team.mons[i] ? roleOf(team.mons[i], team.fmt) : null }));
+  const rows = members.map(([, i]) => ({ i, key: team.mons[i], r: team.mons[i] ? roleOf(team.mons[i], team.fmt, team.sets[i]) : null }));
   const fams = rows.filter(x => x.key).map(x => family(MON[x.key]));
   const roles = rows.map(x => x.r).filter(Boolean), lack = lackNeeds(roles, team.fmt);
   const cnt = k => roles.filter(r => r.main === k).length;
@@ -167,10 +170,10 @@ const fieldTag = k => { const f = FIELD_SET[k] || FIELD_NEED[k]; return f && FIE
 // 隊員 keys（寶可夢 key 陣列，j 是索引）在 fmt 的常用特性／招式與搭配檢查，隊伍卡片和推薦寶可夢共用：
 //   mine＝有統計的隊員 { j, list: [key, 使用率, 超級進化後, 是招式]... }（原型的常用特性與招式，超級進化再加上固定的特性，算 100%，沒有中文說明的略過）
 //   has(abils, moves)＝常用特性在 abils、常用招式在 moves 裡的項目 { j, k, p, mega, move }（使用率 ROLE_PCT% 以上）
-//   set＝開天氣／場地的項目；warns＝搭配提醒 { id（推薦時比較加入前後用）, kind, ... }
-function traitScan(keys, fmt) {
+//   set＝開天氣／場地的項目；warns＝搭配提醒 { id（推薦時比較加入前後用）, kind, ... }。sets：隊員 key → 登錄的配招（見 useOf）
+function traitScan(keys, fmt, sets = {}) {
   const mine = keys.map((key, j) => {
-    const m = MON[key], use = USAGE[family(m)]?.[fmt];
+    const m = MON[key], use = useOf(key, fmt, sets[key]);
     return { j, list: [...(use?.abils || []), ...m.megaAbils.filter(k => ABILS[k]).map(k => [k, 100, true]), ...(use?.moves || []).map(([k, p]) => [k, p, false, true])] };
   }).filter(x => x.list.length);
   const has = (abils = [], moves = []) => mine.flatMap(({ j, list }) => list.filter(([k, p, , move]) => p >= ROLE_PCT && (move ? moves : abils).includes(k))
@@ -211,7 +214,7 @@ const fixText = ({ w, by, spe }) => w.kind === 'need'
 function traitHTML(members) {
   const fz = FMT_ZH[team.fmt];
   const named = members.filter(([, i]) => team.mons[i]).map(([, i]) => i);
-  const { mine, has, warns } = traitScan(named.map(i => team.mons[i]), team.fmt);
+  const { mine, has, warns } = traitScan(named.map(i => team.mons[i]), team.fmt, teamSets());
   const who = j => `${named[j] + 1} ${MON[team.mons[named[j]]].zh}`, whoList = hs => hs.map(h => who(h.j)).join('、');
   // 依隊員合併成「1 噴火龍（日照 96%・晴天）」；超級進化的隊員的特性分「出場時」（原型的常用特性）和「超級進化後」
   const abText = h => (h.move ? '' : h.mega ? '超級進化後 ' : MON[team.mons[named[h.j]]].base ? '出場時 ' : '') + zhOf(h.k) + (h.mega ? '' : ` ${h.p}%`)
@@ -380,11 +383,13 @@ function renderTeam() {
 // 把屬性加進目前格子（手動改屬性就不再算是名單上的寶可夢）；留在這格，讓使用者從 typeListHTML 的清單挑寶可夢
 function pickTeamType(id) {
   team.mons[team.cur] = '';
+  team.sets[team.cur] = null;
   toggleSel(team.slots[team.cur], id, 2);
   renderTeam();
 }
 // 把寶可夢放進目前格子，再跳到後面的空格
 function pickTeamMon(key) {
+  if (team.mons[team.cur] !== key) team.sets[team.cur] = null;
   team.slots[team.cur] = MON[key].types.slice();
   team.mons[team.cur] = key;
   const n = team.slots.findIndex((x, i) => i > team.cur && !x.length);
@@ -419,4 +424,4 @@ $('#tSum').addEventListener('click', e => {
   const b = e.target.closest('[data-mon]'), k = team.slots.findIndex(s => !s.length);
   if (b && k >= 0) { team.cur = k; pickTeamMon(b.dataset.mon); }
 });
-$('#tClear').addEventListener('click', () => { team.slots = team.slots.map(() => []); team.mons = team.mons.map(() => ''); team.cur = 0; renderTeam(); });
+$('#tClear').addEventListener('click', () => { team.slots = team.slots.map(() => []); team.mons = team.mons.map(() => ''); team.sets = team.sets.map(() => null); team.cur = 0; renderTeam(); });
