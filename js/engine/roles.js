@@ -85,6 +85,12 @@ function attacksOf(key, defs, fmt, set) {
 const monUnit = (m, fmt) => ({ defs: m.types, atk: attacksOf(m.key, m.types, fmt) });
 // 超級石＝說明寫「…超級進化的持有物」的道具；一個家族有多種超級進化時，說明的括號寫明是哪一種（如「（超級噴火龍Ｘ）」）
 const isStone = k => (ITEMS[k]?.[1] || '').includes('超級進化的持有物');
+// 超級進化型態 x 固定帶的超級石 key：說明寫「能讓<原型名>…超級進化」的那顆（原型名去掉後面的括號，如「超能妙喵 (雄性的樣子)」），
+// 原型有多種超級進化時再看括號寫的型態；資料只收使用率 5% 以上的道具，沒收到的回傳 undefined（如超級阿勃梭魯，大家都帶 Z 的）
+const stoneOf = x => {
+  const b = MON[x.base], one = megasOf(b).length === 1, name = b.zh.replace(/\s*[（(].*$/, '');
+  return Object.keys(ITEMS).find(k => isStone(k) && ITEMS[k][1].includes(`能讓${name}`) && (one || ITEMS[k][1].includes(`（${x.zh}）`)));
+};
 // 一般寶可夢 m 在 fmt 可能超級進化成的型態：[{ mon, p 帶這顆超級石的使用率, counted 算進對位判斷 }]。
 // 使用率 ROLE_PCT% 以上才算（同常帶攻擊的門檻）；這隻沒有道具統計時 p 是 null、每種都算
 function megaInfo(m, fmt) {

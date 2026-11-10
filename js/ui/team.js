@@ -276,7 +276,8 @@ function typeListHTML() {
       ? `<div class="qpick">${list.map(m => `<button data-mon="${m.key}">${m.zh}${chips(m.types)}<span class="meta">${meta(m)}</span></button>`).join('')}</div>`
       : '<p class="muted small b-intro">名單裡沒有這種屬性組合的寶可夢；只選屬性也能看屬性分析。</p>');
 }
-// 目前格子挑了寶可夢時的配招登錄（team.sets，見 useOf）：4 招、特性（超級進化固定，不能選）、道具、6 項能力點數、性格。
+// 目前格子挑了寶可夢時的配招登錄（team.sets，見 useOf）：4 招、特性、道具（超級進化的特性固定、道具固定是超級石，不能選；
+// 一般型態的道具不列超級石，要超級進化就在格子選超級進化型態）、6 項能力點數、性格。
 // 招式／特性／道具選單先列這隻在 fmt 的 OP.GG 常用（依使用率），其他依中文名排；資料只收得到任一隻寶可夢使用率 5% 以上的招式／特性／道具，
 // 也不檢查這隻學不學得會。性格是「↑哪項・↓哪項」（攻擊～速度，HP 沒有性格）
 const NATURES = [1, 2, 3, 4, 5].flatMap(u => [1, 2, 3, 4, 5].filter(d => d !== u).map(d => [u, d]));
@@ -285,9 +286,9 @@ function setEditorHTML() {
   if (!key) return '';
   const m = MON[key], s = team.sets[i] || emptySet(), use = useOf(key, team.fmt), fz = FMT_ZH[team.fmt];
   const opt = (v, zh, cur) => `<option value="${v}"${v === cur ? ' selected' : ''}>${zh}</option>`;
-  const opts = (dict, common, cur) => {
-    const top = common.map(([k]) => k).filter(k => dict[k]);
-    const rest = Object.keys(dict).filter(k => !top.includes(k)).sort((x, y) => dict[x][0].localeCompare(dict[y][0], 'zh-Hant'));
+  const opts = (dict, common, cur, ok = () => true) => {
+    const top = common.map(([k]) => k).filter(k => dict[k] && ok(k));
+    const rest = Object.keys(dict).filter(k => !top.includes(k) && ok(k)).sort((x, y) => dict[x][0].localeCompare(dict[y][0], 'zh-Hant'));
     return opt('', '（未填）', cur) + (top.length ? `<optgroup label="${fz}常用">${top.map(k => opt(k, dict[k][0], cur)).join('')}</optgroup>` : '')
       + `<optgroup label="${top.length ? '其他' : '全部'}">${rest.map(k => opt(k, dict[k][0], cur)).join('')}</optgroup>`;
   };
@@ -296,7 +297,8 @@ function setEditorHTML() {
     + `<div class="c-f"><span class="c-l">招式</span>${s.moves.map((k, n) => `<select class="sel" data-mv="${n}" aria-label="招式 ${n + 1}">${opts(MOVES, use?.moves || [], k)}</select>`).join('')}</div>`
     + `<div class="c-f"><span class="c-l">特性</span>${m.base ? `<span>${m.megaAbils.map(abilZh).join('、')}<span class="meta">（超級進化後固定）</span></span>`
       : `<select class="sel" data-ab aria-label="特性">${opts(ABILS, use?.abils || [], s.ab)}</select>`}</div>`
-    + `<div class="c-f"><span class="c-l">道具</span><select class="sel" data-it aria-label="道具">${opts(ITEMS, use?.items || [], s.item)}</select></div>`
+    + `<div class="c-f"><span class="c-l">道具</span>${m.base ? `<span>${stoneOf(m) ? ITEMS[stoneOf(m)][0] : '專屬的超級石'}<span class="meta">（超級進化固定）</span></span>`
+      : `<select class="sel" data-it aria-label="道具">${opts(ITEMS, use?.items || [], s.item, k => !isStone(k))}</select>`}</div>`
     + `<div class="c-f"><span class="c-l">能力點數</span><div class="c-sts">${STAT_ZH.map((zh, n) => `<span class="c-st"><label for="tSp${n}">${zh}</label>`
       + `<input type="number" class="sel c-num" id="tSp${n}" data-sp="${n}" min="0" max="32" step="1" value="${s.sp[n]}"></span>`).join('')}`
     + `<span class="${sum > 66 ? 'x-msg' : 'muted small'}">${sum > 66 ? '⚠ ' : ''}合計 ${sum}／66${sum > 66 ? '，超過上限' : ''}</span></div></div>`

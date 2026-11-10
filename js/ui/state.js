@@ -47,13 +47,14 @@ function saveState() {
   try { history.replaceState(null, '', stateHash()); } catch (e) { /* file:// 某些瀏覽器不允許 */ }
   try { localStorage.setItem(STATE_KEY, stateQuery()); } catch (e) { /* 無痕或封鎖儲存時略過 */ }
 }
-// 網址 ps 的一格 → 寶可夢 key 的配招（見 useOf）：資料裡沒有的招式／道具／特性、超出範圍的點數不收，超級進化的特性是固定的也不收，
+// 網址 ps 的一格 → 寶可夢 key 的配招（見 useOf）：資料裡沒有的招式／道具／特性、超出範圍的點數不收，超級進化的特性與道具（超級石）是固定的也不收，
+// 一般型態帶超級石不收（同登錄畫面不列），
 // 性格要 ↑↓ 兩項都有才收；什麼都沒填就是 null（沒登錄）
 function parseSet(s, key) {
   const [mv = '', item = '', ab = '', sp = '', nat = ''] = s.split('.');
   const num = (v, lo, hi) => { const n = Number(v); return Number.isInteger(n) && n >= lo && n <= hi ? n : 0; };
   const ms = mv.split('+'), pts = sp.split('+'), ns = nat.split('+').map(v => num(v, 1, 5));
-  const set = { moves: [0, 1, 2, 3].map(n => Object.hasOwn(MOVES, ms[n] || '') ? ms[n] : ''), item: Object.hasOwn(ITEMS, item) ? item : '',
+  const set = { moves: [0, 1, 2, 3].map(n => Object.hasOwn(MOVES, ms[n] || '') ? ms[n] : ''), item: !MON[key].base && Object.hasOwn(ITEMS, item) && !isStone(item) ? item : '',
     ab: !MON[key].base && (Object.hasOwn(ABILS, ab) || Object.hasOwn(ABIL_ZH, ab)) ? ab : '',
     sp: [0, 1, 2, 3, 4, 5].map(n => num(pts[n], 0, 32)), nat: ns[0] && ns[1] ? [ns[0], ns[1]] : [0, 0] };
   return setFilled(set) ? set : null;
