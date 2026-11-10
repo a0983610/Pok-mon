@@ -2,9 +2,17 @@
 // atk／def：攻擊方／防守方寶可夢 key；ai：攻擊方投資；hi、di：防守方 HP、防禦／特防投資（投資都是 [能力點數, 性格 ×10]）；
 // st：能力變化 [攻擊方攻擊, 攻擊方特攻, 防守方防禦, 防守方特防, 攻擊方速度, 防守方速度]；aItem／dItem：道具 key；aAb／dAb：選的特性（空＝用 abOf 的預設）；
 // weather：天氣；crit：急所；extra：加算的招式；terrain：場地；hh：隊友用了幫助（只在雙打算）；walls：防守方的牆（WALLS 的 key）；burn：攻擊方灼傷；
-// sa、sd：攻擊方、防守方速度投資；tw：有順風的一方、par：麻痺的一方（'a' 攻擊方／'d' 防守方）；tr：戲法空間
+// sa、sd：攻擊方、防守方速度投資；tw：有順風的一方、par：麻痺的一方（'a' 攻擊方／'d' 防守方）；tr：戲法空間；
+// noSet：關掉「套用登錄配招」的一方（預設有登錄就套用，鏡像對戰時對手是同一隻可以關掉）
 const CALC0 = { atk: '', def: '', ai: [32, 11], hi: [0, 10], di: [0, 10], st: [0, 0, 0, 0, 0, 0], aItem: '', dItem: '', aAb: '', dAb: '', weather: '', crit: false, extra: '',
-  terrain: '', hh: false, walls: [], burn: false, sa: [32, 11], sd: [32, 11], tw: [], par: [], tr: false };
+  terrain: '', hh: false, walls: [], burn: false, sa: [32, 11], sd: [32, 11], tw: [], par: [], tr: false, noSet: [] };
+// 我方隊伍裡寶可夢 key 登錄的配招（見 useOf；沒在隊上或沒登錄是 null）；calcSet＝這一方（'a'／'d'）實際套用的配招（關掉了就是 null）
+const teamSetOf = key => { const i = key ? team.mons.indexOf(key) : -1; return i >= 0 ? team.sets[i] : null; };
+const calcSet = s => calc.noSet.includes(s) ? null : teamSetOf(calc[s === 'a' ? 'atk' : 'def']);
+// 配招有填能力點數或性格才用登錄的投資，不然照這頁的投資檔位
+const hasSpread = set => set.sp.some(Boolean) || !!set.nat[0];
+// 套用配招時這一方的道具：登錄了就用登錄的（這一方帶不了、或不影響傷害／速度的算沒帶），沒登錄照這頁選的 cur
+const itemFor = (side, set, key, cur) => set?.item ? (itemOK(side, key, set.item) ? set.item : '') : cur;
 const WALLS = ['reflect', 'light-screen', 'aurora-veil'], SIDES = ['a', 'd'];
 // 投資欄位：[calc 的 key, 快選檔位的元素 id, 快選檔位, 有沒有性格]（網址 ce 也照這個順序）
 const INVS = [['ai', 'cAi', ATK_INV, true], ['hi', 'cHi', HP_INV, false], ['di', 'cDi', DEF_INV, true], ['sa', 'cSa', SPE_INV, true], ['sd', 'cSd', SPE_INV, true]];
@@ -110,29 +118,38 @@ function dmgSumHTML(A, D, { ok, kos, top }, pre = '') {
     : ok.length ? `<div class="c-sum good">${pre}${A.zh}的招式對${D.zh}都沒有效果。</div>` : '';
 }
 function calcHTML() {
-  const A = MON[calc.atk], D = MON[calc.def], aab = abOf(calc.atk, calc.aAb), dab = abOf(calc.def, calc.dAb);
-  const a = { key: calc.atk, inv: calc.ai, st: { atk: calc.st[0], spa: calc.st[1] }, item: calc.aItem, ab: aab };
-  const d = { key: calc.def, hp: calc.hi, inv: calc.di, st: { def: calc.st[2], spd: calc.st[3] }, item: calc.dItem, ab: dab };
+  // sa／sd：兩方套用的我方登錄配招（calcSet）：有填的特性、道具、招式、能力點數與性格用登錄的，沒填的照這頁的設定
+  const A = MON[calc.atk], D = MON[calc.def], sa = calcSet('a'), sd = calcSet('d');
+  const aab = sa?.ab || abOf(calc.atk, calc.aAb), dab = sd?.ab || abOf(calc.def, calc.dAb);
+  const aItem = itemFor('a', sa, calc.atk, calc.aItem), dItem = itemFor('d', sd, calc.def, calc.dItem);
+  const spA = sa && hasSpread(sa) ? { sp: sa.sp, nat: sa.nat } : {}, spD = sd && hasSpread(sd) ? { sp: sd.sp, nat: sd.nat } : {};
+  const a = { key: calc.atk, inv: calc.ai, ...spA, st: { atk: calc.st[0], spa: calc.st[1] }, item: aItem, ab: aab, set: sa };
+  const d = { key: calc.def, hp: calc.hi, inv: calc.di, ...spD, st: { def: calc.st[2], spd: calc.st[3] }, item: dItem, ab: dab };
   const hh = calc.hh && team.fmt === 'd';
   const o = { fmt: team.fmt, weather: calc.weather, crit: calc.crit, terrain: calc.terrain, hh, walls: calc.walls, burn: calc.burn };
   const fw = dmgRows(a, d, o, calc.extra), { use, ok, why } = fw;
   // 反擊＝防守方打攻擊方，和按「⇄ 對調」看到的一樣：特性跟著寶可夢、投資檔位不動（攻擊投資套在防守方、HP／防禦投資套在攻擊方），
-  // 道具（對調後兩邊都能帶的只有講究圍巾，不影響傷害）、能力變化、加算招式、灼傷、幫助、牆不算；天氣、場地、急所照舊
-  const bk = dmgRows({ key: calc.def, inv: calc.ai, st: { atk: 0, spa: 0 }, item: '', ab: dab },
-    { key: calc.atk, hp: calc.hi, inv: calc.di, st: { def: 0, spd: 0 }, item: '', ab: aab }, { ...o, hh: false, walls: [], burn: false }, '');
-  const { spd, first } = speedPair(...SIDES.map((s, i) => ({ key: [calc.atk, calc.def][i], inv: [calc.sa, calc.sd][i], st: calc.st[4 + i], item: [calc.aItem, calc.dItem][i],
+  // 道具（對調後兩邊都能帶的只有講究圍巾，不影響傷害）、能力變化、加算招式、灼傷、幫助、牆不算；天氣、場地、急所照舊。
+  // 套用登錄配招的一方，投資和道具照登錄的（道具是那隻自己帶的，反過來打也一樣）
+  const bk = dmgRows({ key: calc.def, inv: calc.ai, ...spD, st: { atk: 0, spa: 0 }, item: itemFor('a', sd, calc.def, ''), ab: dab, set: sd },
+    { key: calc.atk, hp: calc.hi, inv: calc.di, ...spA, st: { def: 0, spd: 0 }, item: itemFor('d', sa, calc.atk, ''), ab: aab }, { ...o, hh: false, walls: [], burn: false }, '');
+  const sps = [spA, spD];
+  const { spd, first } = speedPair(...SIDES.map((s, i) => ({ key: [calc.atk, calc.def][i], inv: [calc.sa, calc.sd][i], ...sps[i], st: calc.st[4 + i], item: [aItem, dItem][i],
     ab: [aab, dab][i], tw: calc.tw.includes(s), par: calc.par.includes(s), status: calc.par.includes(s) || (!i && calc.burn) })), { weather: calc.weather, terrain: calc.terrain, tr: calc.tr });
-  const spdText = (m, i) => `${m.zh} <b>${spd[i].v}</b><span class="meta">（${[`投資 ${invName(SPE_INV, [calc.sa, calc.sd][i])}`,
-    calc.st[4 + i] && `速度 ${stgText(calc.st[4 + i])}`, ...spd[i].notes].filter(Boolean).join('・')}）</span>`;
-  const [asp, anat] = calc.ai, [dsp, dnat] = calc.di, aname = invName(ATK_INV, calc.ai), dname = invName(DEF_INV, calc.di);
+  const spdText = (m, i) => `${m.zh} <b>${spd[i].v}</b><span class="meta">（${[sps[i].sp ? `登錄配招 點數 ${sps[i].sp[5]}${NAT_ZH[natOf(sps[i].nat, 5)]}`
+    : `投資 ${invName(SPE_INV, [calc.sa, calc.sd][i])}`, calc.st[4 + i] && `速度 ${stgText(calc.st[4 + i])}`, ...spd[i].notes].filter(Boolean).join('・')}）</span>`;
+  // 上方的能力值（套用登錄配招時照登錄的點數與性格）
+  const statAt = (m, x, i, inv) => { const [p, n] = invAt(x, i, inv); return statOf(m.bs[i], p, i, n); };
+  const aname = spA.sp ? '登錄配招' : invName(ATK_INV, calc.ai), dname = spD.sp ? '登錄配招' : `HP ${invName(HP_INV, calc.hi)}・防禦／特防 ${invName(DEF_INV, calc.di)}`;
+  const aItemZh = sa?.item || calc.aItem, dItemZh = sd?.item || calc.dItem;
   const stg = (v, zh) => v ? `<span>${zh} ${stgText(v)}</span>` : '';
   const row = ({ k, p, r }) => {
     const head = `<b>${MOVES[k][0]}</b>${chip(r.type)}${mtag(r.eff)}<span class="meta">${CAT_ZH[r.cat]} ${r.power}`
       + `${r.hits > 1 ? ` ×${r.hits} 下${r.hitNote ? `（${r.hitNote}）` : ''}` : ''}${r.stab > 4096 ? `・本系${r.stab > 6144 ? ' ×2' : ''}` : ''}`
-      + `${r.spread ? '・範圍 ×0.75' : ''}${ALWAYS_CRIT.has(k) ? '・必定急所' : ''}${FLAG.priority.has(k) ? '・先制' : ''}・${p ? `使用率 ${p}%` : '加算'}</span>`;
+      + `${r.spread ? '・範圍 ×0.75' : ''}${ALWAYS_CRIT.has(k) ? '・必定急所' : ''}${FLAG.priority.has(k) ? '・先制' : ''}・${p ? (sa?.moves.some(Boolean) ? '登錄' : `使用率 ${p}%`) : '加算'}</span>`;
     if (!r.eff) return `<div class="dmg"><div class="dmg-h">${head}<span class="ko">沒有效果${r.immuneBy ? `（${abilZh(r.immuneBy)}）` : r.blockedBy ? `（${r.blockedBy}）` : ''}</span></div></div>`;
     const lo = hpPct(r.min, r.hp), hi = hpPct(r.max, r.hp), kt = koText(r.ko);
-    const extra = [...r.notes, r.berry && `${ITEMS[calc.dItem][0]}減半第一下`, r.endured && `${ITEMS[r.endured]?.[0] || abilZh(r.endured)}撐住第一下`].filter(Boolean);
+    const extra = [...r.notes, r.berry && `${ITEMS[dItem][0]}減半第一下`, r.endured && `${ITEMS[r.endured]?.[0] || abilZh(r.endured)}撐住第一下`].filter(Boolean);
     return `<div class="dmg"><div class="dmg-h">${head}<span class="ko k${kt.n}">${kt.text}</span></div>`
       + `<div class="dmg-bar"><span style="width:${Math.min(100, lo)}%"></span><span class="rng" style="width:${Math.min(100, hi) - Math.min(100, lo)}%"></span></div>`
       + `<div class="meta">${lo}～${hi}%（${r.min}～${r.max}／HP ${r.hp}）${extra.map(s => '・' + s).join('')}</div></div>`;
@@ -149,19 +166,20 @@ function calcHTML() {
     const txt = [im[0] && `攻擊 ${im[0] > 0 ? '+' : '−'}${Math.abs(im[0])}`, im[1] && `特攻 +${im[1]}`].filter(Boolean).join('、');
     hints.push(`<div class="x-line"><span class="x-msg">${D.zh}的${abilZh(dab)}出場會讓${A.zh}${txt}</span><button class="mini" data-im="${im.join('.')}">套用${txt}</button></div>`);
   }
-  // 能力點數合計超過 66（每隻六項合計的上限）：攻擊方算攻擊／特攻＋速度，防守方算 HP＋防禦／特防＋速度
-  [['攻擊方', A, [['攻擊／特攻', calc.ai], ['速度', calc.sa]]], ['防守方', D, [['HP', calc.hi], ['防禦／特防', calc.di], ['速度', calc.sd]]]].forEach(([side, m, parts]) => {
+  // 能力點數合計超過 66（每隻六項合計的上限）：攻擊方算攻擊／特攻＋速度，防守方算 HP＋防禦／特防＋速度（套用登錄點數的一方在隊伍分析提示，這裡不算）
+  [['攻擊方', A, [['攻擊／特攻', calc.ai], ['速度', calc.sa]], spA], ['防守方', D, [['HP', calc.hi], ['防禦／特防', calc.di], ['速度', calc.sd]], spD]].forEach(([side, m, parts, sp]) => {
+    if (sp.sp) return;
     const sum = parts.reduce((s, [, v]) => s + v[0], 0);
     if (sum > 66) hints.push(`<div class="x-line"><span class="x-msg">⚠ ${side}${m.zh}的能力點數 ${parts.map(([zh, v]) => `${zh} ${v[0]}`).join('＋')}＝${sum}，超過上限 66</span></div>`);
   });
   return `<div class="res-head">${A.zh}${chips(A.types)} → ${D.zh}${chips(D.types)}`
     + `<span class="muted small">（${[FMT_ZH[team.fmt], FIELD_ZH[calc.weather], FIELD_ZH[calc.terrain], calc.tr && '戲法空間', hh && '幫助', calc.burn && '灼傷',
       ...calc.walls.map(w => MOVES[w][0]), calc.crit && '急所'].filter(Boolean).join('・')}）</span></div>`
-    + `<div class="bst">攻擊方（${aname}）<span>攻擊 <b>${statOf(A.bs[1], asp, 1, anat)}</b></span><span>特攻 <b>${statOf(A.bs[3], asp, 3, anat)}</b></span>`
-    + `${stg(calc.st[0], '攻擊')}${stg(calc.st[1], '特攻')}${aab ? `<span>${abilZh(aab) || '固定特性'}</span>` : ''}${calc.aItem ? `<span>${ITEMS[calc.aItem][0]}</span>` : ''}</div>`
-    + `<div class="bst">防守方（HP ${invName(HP_INV, calc.hi)}・防禦／特防 ${dname}）<span>HP <b>${statOf(D.bs[0], calc.hi[0], 0)}</b></span>`
-    + `<span>防禦 <b>${statOf(D.bs[2], dsp, 2, dnat)}</b></span><span>特防 <b>${statOf(D.bs[4], dsp, 4, dnat)}</b></span>`
-    + `${stg(calc.st[2], '防禦')}${stg(calc.st[3], '特防')}${dab ? `<span>${abilZh(dab) || '固定特性'}</span>` : ''}${calc.dItem ? `<span>${ITEMS[calc.dItem][0]}</span>` : ''}</div>`
+    + `<div class="bst">攻擊方（${aname}）<span>攻擊 <b>${statAt(A, a, 1, calc.ai)}</b></span><span>特攻 <b>${statAt(A, a, 3, calc.ai)}</b></span>`
+    + `${stg(calc.st[0], '攻擊')}${stg(calc.st[1], '特攻')}${aab ? `<span>${abilZh(aab) || '固定特性'}</span>` : ''}${aItemZh ? `<span>${ITEMS[aItemZh][0]}</span>` : ''}</div>`
+    + `<div class="bst">防守方（${dname}）<span>HP <b>${statAt(D, d, 0, calc.hi)}</b></span>`
+    + `<span>防禦 <b>${statAt(D, d, 2, calc.di)}</b></span><span>特防 <b>${statAt(D, d, 4, calc.di)}</b></span>`
+    + `${stg(calc.st[2], '防禦')}${stg(calc.st[3], '特防')}${dab ? `<span>${abilZh(dab) || '固定特性'}</span>` : ''}${dItemZh ? `<span>${ITEMS[dItemZh][0]}</span>` : ''}</div>`
     + hints.join('')
     + `<div class="c-sum info">速度：${spdText(A, 0)} ／ ${spdText(D, 1)} → `
     + `${first < 0 ? '同速，誰先動各 50%' : `<b>${first ? D.zh : A.zh}</b>先動${calc.tr ? '（戲法空間：速度慢的先動）' : ''}`}`
@@ -190,7 +208,9 @@ function calcHTML() {
     + '勾「戲法空間」時速度慢的先動（同 Pokémon Showdown，同速仍各 50%、先制招式仍優先）；不含加速這類回合中的變化。'
     + `快選的「對手」會接著列出牠 OP.GG 道具統計有 ${ROLE_PCT}% 以上帶超級石的超級進化型態（同出戰選角的判斷）。`
     + '「反擊」＝防守方打攻擊方最痛的一招，和按「⇄ 對調」看到的相同：投資檔位不動'
-    + '（上方的攻擊投資套在防守方、HP／防禦投資套在攻擊方），能力變化、道具、灼傷、幫助、牆不算。</p>';
+    + '（上方的攻擊投資套在防守方、HP／防禦投資套在攻擊方），能力變化、道具、灼傷、幫助、牆不算。'
+    + '選到「隊伍分析」登錄了配招的我方隊員時，預設套用登錄的招式、特性、道具、能力點數與性格（反擊也照登錄的投資與道具；沒填的欄位照這頁的設定），'
+    + '列出的招式標「登錄」；對手剛好是同一隻（鏡像對戰）時，把那一方的「套用」關掉。</p>';
 }
 function renderCalc() {
   [['atk', 'aItem', 'a', '#cAtk', '#cAtkQ', '#cAItem', 'aAb', '#cAAb', ATK_REL], ['def', 'dItem', 'd', '#cDef', '#cDefQ', '#cDItem', 'dAb', '#cDAb', DEF_REL]]
@@ -205,6 +225,17 @@ function renderCalc() {
       $(sel).disabled = !!MON[calc[side]]?.base;
       $(abSel).innerHTML = abilOptions(rel, calc[side], abOf(calc[side], calc[ab]));
       $(abSel).disabled = $(abSel).options.length < 2;
+      // 我方登錄了配招：這一方多一列「套用」開關；套用時登錄的特性／道具鎖住選單顯示登錄的，有登錄能力點數或性格就收起投資檔位
+      const own = teamSetOf(calc[side]), set = calcSet(s), row = $(s === 'a' ? '#cASet' : '#cDSet');
+      row.hidden = !own;
+      row.innerHTML = own ? `<span class="c-l">配招</span><label class="check"><input type="checkbox" data-useset="${s}"${set ? ' checked' : ''}> 套用隊伍分析登錄的配招</label>`
+        + `<span class="muted small">${[own.moves.filter(Boolean).map(k => MOVES[k][0]).join('・'), hasSpread(own) && '能力點數與性格'].filter(Boolean).join('；')}</span>` : '';
+      if (set?.item && !MON[calc[side]].base) {
+        $(sel).innerHTML = `<option value="">登錄：${ITEMS[set.item][0]}${itemOK(s, calc[side], set.item) ? '' : '（不影響這裡的計算）'}</option>`;
+        $(sel).disabled = true;
+      }
+      if (set?.ab) { $(abSel).innerHTML = `<option value="">登錄：${abilZh(set.ab) || set.ab}</option>`; $(abSel).disabled = true; }
+      (s === 'a' ? ['cAi', 'cSa'] : ['cHi', 'cDi', 'cSd']).forEach(id => { $('#' + id).closest('.c-f').hidden = !!(set && hasSpread(set)); });
     });
   // 正在輸入的點數欄不覆寫（離開欄位時 change 會再重畫成實際的值）
   INVS.forEach(([k, id, list]) => {
@@ -238,6 +269,7 @@ function setCalcMon(side, key) {
     calc[side] = key;
     if (side === 'atk') { calc.aItem = calc.aAb = calc.extra = ''; calc.burn = false; } else calc.dItem = calc.dAb = '';
     calc.par = calc.par.filter(s => s !== side[0]);
+    calc.noSet = calc.noSet.filter(s => s !== side[0]);
   }
   renderCalc();
 }
@@ -270,6 +302,7 @@ $('#p-calc').addEventListener('change', e => {
   else if (e.target.dataset.tw) calc.tw = SIDES.filter(s => s === e.target.dataset.tw ? e.target.checked : calc.tw.includes(s));
   else if (e.target.dataset.par) calc.par = SIDES.filter(s => s === e.target.dataset.par ? e.target.checked : calc.par.includes(s));
   else if (e.target.dataset.nat) calc[e.target.dataset.nat] = [calc[e.target.dataset.nat][0], +e.target.value];
+  else if (e.target.dataset.useset) calc.noSet = SIDES.filter(s => s === e.target.dataset.useset ? !e.target.checked : calc.noSet.includes(s));
   else if (e.target.dataset.inv) e.target.value = calc[e.target.dataset.inv][0];
   else return;
   renderCalc();
@@ -294,6 +327,7 @@ $('#cSwap').addEventListener('click', () => {
   calc.st = [0, 0, 0, 0, calc.st[5], calc.st[4]];
   calc.tw = flip(calc.tw);
   calc.par = flip(calc.par);
+  calc.noSet = flip(calc.noSet);
   calc.burn = calc.hh = false;
   calc.walls = [];
   renderCalc();

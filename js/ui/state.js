@@ -4,7 +4,8 @@
 //   傷害計算：ca=攻擊方key&cd=防守方key&ce=攻擊方投資.HP投資.防禦投資.攻擊方速度投資.防守方速度投資（每個是能力點數，＋性格接 +、−性格接 -；
 //   舊網址的 cv 是快選檔位的索引，讀得到但不再寫）
 //   &cs=攻擊.特攻.防禦.特防.攻擊方速度.防守方速度能力變化&ci=攻擊方道具.防守方道具&cb=攻擊方特性.防守方特性&cw=天氣&cc=1（急所）&cx=加算招式
-//   &ct=場地&ch=1（幫助）&cl=牆.牆&cn=1（灼傷）&cg=有順風的一方（a.d）&cz=麻痺的一方（a.d）&cr=1（戲法空間）（和預設相同的不寫）
+//   &ct=場地&ch=1（幫助）&cl=牆.牆&cn=1（灼傷）&cg=有順風的一方（a.d）&cz=麻痺的一方（a.d）&cr=1（戲法空間）
+//   &cu=關掉「套用登錄配招」的一方（a.d）（和預設相同的不寫）
 const STATE_KEY = 'pkmn-champions-state';
 function stateQuery() {
   const q = [];
@@ -38,6 +39,7 @@ function stateQuery() {
   if (calc.tw.length) q.push('cg=' + calc.tw.join('.'));
   if (calc.par.length) q.push('cz=' + calc.par.join('.'));
   if (calc.tr) q.push('cr=1');
+  if (calc.noSet.length) q.push('cu=' + calc.noSet.join('.'));
   return q.join('&');
 }
 const stateHash = () => { const q = stateQuery(); return '#' + curTab + (q ? '?' + q : ''); };
@@ -98,6 +100,7 @@ function loadState(q) {
   calc.tw = SIDES.filter(s => (kv.cg || '').split('.').includes(s));
   calc.par = SIDES.filter(s => (kv.cz || '').split('.').includes(s));
   calc.tr = kv.cr === '1';
+  calc.noSet = SIDES.filter(s => (kv.cu || '').split('.').includes(s));
 }
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-copy]');
