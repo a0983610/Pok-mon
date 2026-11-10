@@ -1,10 +1,10 @@
 # 從 OP.GG 寶可夢冠軍圖鑑頁擷取寶可夢名單（屬性、單打／雙打排名、超級進化原型），
 # 再逐隻抓有排名的寶可夢詳細頁，取單打／雙打的常用招式、特性、道具使用率，隊友、勝於、敗於名單，
 # 以及招式／特性／道具的中文名與效果，
-# 寫進 index.html 的 MONS START / MONS END 區塊之間。超級進化沒有獨立統計，網頁端沿用原型的；
+# 整個檔重寫到 index.html 旁邊的 mons-data.js。超級進化沒有獨立統計，網頁端沿用原型的；
 # 超級進化的特性是固定的，名單頁就有，另外存在名單裡。
 # 種族值不太會變，另外寫到 index.html 旁邊的 base-stats.js（不帶日期，資料沒變就不會有 diff）。
-# 用法：python tools/update_mons.py [index.html 路徑，預設為 repo 根目錄的 index.html]
+# 用法：python tools/update_mons.py [index.html 路徑，預設為 repo 根目錄的 index.html；只用來決定寫到哪個資料夾，不會改 index.html]
 # 有排名的寶可夢約 250 隻要逐頁抓，跑一次約 3～5 分鐘。
 import datetime
 import json
@@ -158,24 +158,22 @@ def main(path):
     today = datetime.date.today().isoformat()
     dump = lambda o: json.dumps(o, ensure_ascii=False, separators=(',', ':'))
     body = '\n'.join(dump(r) + ',' for r in rows)
-    block = ('// ----- MONS START -----\n'
-             '// 寶可夢名單與常用招式：%s 擷取自 OP.GG 寶可夢冠軍圖鑑（含超級進化）；這段由 tools/update_mons.py 產生，勿手改\n'
-             "const MONS_DATE = '%s';\n"
-             '// [key, 中文名, 屬性（. 分隔）, 單打排名, 雙打排名（0＝沒有排名）, 超級進化的原型 key, 超級進化後的特性 key（. 分隔，只有超級進化有）]；\n'
-             '// 種族值在 base-stats.js\n'
-             'const MONS_RAW = [\n%s\n];\n'
-             '// 常用統計：寶可夢 key → [單打招式, 雙打招式, 單打特性, 雙打特性, 單打道具, 雙打道具,\n'
-             '//   單打隊友, 雙打隊友, 單打勝於, 雙打勝於, 單打敗於, 雙打敗於]。招式／特性／道具每項是「key:使用率%%」以空白分隔、\n'
-             '//   依使用率高到低，低於 %d%% 的不收；隊友／勝於／敗於是寶可夢 key 以空白分隔，依 OP.GG 順序取前 %d 隻。\n'
-             '//   沒有統計的是空字串，超級進化不在這裡（沿用原型）\n'
-             'const USAGE_RAW = {\n%s\n};\n'
-             '// 招式：key → [中文名, 屬性, 分類（physical 物理／special 特殊／status 變化）, 威力（null＝沒有）, 效果]\n'
-             'const MOVES = {\n%s\n};\n'
-             '// 特性：key → [中文名, 效果]\n'
-             'const ABILS = {\n%s\n};\n'
-             '// 道具：key → [中文名, 效果]\n'
-             'const ITEMS = {\n%s\n};\n'
-             '// ----- MONS END -----') % (
+    mons_js = ('// 寶可夢名單與常用招式：%s 擷取自 OP.GG 寶可夢冠軍圖鑑（含超級進化）；這個檔由 tools/update_mons.py 產生，勿手改\n'
+               "const MONS_DATE = '%s';\n"
+               '// [key, 中文名, 屬性（. 分隔）, 單打排名, 雙打排名（0＝沒有排名）, 超級進化的原型 key, 超級進化後的特性 key（. 分隔，只有超級進化有）]；\n'
+               '// 種族值在 base-stats.js\n'
+               'const MONS_RAW = [\n%s\n];\n'
+               '// 常用統計：寶可夢 key → [單打招式, 雙打招式, 單打特性, 雙打特性, 單打道具, 雙打道具,\n'
+               '//   單打隊友, 雙打隊友, 單打勝於, 雙打勝於, 單打敗於, 雙打敗於]。招式／特性／道具每項是「key:使用率%%」以空白分隔、\n'
+               '//   依使用率高到低，低於 %d%% 的不收；隊友／勝於／敗於是寶可夢 key 以空白分隔，依 OP.GG 順序取前 %d 隻。\n'
+               '//   沒有統計的是空字串，超級進化不在這裡（沿用原型）\n'
+               'const USAGE_RAW = {\n%s\n};\n'
+               '// 招式：key → [中文名, 屬性, 分類（physical 物理／special 特殊／status 變化）, 威力（null＝沒有）, 效果]\n'
+               'const MOVES = {\n%s\n};\n'
+               '// 特性：key → [中文名, 效果]\n'
+               'const ABILS = {\n%s\n};\n'
+               '// 道具：key → [中文名, 效果]\n'
+               'const ITEMS = {\n%s\n};\n') % (
         today, today, body, MIN_PCT, LIST_N,
         '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in use.items()),
         '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in sorted(mv_out.items())),
@@ -184,21 +182,20 @@ def main(path):
     stats_js = ('// 種族值：擷取自 OP.GG 寶可夢冠軍圖鑑（含超級進化）；這個檔由 tools/update_mons.py 產生，勿手改\n'
                 '// 寶可夢 key → [HP, 攻擊, 防禦, 特攻, 特防, 速度]\n'
                 'const BASE_STATS = {\n%s\n};\n') % '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in stats.items())
-    with open(path, encoding='utf-8', newline='') as f:
-        html = f.read()
-    if '\r\n' in html:
-        block = block.replace('\n', '\r\n')
-        stats_js = stats_js.replace('\n', '\r\n')
-    new, n = re.subn(r'// ----- MONS START -----.*?// ----- MONS END -----', lambda m: block, html, flags=re.S)
-    if n != 1:
-        raise SystemExit('index.html 裡找不到唯一的 MONS 區塊')
-    with open(path, 'w', encoding='utf-8', newline='') as f:
-        f.write(new)
-    with open(os.path.join(os.path.dirname(os.path.abspath(path)), 'base-stats.js'), 'w', encoding='utf-8', newline='') as f:
-        f.write(stats_js)
+    out = os.path.dirname(os.path.abspath(path))
+    mons_path = os.path.join(out, 'mons-data.js')
+    # 換行沿用既有的 mons-data.js（Windows 上 git 取出來是 CRLF），檔案還不存在就用 LF
+    if os.path.exists(mons_path):
+        with open(mons_path, 'rb') as f:
+            if f.readline().endswith(b'\r\n'):
+                mons_js = mons_js.replace('\n', '\r\n')
+                stats_js = stats_js.replace('\n', '\r\n')
+    for p, s in ((mons_path, mons_js), (os.path.join(out, 'base-stats.js'), stats_js)):
+        with open(p, 'w', encoding='utf-8', newline='') as f:
+            f.write(s)
     print('寫入 %d 隻（超級進化 %d、單打有排名 %d、雙打有排名 %d）；常用招式 %d 隻、招式 %d 種、特性 %d 種、道具 %d 種，%d bytes' % (
         len(rows), sum(1 for r in rows if r[5]), sum(1 for r in rows if r[3]), sum(1 for r in rows if r[4]),
-        sum(1 for u in use.values() if u[0] or u[1]), len(mv_out), len(ab_out), len(it_out), len(block.encode())))
+        sum(1 for u in use.values() if u[0] or u[1]), len(mv_out), len(ab_out), len(it_out), len(mons_js.encode())))
     print('前 3 筆：', rows[:3])
 
 
