@@ -32,7 +32,7 @@ const SUP_ABILS = new Set(ROLES.filter(r => r.sup).flatMap(r => r.abils || []));
 // 寶可夢 key（超級進化沿用原型的統計）在 fmt 的角色；沒有統計資料回傳 null。
 // 超級進化另外加上超級進化後的固定特性（mega，算 100%；和原型常用特性相同的只算一次，沒有中文說明的略過）。
 // phys／spec／sup＝平均帶幾招物攻、特攻、輔助招（使用率加總 ÷ 100），main＝三者最多的那類（輔助同分算輔助），
-// tags＝有的功能標籤，by 是撐起標籤的招式／特性 [中文名, 使用率]。set：我方登錄的配招（見 useOf）
+// tags＝有的功能標籤，by 是撐起標籤的招式／特性 [中文名, 使用率, 是登錄的]。set：我方登錄的配招（見 useOf）
 function roleOf(key, fmt, set) {
   const use = useOf(key, fmt, set);
   if (!use || !use.moves.length) return null;
@@ -46,8 +46,8 @@ function roleOf(key, fmt, set) {
   });
   abils.forEach(([k, p]) => { if (SUP_ABILS.has(k)) sup += p; });
   const tags = ROLES.map(r => ({ id: r.id, by: [
-    ...use.moves.filter(([k, p]) => p >= ROLE_PCT && r.moves.includes(k)).map(([k, p]) => [MOVES[k][0], p]),
-    ...abils.filter(([k, p]) => p >= ROLE_PCT && r.abils?.includes(k)).map(([k, p, m]) => [(m ? '超級進化後特性' : '特性') + ABILS[k][0], p]),
+    ...use.moves.filter(([k, p]) => p >= ROLE_PCT && r.moves.includes(k)).map(([k, p]) => [MOVES[k][0], p, use.reg?.moves]),
+    ...abils.filter(([k, p]) => p >= ROLE_PCT && r.abils?.includes(k)).map(([k, p, m]) => [(m ? '超級進化後特性' : '特性') + ABILS[k][0], p, !m && use.reg?.abils]),
   ] })).filter(t => t.by.length);
   return { use, mega, phys: phys / 100, spec: spec / 100, sup: sup / 100, main: sup >= Math.max(phys, spec) ? 'sup' : phys >= spec ? 'phys' : 'spec', tags };
 }
@@ -59,13 +59,17 @@ const FIXED_DMG = new Set(['counter', 'mirror-coat', 'metal-burst', 'comeuppance
 // 寶可夢 key 在 fmt 的 OP.GG 統計（超級進化沿用原型）；沒有統計回傳 undefined。
 // set：我方登錄的配招 { moves: [招式 key ×4], item, ab, sp: [HP, 攻擊, 防禦, 特攻, 特防, 速度 的能力點數], nat: [↑能力索引, ↓能力索引] }
 // （沒填的是空字串／0）。有填的招式／特性／道具當成使用率 100% 蓋過統計的同一欄，沒填的照舊看統計；
-// 只有我方隊員會傳，對手一律看統計（鏡像對戰也不會混用）
+// 只有我方隊員會傳，對手一律看統計（鏡像對戰也不會混用）。有蓋過時多回傳 reg { moves, abils, items }＝哪幾欄是登錄的（畫面上登錄的不標使用率）
 function useOf(key, fmt, set) {
   const use = USAGE[family(MON[key])]?.[fmt], moves = set ? set.moves.filter(Boolean) : [];
   if (!moves.length && !set?.ab && !set?.item) return use;
   return { ...(use || { moves: [], abils: [], items: [], mates: [], win: [], lose: [] }),
-    ...(moves.length && { moves: moves.map(k => [k, 100]) }), ...(set.ab && { abils: [[set.ab, 100]] }), ...(set.item && { items: [[set.item, 100]] }) };
+    ...(moves.length && { moves: moves.map(k => [k, 100]) }), ...(set.ab && { abils: [[set.ab, 100]] }), ...(set.item && { items: [[set.item, 100]] }),
+    reg: { moves: moves.length > 0, abils: !!set.ab, items: !!set.item } };
 }
+// 空的配招；setFilled＝有沒有填任何一欄（什麼都沒填就當沒登錄，存 null）
+const emptySet = () => ({ moves: ['', '', '', ''], item: '', ab: '', sp: [0, 0, 0, 0, 0, 0], nat: [0, 0] });
+const setFilled = s => s.moves.some(Boolean) || !!s.item || !!s.ab || s.sp.some(Boolean) || !!s.nat[0];
 function attacksOf(key, defs, fmt, set) {
   const use = key && useOf(key, fmt, set);
   if (!use || !use.moves.length) return defs.map(ty => ({ ty, zh: null }));
@@ -199,9 +203,9 @@ const ANTI_SETUP = ['taunt', 'encore', 'haze', 'clear-smog', 'roar', 'whirlwind'
 // 寶可夢 key 在 fmt 能反制強化的招式／特性（使用率 ROLE_PCT% 以上；超級進化看固定特性），寫成「挑釁 45%」；set 見 useOf
 function antiSetupOf(key, fmt, set) {
   const m = MON[key], use = useOf(key, fmt, set);
-  const moves = (use?.moves || []).filter(([k, p]) => p >= ROLE_PCT && ANTI_SETUP.includes(k)).map(([k, p]) => `${MOVES[k][0]} ${p}%`);
+  const moves = (use?.moves || []).filter(([k, p]) => p >= ROLE_PCT && ANTI_SETUP.includes(k)).map(([k, p]) => MOVES[k][0] + (use.reg?.moves ? '' : ` ${p}%`));
   const abils = m.base ? (m.megaAbils.includes('unaware') ? [`超級進化後特性${abilZh('unaware')}`] : [])
-    : (use?.abils || []).filter(([k, p]) => k === 'unaware' && p >= ROLE_PCT).map(([k, p]) => `特性${abilZh(k)} ${p}%`);
+    : (use?.abils || []).filter(([k, p]) => k === 'unaware' && p >= ROLE_PCT).map(([k, p]) => `特性${abilZh(k)}` + (use.reg?.abils ? '' : ` ${p}%`));
   return [...moves, ...abils];
 }
 // 先發：從組合 c（bringCombos 的結果）任挑 n 隻（單打 1 隻、雙打 2 隻），依序比
@@ -215,7 +219,7 @@ function antiSetupOf(key, fmt, set) {
 function leadPick(c, n, uOf, sOf, kOf, opps, setups, fmt, setOf = () => undefined) {
   const atk = [...new Set(opps.flatMap(u => [u, ...(u.megas || [])].flatMap(f => f.atk.map(a => a.ty))))];
   const roleIn = j => kOf(j) && roleOf(kOf(j), fmt, setOf(j));
-  const supOf = j => { const r = roleIn(j); return r ? [...new Set(r.tags.filter(t => LEAD_SUP.includes(t.id)).flatMap(t => t.by.map(([zh, p]) => `${zh} ${p}%`)))] : []; };
+  const supOf = j => { const r = roleIn(j); return r ? [...new Set(r.tags.filter(t => LEAD_SUP.includes(t.id)).flatMap(t => t.by.map(([zh, p, reg]) => reg ? zh : `${zh} ${p}%`)))] : []; };
   const antiOf = j => kOf(j) ? antiSetupOf(kOf(j), fmt, setOf(j)) : [];
   // 組合裡任挑 n 隻的位置（c.idx 的索引）
   const sets = n === 1 ? c.idx.map((_, p) => [p]) : c.idx.flatMap((_, p) => c.idx.slice(p + 1).map((__, d) => [p, p + 1 + d]));

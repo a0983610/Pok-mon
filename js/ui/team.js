@@ -88,22 +88,26 @@ const byText = by => by.length ? `（${by.map(([zh, p]) => `${zh} ${p}%`).join('
 const STAT_ZH = ['HP', '攻擊', '防禦', '特攻', '特防', '速度'];
 const statsHTML = m => `<div class="bst">${m.bs.map((v, k) => `<span${(k === 1 || k === 3) && v === Math.max(m.bs[1], m.bs[3]) ? ' class="hi"' : ''}>`
   + `${STAT_ZH[k]} <b>${v}</b></span>`).join('')}<span>合計 <b>${m.bs.reduce((s, v) => s + v, 0)}</b></span></div>`;
-// OP.GG 常帶道具（前 3）與常見隊友（前 6）；fams 是隊上成員的家族，已在隊上的隊友標 ✔
+// OP.GG 常帶道具（前 3；登錄的不標使用率）與常見隊友（前 6）；fams 是隊上成員的家族，已在隊上的隊友標 ✔
 const kitHTML = (use, fams) => use.items.length || use.mates.length ? '<div class="bst">'
-  + (use.items.length ? `<span>道具 ${use.items.slice(0, 3).map(([k, p]) => `<b>${ITEMS[k]?.[0] ?? k}</b> ${p}%`).join('・')}</span>` : '')
+  + (use.items.length ? `<span>道具 ${use.items.slice(0, 3).map(([k, p]) => `<b>${ITEMS[k]?.[0] ?? k}</b>` + (use.reg?.items ? '（登錄）' : ` ${p}%`)).join('・')}</span>` : '')
   + (use.mates.length ? `<span>常見隊友 ${use.mates.slice(0, 6).map(k => fams.includes(family(MON[k])) ? `<b>✔${MON[k].zh}</b>` : MON[k].zh).join('・')}</span>` : '')
   + '</div>' : '';
-// 常用招式（摘要列前 5 招）、特性、超級進化後特性、道具的完整清單與效果（r 是 roleOf 的結果）；隊伍角色和出戰選角的對手情報共用
-const useDetailsHTML = r => `<details class="mv"><summary>常用：${r.use.moves.slice(0, 5).map(([k, p]) => `${MOVES[k][0]} ${p}%`).join('・')}`
-  + `${r.use.moves.length > 5 ? '…' : ''}（點開看效果）</summary>`
-  + r.use.moves.map(([k, p]) => {
-    const [zh, ty, cat, pow, eff] = MOVES[k];
-    return `<div class="mv-row"><span class="mv-p">${p}%</span><b>${zh}</b>${chip(ty)}<span class="meta">${CAT_ZH[cat]}${pow ? ' 威力 ' + pow : ''}</span><span class="mv-e">${eff}</span></div>`;
-  }).join('')
-  + r.use.abils.map(([k, p]) => `<div class="mv-row"><span class="mv-p">${p}%</span><b>特性：${ABILS[k][0]}</b><span class="mv-e">${ABILS[k][1]}</span></div>`).join('')
-  + r.mega.map(k => `<div class="mv-row"><span class="mv-p">固定</span><b>超級進化後特性：${ABILS[k][0]}</b><span class="mv-e">${ABILS[k][1]}</span></div>`).join('')
-  + r.use.items.filter(([k]) => ITEMS[k]).map(([k, p]) => `<div class="mv-row"><span class="mv-p">${p}%</span><b>道具：${ITEMS[k][0]}</b><span class="mv-e">${ITEMS[k][1]}</span></div>`).join('')
-  + '</details>';
+// 常用招式（摘要列前 5 招）、特性、超級進化後特性、道具的完整清單與效果（r 是 roleOf 的結果；我方登錄的欄位標「登錄」、不標使用率）；
+// 隊伍角色和出戰選角的對手情報共用
+const useDetailsHTML = r => {
+  const g = r.use.reg || {}, pc = (p, reg) => reg ? '登錄' : p + '%';
+  return `<details class="mv"><summary>${g.moves ? '登錄' : '常用'}：${r.use.moves.slice(0, 5).map(([k, p]) => MOVES[k][0] + (g.moves ? '' : ` ${p}%`)).join('・')}`
+    + `${r.use.moves.length > 5 ? '…' : ''}（點開看效果）</summary>`
+    + r.use.moves.map(([k, p]) => {
+      const [zh, ty, cat, pow, eff] = MOVES[k];
+      return `<div class="mv-row"><span class="mv-p">${pc(p, g.moves)}</span><b>${zh}</b>${chip(ty)}<span class="meta">${CAT_ZH[cat]}${pow ? ' 威力 ' + pow : ''}</span><span class="mv-e">${eff}</span></div>`;
+    }).join('')
+    + r.use.abils.map(([k, p]) => `<div class="mv-row"><span class="mv-p">${pc(p, g.abils)}</span><b>特性：${ABILS[k][0]}</b><span class="mv-e">${ABILS[k][1]}</span></div>`).join('')
+    + r.mega.map(k => `<div class="mv-row"><span class="mv-p">固定</span><b>超級進化後特性：${ABILS[k][0]}</b><span class="mv-e">${ABILS[k][1]}</span></div>`).join('')
+    + r.use.items.filter(([k]) => ITEMS[k]).map(([k, p]) => `<div class="mv-row"><span class="mv-p">${pc(p, g.items)}</span><b>道具：${ITEMS[k][0]}</b><span class="mv-e">${ITEMS[k][1]}</span></div>`).join('')
+    + '</details>';
+};
 function roleHTML(members) {
   const fz = FMT_ZH[team.fmt];
   const rows = members.map(([, i]) => ({ i, key: team.mons[i], r: team.mons[i] ? roleOf(team.mons[i], team.fmt, team.sets[i]) : null }));
@@ -122,12 +126,13 @@ function roleHTML(members) {
       if (!key) return `<div class="mrole"><div class="mrole-h"><b>${i + 1}</b>${chips(team.slots[i])}<span class="meta">只選屬性，沒有招式資料</span></div></div>`;
       const head = `<div class="mrole"><div class="mrole-h"><b>${i + 1} ${MON[key].zh}</b>`;
       if (!r) return `${head}<span class="meta">${fz}沒有統計資料</span></div>${statsHTML(MON[key])}</div>`;
-      return `${head}${roleTags(r)}<span class="meta">平均帶 物攻 ${r.phys.toFixed(1)}・特攻 ${r.spec.toFixed(1)}・輔助 ${r.sup.toFixed(1)} 招`
+      return `${head}${roleTags(r)}<span class="meta">${r.use.reg?.moves ? '登錄配招' : '平均帶'} 物攻 ${r.phys.toFixed(1)}・特攻 ${r.spec.toFixed(1)}・輔助 ${r.sup.toFixed(1)} 招`
         + `${MON[key].base ? `・沿用${MON[MON[key].base].zh}的統計` : ''}</span></div>${statsHTML(MON[key])}${kitHTML(r.use, fams)}${useDetailsHTML(r)}</div>`;
     }).join('')
     + `<details class="b-more" style="margin-top:10px"><summary>角色怎麼判斷</summary><p class="note">`
     + `依 OP.GG ${fz}統計的常用招式與特性（${MONS_DATE} 擷取，只收使用率 5% 以上）判斷，超級進化沿用原型的統計，再加上超級進化後的固定特性（算 100%，和原型常用特性相同的只算一次）。`
     + `物攻／特攻／輔助＝平均帶幾招該類招式（使用率加總 ÷ 100；輔助類特性如威嚇也算一招），最多的那類就是這隻的角色，輔助同分算輔助。`
+    + '在上方格子登錄了配招的隊員，登錄的招式、特性、道具當成使用率 100%（不標使用率），沒填的欄位照 OP.GG 統計。'
     + `功能標籤要使用率 ${ROLE_PCT}% 以上才標，打 ★ 的算輔助招：<br>`
     + ROLES.map(r => `<b>${r.sup ? '★' : ''}${r.zh}</b>：${names(r.moves, MOVES)}${r.abils && names(r.abils, ABILS) ? '；特性 ' + names(r.abils, ABILS) : ''}`).join('<br>')
     + `<br>「隊伍該有」＝物攻、特攻輸出各一，加上${fz}排名前 30 名裡至少兩成有的功能。`
@@ -174,10 +179,12 @@ const fieldTag = k => { const f = FIELD_SET[k] || FIELD_NEED[k]; return f && FIE
 function traitScan(keys, fmt, sets = {}) {
   const mine = keys.map((key, j) => {
     const m = MON[key], use = useOf(key, fmt, sets[key]);
-    return { j, list: [...(use?.abils || []), ...m.megaAbils.filter(k => ABILS[k]).map(k => [k, 100, true]), ...(use?.moves || []).map(([k, p]) => [k, p, false, true])] };
+    return { j, list: [...(use?.abils || []).map(([k, p]) => [k, p, false, false, use.reg?.abils]), ...m.megaAbils.filter(k => ABILS[k]).map(k => [k, 100, true]),
+      ...(use?.moves || []).map(([k, p]) => [k, p, false, true, use.reg?.moves])] };
   }).filter(x => x.list.length);
+  // reg＝這項是登錄的（不標使用率）
   const has = (abils = [], moves = []) => mine.flatMap(({ j, list }) => list.filter(([k, p, , move]) => p >= ROLE_PCT && (move ? moves : abils).includes(k))
-    .map(([k, p, mega, move]) => ({ j, k, p, mega, move })));
+    .map(([k, p, mega, move, reg]) => ({ j, k, p, mega, move, reg })));
   // 搭配檢查：靠天氣／場地的特性或招式沒人開、同時會開兩種天氣（或場地）、無關天氣抵消隊友的天氣、順風和戲法空間同隊、戲法空間但隊員偏快
   const setKeys = Object.keys(FIELD_SET), needKeys = Object.keys(FIELD_NEED);
   const set = has(setKeys, setKeys), need = has(needKeys, needKeys), warns = [];
@@ -217,7 +224,7 @@ function traitHTML(members) {
   const { mine, has, warns } = traitScan(named.map(i => team.mons[i]), team.fmt, teamSets());
   const who = j => `${named[j] + 1} ${MON[team.mons[named[j]]].zh}`, whoList = hs => hs.map(h => who(h.j)).join('、');
   // 依隊員合併成「1 噴火龍（日照 96%・晴天）」；超級進化的隊員的特性分「出場時」（原型的常用特性）和「超級進化後」
-  const abText = h => (h.move ? '' : h.mega ? '超級進化後 ' : MON[team.mons[named[h.j]]].base ? '出場時 ' : '') + zhOf(h.k) + (h.mega ? '' : ` ${h.p}%`)
+  const abText = h => (h.move ? '' : h.mega ? '超級進化後 ' : MON[team.mons[named[h.j]]].base ? '出場時 ' : '') + zhOf(h.k) + (h.mega || h.reg ? '' : ` ${h.p}%`)
     + (h.k in FIELD_SET && fieldTag(h.k) ? '・' + fieldTag(h.k) : '');
   const label = hs => [...new Set(hs.map(h => h.j))].map(j => `${who(j)}（${hs.filter(h => h.j === j).map(abText).join('、')}）`);
   const names = list => list.filter(k => ABILS[k] || MOVES[k]).map(k => zhOf(k) + (fieldTag(k) ? `（${fieldTag(k)}）` : '')).join('、');
@@ -240,7 +247,7 @@ function traitHTML(members) {
     + `<div class="x-line"><span class="x-msg">搭配檢查：</span>${warns.length ? '' : '<span class="none">（沒有問題）</span>'}</div>`
     + warns.map(w => `<div class="x-line"><span>⚠ ${text(w)}</span></div>`).join('')
     + `<details class="b-more" style="margin-top:10px"><summary>怎麼分類、怎麼檢查</summary><p class="note">`
-    + `依 OP.GG ${fz}統計的常用特性與招式（${MONS_DATE} 擷取），使用率 ${ROLE_PCT}% 以上才算。`
+    + `依 OP.GG ${fz}統計的常用特性與招式（${MONS_DATE} 擷取），使用率 ${ROLE_PCT}% 以上才算；登錄了配招的隊員照登錄的算（不標使用率）。`
     + '超級進化的隊員，特性分兩段：「出場時」是原型的常用特性（出場還沒超級進化），「超級進化後」是超級進化固定的特性。<br>'
     + TRAIT_CATS.map(c => `<b>${c.zh}</b>：${[c.abils && names(c.abils), c.moves && (c.abils ? '招式 ' : '') + names(c.moves)].filter(Boolean).join('；')}`).join('<br>')
     + `<br><b>搭配檢查</b>：${names(Object.keys(FIELD_NEED))}只在括號裡的天氣／場地有效果，隊上沒有隊友或招式會開就提醒`
@@ -268,6 +275,34 @@ function typeListHTML() {
     + (list.length
       ? `<div class="qpick">${list.map(m => `<button data-mon="${m.key}">${m.zh}${chips(m.types)}<span class="meta">${meta(m)}</span></button>`).join('')}</div>`
       : '<p class="muted small b-intro">名單裡沒有這種屬性組合的寶可夢；只選屬性也能看屬性分析。</p>');
+}
+// 目前格子挑了寶可夢時的配招登錄（team.sets，見 useOf）：4 招、特性（超級進化固定，不能選）、道具、6 項能力點數、性格。
+// 招式／特性／道具選單先列這隻在 fmt 的 OP.GG 常用（依使用率），其他依中文名排；資料只收得到任一隻寶可夢使用率 5% 以上的招式／特性／道具，
+// 也不檢查這隻學不學得會。性格是「↑哪項・↓哪項」（攻擊～速度，HP 沒有性格）
+const NATURES = [1, 2, 3, 4, 5].flatMap(u => [1, 2, 3, 4, 5].filter(d => d !== u).map(d => [u, d]));
+function setEditorHTML() {
+  const i = team.cur, key = team.mons[i];
+  if (!key) return '';
+  const m = MON[key], s = team.sets[i] || emptySet(), use = useOf(key, team.fmt), fz = FMT_ZH[team.fmt];
+  const opt = (v, zh, cur) => `<option value="${v}"${v === cur ? ' selected' : ''}>${zh}</option>`;
+  const opts = (dict, common, cur) => {
+    const top = common.map(([k]) => k).filter(k => dict[k]);
+    const rest = Object.keys(dict).filter(k => !top.includes(k)).sort((x, y) => dict[x][0].localeCompare(dict[y][0], 'zh-Hant'));
+    return opt('', '（未填）', cur) + (top.length ? `<optgroup label="${fz}常用">${top.map(k => opt(k, dict[k][0], cur)).join('')}</optgroup>` : '')
+      + `<optgroup label="${top.length ? '其他' : '全部'}">${rest.map(k => opt(k, dict[k][0], cur)).join('')}</optgroup>`;
+  };
+  const sum = s.sp.reduce((a, v) => a + v, 0), nat = s.nat[0] ? s.nat.join('+') : '';
+  return `<div class="set-ed"><div class="b-label">第 ${i + 1} 隻 ${m.zh} 的配招<span class="muted small">沒填的欄位照 OP.GG ${fz}統計；登錄後隊伍分析、出戰選角都照這份判斷</span></div>`
+    + `<div class="c-f"><span class="c-l">招式</span>${s.moves.map((k, n) => `<select class="sel" data-mv="${n}" aria-label="招式 ${n + 1}">${opts(MOVES, use?.moves || [], k)}</select>`).join('')}</div>`
+    + `<div class="c-f"><span class="c-l">特性</span>${m.base ? `<span>${m.megaAbils.map(abilZh).join('、')}<span class="meta">（超級進化後固定）</span></span>`
+      : `<select class="sel" data-ab aria-label="特性">${opts(ABILS, use?.abils || [], s.ab)}</select>`}</div>`
+    + `<div class="c-f"><span class="c-l">道具</span><select class="sel" data-it aria-label="道具">${opts(ITEMS, use?.items || [], s.item)}</select></div>`
+    + `<div class="c-f"><span class="c-l">能力點數</span><div class="c-sts">${STAT_ZH.map((zh, n) => `<span class="c-st"><label for="tSp${n}">${zh}</label>`
+      + `<input type="number" class="sel c-num" id="tSp${n}" data-sp="${n}" min="0" max="32" step="1" value="${s.sp[n]}"></span>`).join('')}`
+    + `<span class="${sum > 66 ? 'x-msg' : 'muted small'}">${sum > 66 ? '⚠ ' : ''}合計 ${sum}／66${sum > 66 ? '，超過上限' : ''}</span></div></div>`
+    + `<div class="c-f"><span class="c-l">性格</span><select class="sel" data-nat aria-label="性格">${opt('', '不加減', nat)}`
+    + NATURES.map(([u, d]) => opt(`${u}+${d}`, `${STAT_ZH[u]} ↑・${STAT_ZH[d]} ↓`, nat)).join('') + '</select></div>'
+    + `<div class="c-f"><button class="mini" data-setclear${team.sets[i] ? '' : ' disabled'}>清除配招</button></div></div>`;
 }
 // 實戰：OP.GG 對手 m 的敗於／勝於名單裡有我方挑了寶可夢的隊員（named 是格子索引，同家族算）；
 // 兩份名單都有的不列（名單依次數排，兩隻都熱門時常常兩邊都上榜，看不出誰剋誰）。熱門威脅和出戰選角共用
@@ -313,7 +348,11 @@ function threatHTML(members) {
 // 速度線：我方（挑了寶可夢的才有速度）和熱門寶可夢依速度種族值由快到慢排，同速時我方排前面。
 // 熱門寶可夢常帶超級石的（megaInfo 算進去的），超級進化型態另列一行；比幾隻快／慢時取進化前後較快的
 // 帶講究圍巾的使用率（OP.GG 道具統計）；超級進化要帶超級石，不標
-const scarf = m => { const p = !m.base && useOf(m.key, team.fmt)?.items.find(([k]) => k === 'choice-scarf')?.[1]; return p ? `・講究圍巾 ${p}%` : ''; };
+// 帶講究圍巾的比例（set＝我方登錄的配招，登錄了道具就看登錄的）
+const scarf = (m, set) => {
+  const u = m.base ? null : useOf(m.key, team.fmt, set), p = u?.items.find(([k]) => k === 'choice-scarf')?.[1];
+  return p ? `・講究圍巾${u.reg?.items ? '（登錄）' : ` ${p}%`}` : '';
+};
 function speedHTML(members) {
   const top = topMons(team.fmt, THREAT_N), megas = new Map(top.map(m => [m, megaInfo(m, team.fmt).filter(x => x.counted)]));
   const fastest = m => Math.max(m.spe, ...megas.get(m).map(x => x.mon.spe));
@@ -329,7 +368,7 @@ function speedHTML(members) {
     + (members.some(([, i]) => !team.mons[i]) ? '<p class="muted small b-intro">只選屬性的格子沒有速度資料，挑了寶可夢才會列進速度線。</p>' : '')
     + `<div style="margin-top:8px">${rows.map(x => `<div class="spd${x.i != null ? ' me' : ''}"><b class="v">${x.mon.spe}</b><b>${x.mon.zh}</b>${chips(x.mon.types)}`
       + `<span class="meta">${x.i != null ? `我方第 ${x.i + 1} 隻` : `#${x.mon.rank[team.fmt]}`}`
-      + `${x.mega ? `・超級進化${x.p != null ? `（帶超級石 ${x.p}%）` : ''}` : ''}${scarf(x.mon)}</span></div>`).join('')}</div>`
+      + `${x.mega ? `・超級進化${x.p != null ? `（帶超級石 ${x.p}%）` : ''}` : ''}${scarf(x.mon, x.i != null ? team.sets[x.i] : undefined)}</span></div>`).join('')}</div>`
     + '<p class="note">※ 只比速度種族值，不含性格、能力投資、道具、特性與場地（如順風、戲法空間）；'
     + '種族值相同時實際誰快要看投資，所以算同速。我方超級進化看超級進化後的速度；'
     + `熱門寶可夢 OP.GG 道具統計有 ${ROLE_PCT}% 以上帶超級石的，超級進化型態另列一行（標「超級進化」），上方「比幾隻快／慢」取進化前後較快的那個。`
@@ -337,9 +376,10 @@ function speedHTML(members) {
 }
 function renderTeam() {
   $('#tSlots').innerHTML = team.slots.map((s, i) => `<button class="slot" data-i="${i}" aria-pressed="${i === team.cur}"><span class="slot-n">第 ${i + 1} 隻</span>`
-    + `${team.mons[i] ? `<span class="slot-name">${MON[team.mons[i]].zh}</span>` : ''}${s.length ? chips(s) : '<span class="muted small">空</span>'}</button>`).join('');
+    + `${team.mons[i] ? `<span class="slot-name">${MON[team.mons[i]].zh}</span>` : ''}${s.length ? chips(s) : '<span class="muted small">空</span>'}`
+    + `${team.sets[i] ? '<span class="muted small">已登錄配招</span>' : ''}</button>`).join('');
   renderPick($('#tPick'), team.slots[team.cur]);
-  $('#tList').innerHTML = typeListHTML();
+  $('#tList').innerHTML = typeListHTML() || setEditorHTML();
   document.querySelectorAll('#tFmt button').forEach(b => b.setAttribute('aria-pressed', b.dataset.fmt === team.fmt));
 
   const members = team.slots.map((s, i) => [s, i]).filter(([s]) => s.length);
@@ -414,6 +454,20 @@ $('#tPick').addEventListener('click', e => {
 $('#tList').addEventListener('click', e => {
   const b = e.target.closest('[data-mon]');
   if (b) pickTeamMon(b.dataset.mon);
+  if (e.target.closest('[data-setclear]')) { team.sets[team.cur] = null; renderTeam(); }
+});
+// 配招登錄：同一招選到另一格時，原本那格清掉；點數限 0～32；什麼都沒填就當沒登錄
+$('#tList').addEventListener('change', e => {
+  const el = e.target, d = el.dataset, i = team.cur;
+  if (!el.closest('.set-ed') || !team.mons[i]) return;
+  const s = structuredClone(team.sets[i] || emptySet());
+  if (d.mv != null) s.moves = s.moves.map((k, n) => n === +d.mv ? el.value : k === el.value ? '' : k);
+  else if (d.ab != null) s.ab = el.value;
+  else if (d.it != null) s.item = el.value;
+  else if (d.sp != null) { const v = Math.round(Number(el.value)); s.sp[+d.sp] = Number.isFinite(v) ? Math.max(0, Math.min(32, v)) : 0; }
+  else if (d.nat != null) s.nat = el.value ? el.value.split('+').map(Number) : [0, 0];
+  team.sets[i] = setFilled(s) ? s : null;
+  renderTeam();
 });
 $('#tResult').addEventListener('click', e => {
   const b = e.target.closest('[data-add], [data-mon]');

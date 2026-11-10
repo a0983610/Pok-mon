@@ -54,7 +54,7 @@ function parseSet(s, key) {
   const set = { moves: [0, 1, 2, 3].map(n => Object.hasOwn(MOVES, ms[n] || '') ? ms[n] : ''), item: Object.hasOwn(ITEMS, item) ? item : '',
     ab: !MON[key].base && (Object.hasOwn(ABILS, ab) || Object.hasOwn(ABIL_ZH, ab)) ? ab : '',
     sp: [0, 1, 2, 3, 4, 5].map(n => num(pts[n], 0, 32)), nat: ns[0] && ns[1] ? [ns[0], ns[1]] : [0, 0] };
-  return set.moves.some(Boolean) || set.item || set.ab || set.sp.some(Boolean) || set.nat[0] ? set : null;
+  return setFilled(set) ? set : null;
 }
 function loadState(q) {
   const kv = Object.fromEntries(q.split('&').map(s => s.split('=')));
