@@ -2,7 +2,16 @@
 // mode：rand 對上隨機熱門隊、opp 對上「出戰選角」的對手；range 隨機隊從單打排名前幾名挑；n 場數。
 // run 模擬中（{ stop }）、res 上一次的結果（不存網址）
 const SIM_MODES = ['rand', 'opp'], SIM_RANGES = [30, 60, 100], SIM_NS = [100, 300, 1000];
-const sim = { mode: 'rand', range: 30, n: 100, run: null, res: null };
+// 決策方式（simPlay 的 opt）：快速＝往前算一回合、標準／精細＝樹搜尋每步 400／800 次；ms＝瀏覽器實測每場約幾毫秒（2026-11-11，估時間用）
+const SIM_ALGOS = [
+  { id: 'fast', zh: '快速', opt: { algo: 'ply1' }, ms: 50, hint: '每步把雙方各種出法都試算一回合' },
+  { id: 'std', zh: '標準', opt: { algo: 'tree', iters: 400 }, ms: 640, hint: '每步往下打 400 次到分出勝負（樹搜尋）' },
+  { id: 'fine', zh: '精細', opt: { algo: 'tree', iters: 800 }, ms: 1500, hint: '每步往下打 800 次到分出勝負（樹搜尋，最強）' },
+];
+const sim = { mode: 'rand', range: 30, n: 100, algo: 'std', run: null, res: null };
+const simAlgo = id => SIM_ALGOS.find(a => a.id === id) || SIM_ALGOS[1];
+// 預估時間的文字：秒數不到 1 分鐘寫秒，不然寫分鐘
+const simEta = ms => ms < 60000 ? `${Math.max(1, Math.round(ms / 1000))} 秒` : `${Math.round(ms / 60000)} 分鐘`;
 // 我方：隊伍分析挑了寶可夢的隊員（只選屬性的沒有能力值，不算）
 const simMine = () => team.mons.map((k, i) => k ? { key: k, set: team.sets[i] } : null).filter(Boolean);
 const simPctText = (x, n) => n ? `${Math.round(x / n * 1000) / 10}%` : '—';
@@ -11,6 +20,9 @@ function renderSim() {
   seg('sMode', SIM_MODES, sim.mode);
   seg('sRange', SIM_RANGES, sim.range);
   seg('sN', SIM_NS, sim.n);
+  seg('sAlgo', SIM_ALGOS.map(a => a.id), sim.algo);
+  const al = simAlgo(sim.algo);
+  $('#sAlgoHint').textContent = `${al.hint}，${sim.n} 場約 ${simEta(al.ms * sim.n)}`;
   $('#sRangeRow').hidden = sim.mode !== 'rand';
   const mine = simMine(), noOpp = sim.mode === 'opp' && !bring.opp.some(Boolean);
   $('#sRun').disabled = !!sim.run || !mine.length || noOpp;
@@ -26,19 +38,21 @@ function renderSim() {
 async function runSim() {
   const mine = simMine(), fmt = 's';
   if (sim.run || !mine.length) return;
-  const run = sim.run = { stop: false }, mode = sim.mode, total = sim.n;
+  const run = sim.run = { stop: false }, mode = sim.mode, total = sim.n, al = simAlgo(sim.algo);
   // 對上出戰選角的對手：雙方帶誰每場都一樣，先算好、快取共用
   const fixed = mode === 'opp' ? simSides(mine, bring.opp, fmt) : null, fixedCtx = fixed && simCtx(fmt);
-  const res = { mode, range: sim.range, total, n: 0, win: 0, lose: 0, draw: 0, turns: 0, my: {}, opp: {}, logs: {}, fixed };
+  const res = { mode, range: sim.range, algo: al.id, total, n: 0, win: 0, lose: 0, draw: 0, turns: 0, my: {}, opp: {}, logs: {}, fixed };
   renderSim();
-  let t0 = performance.now();
+  const start = performance.now();
+  let t0 = start;
   for (let g = 0; g < total && !run.stop; g++) {
     const oppKeys = fixed ? null : simRandTeam(fmt, sim.range, Math.random), sides = fixed || simSides(mine, oppKeys, fmt);
     const want = !res.logs.win || !res.logs.lose;
-    const out = simPlay(fixed ? fixedCtx : simCtx(fmt), sides, Math.random, want);
+    const out = simPlay(fixed ? fixedCtx : simCtx(fmt), sides, Math.random, want, al.opt);
     simTally(res, sides, out, g + 1);
     if (performance.now() - t0 > 50) {
-      $('#sMsg').textContent = `模擬中… ${res.n}／${total} 場`;
+      // 剩下的時間照目前每場平均估
+      $('#sMsg').textContent = `模擬中… ${res.n}／${total} 場，預估還要 ${simEta((performance.now() - start) / res.n * (total - res.n))}`;
       await new Promise(r => setTimeout(r));
       t0 = performance.now();
     }
@@ -74,7 +88,8 @@ function simResultHTML(res) {
   const n = res.n;
   if (!n) return '<p class="empty">沒有跑完任何一場。</p>';
   const rate = res.win / n, nm = k => MON[k].zh;
-  const head = `<div class="res-head">模擬結果<span class="muted small">（單打 6 選 3，${res.mode === 'rand' ? `對手從排名前 ${res.range} 隨機組隊` : '對手是出戰選角的 6 隻'}，共 ${n} 場）</span></div>`
+  const head = `<div class="res-head">模擬結果<span class="muted small">（單打 6 選 3，${res.mode === 'rand' ? `對手從排名前 ${res.range} 隨機組隊` : '對手是出戰選角的 6 隻'}，`
+    + `決策方式${simAlgo(res.algo).zh}，共 ${n} 場）</span></div>`
     + `<div class="c-sum ${rate >= 0.5 ? 'good' : 'bad'}"><b>勝率 ${simPctText(res.win, n)}</b>　贏 ${res.win}・輸 ${res.lose}・平手 ${res.draw}`
     + `<span class="meta">　平均 ${Math.round(res.turns / n * 10) / 10} 回合</span></div>`;
   // 對上出戰選角的對手：雙方帶誰固定，列出來
@@ -109,11 +124,14 @@ function simResultHTML(res) {
   return head + bringLine + `<h3>我方每隻</h3>${myRows}` + oppPart
     + `<h3>逐回合紀錄</h3>${logBox('win', '贏') + logBox('lose', '輸') || '<p class="muted small">這次沒有分出勝負的場次。</p>'}`
     + '<p class="note">※ 怎麼模擬：雙方都用「出戰選角」的方法選帶哪 3 隻、誰先發（對手看不到我方的配招，同「對手可能帶的」；'
-    + '對手選一般型態、但某顆超級石使用率過半的當成超級進化；一場只能超級進化一隻）。每回合雙方同時決定出哪一招或換誰：'
-    + '把「我方每種選擇 × 對手每種選擇」都試算這一回合（傷害取平均），之後雙方用簡單規則（出最痛的一招；不怕被打時強化、撒菱，'
-    + '打不太動時上異常狀態，HP 一半以下回復；倒下時換上一對一打得贏的）打到分出勝負來估分數，'
-    + '雙方各自找「對手不管怎麼應對都最不吃虧」的出法（同時出招的賽局解：可能是幾種選擇按比例混著出，像 70% 換人、30% 留場打，'
-    + '只固定出一種會被對手抓到），照比例抽一種；倒下後換上誰也用同樣方法決定。實際出招時傷害抽 16 段亂數、'
+    + '對手選一般型態、但某顆超級石使用率過半的當成超級進化；一場只能超級進化一隻）。每回合雙方同時決定出哪一招或換誰，'
+    + '先估「我方出 X、對手出 Y」各組合的分數：快速＝每種組合都試算這一回合（傷害取平均）；標準、精細＝樹搜尋，每步從目前局面往下打 400／800 次，'
+    + '每次雙方挑「目前看起來好、或還沒試夠」的選擇，照亂數打（傷害、急所、麻痺每次重抽），一路往下展開到沒走過的局面，'
+    + '累積每個組合最後的勝負（比快速多看了之後幾回合怎麼打、以及運氣好壞）。展開不到的部分都用簡單規則（出最痛的一招；不怕被打時強化、撒菱，'
+    + '打不太動時上異常狀態，HP 一半以下回復；倒下時換上一對一打得贏的）打到分出勝負。'
+    + '雙方再各自找「對手不管怎麼應對都最不吃虧」的出法（同時出招的賽局解：可能是幾種選擇按比例混著出，像 70% 換人、30% 留場打，'
+    + '只固定出一種會被對手抓到），照比例抽一種；倒下後換上誰也用同樣方法決定。'
+    + '實測讓雙方用不同方式對打，標準、精細對快速的勝率約 60%、69%。實際出招時傷害抽 16 段亂數、'
     + '急所機率 1/24（容易擊中要害的招式、超幸運、焦點鏡各提高一級：1/8、1/2、必定），同速各 50%。'
     + '我方照「隊伍分析」登錄的配招（沒登錄的照 OP.GG 常見），對手照 OP.GG 使用率前 4 招、最常見的特性、能力點數與性格，道具同一隊不重複（使用率高的先拿）。'
     + '攻擊招式算傷害，加上招式本身的效果：擊掌奇襲、迎頭一擊只有上場後第一回合能用；大爆炸、自爆、薄霧炸裂用了自己倒下；'
@@ -136,5 +154,6 @@ function simResultHTML(res) {
 $('#sMode').addEventListener('click', e => { const b = e.target.closest('button'); if (b && !sim.run) { sim.mode = SIM_MODES[[...b.parentNode.children].indexOf(b)]; renderSim(); } });
 $('#sRange').addEventListener('click', e => { const b = e.target.closest('button'); if (b && !sim.run) { sim.range = SIM_RANGES[[...b.parentNode.children].indexOf(b)]; renderSim(); } });
 $('#sN').addEventListener('click', e => { const b = e.target.closest('button'); if (b && !sim.run) { sim.n = SIM_NS[[...b.parentNode.children].indexOf(b)]; renderSim(); } });
+$('#sAlgo').addEventListener('click', e => { const b = e.target.closest('button'); if (b && !sim.run) { sim.algo = SIM_ALGOS[[...b.parentNode.children].indexOf(b)].id; renderSim(); } });
 $('#sRun').addEventListener('click', runSim);
 $('#sStop').addEventListener('click', () => { if (sim.run) sim.run.stop = true; });

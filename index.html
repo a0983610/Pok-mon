@@ -612,6 +612,14 @@ footer a { color: inherit; }
         </div>
       </div>
       <div class="t-row">
+        <div class="seg" id="sAlgo" aria-label="決策方式">
+          <button aria-pressed="false">快速</button>
+          <button aria-pressed="true">標準</button>
+          <button aria-pressed="false">精細</button>
+        </div>
+        <span class="muted small" id="sAlgoHint"></span>
+      </div>
+      <div class="t-row">
         <button class="btn primary" id="sRun">開始模擬</button>
         <button class="btn" id="sStop" hidden>停止</button>
         <span class="muted small" id="sMsg" role="status"></span>

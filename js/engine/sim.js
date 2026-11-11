@@ -836,15 +836,79 @@ function simGreedyPick(ctx, st, s) {
 function simReplace(st, picks, rnd) {
   [0, 1].forEach(s => { if (picks[s].t === 'sw') simSwitch(st, s, picks[s].i, rnd); });
 }
-// 從局面 st 用簡單規則雙方打下去（最多再 SIM_LOOK 回合），回傳 simValue
-function simRollout(ctx, st) {
+// 從局面 st 用簡單規則雙方打下去（最多再 SIM_LOOK 回合），回傳 simValue；rnd＝照亂數打（樹搜尋用），沒給用期望值
+function simRollout(ctx, st, rnd = null) {
   const end = st.turn + SIM_LOOK, pick = (c, s) => simGreedyPick(ctx, c, s);
   while (!simOver(st) && st.turn < end) {
-    if (simNeed(st, 0) || simNeed(st, 1)) simReplace(st, [0, 1].map(s => simNeed(st, s) ? { t: 'sw', i: pick(st, s) } : { t: 'pass' }), null);
+    if (simNeed(st, 0) || simNeed(st, 1)) simReplace(st, [0, 1].map(s => simNeed(st, s) ? { t: 'sw', i: pick(st, s) } : { t: 'pass' }), rnd);
     if (simOver(st)) break;
-    simTurn(ctx, st, [0, 1].map(s => simGreedyAct(ctx, st, s)), null, 0, pick);
+    simTurn(ctx, st, [0, 1].map(s => simGreedyAct(ctx, st, s)), rnd, 0, pick);
   }
   return simValue(st);
+}
+// 這個階段一方能做的：phase 'turn' 是 simOpts；'replace'（有人倒下要補位）是倒下那方的後排，另一方 pass
+const simPhaseOpts = (ctx, st, s, phase) => phase === 'turn' ? simOpts(ctx, st, s) : simNeed(st, s) ? simBench(st, s).map(i => ({ t: 'sw', i })) : [{ t: 'pass' }];
+// ---------- 樹搜尋（往下打到分出勝負） ----------
+// 雙方同時出招的蒙地卡羅樹搜尋（decoupled UCT、開放迴圈）：每次從目前局面複製一份沿樹往下，每一層雙方各自用 UCB1 挑選擇
+// （平均分數 + SIM_UCB_C × √(ln 這層次數 ÷ 這個選擇的次數)，沒試過的先試），照亂數打這一回合（或補位）；走到樹上沒有的局面就新增一層，
+// 再用簡單規則以期望值打到分出勝負（最多 SIM_LOOK 回合；用亂數打雜訊太大），把分數（simValue 換成 0～1；對手用 1 減它）加回路上每一層雙方選的選擇。
+// 傷害亂數、急所、麻痺等在樹裡每次重抽，同一層對應的局面每次可能不同（開放迴圈），所以每層只記「選擇 → 次數、總分」，能選的選擇每次重算。
+// iters 次後用根節點上「我方出 X、對手出 Y」各組合的平均分數解混合策略（simMix），雙方照比例抽一種（沒給 rnd 取機率最高的）。
+// 比較（2026-11-11，隨機兩隊各打兩場交換決策方式）：照被試次數決定出招、或打到底也用亂數時，和往前算一回合差不多強；
+// 改成上面的做法後，每步 200／400／800 次對往前算一回合的勝率 57.5%（80 場）／60%（100 場）／68.7%（99 場分出勝負）
+const SIM_UCB_C = 0.7;
+const simKey = o => o.t === 'mv' ? o.k : o.t === 'sw' ? 'sw' + o.i : o.t;
+const simNode = () => ({ n: 0, s: [new Map(), new Map()], ch: new Map(), j: new Map() });
+function simUcb(nd, s, opts) {
+  const ln = Math.log(Math.max(1, nd.n));
+  let best = opts[0], bv = -Infinity;
+  for (const o of opts) {
+    const e = nd.s[s].get(simKey(o));
+    if (!e) return o;
+    const v = e.w / e.n + SIM_UCB_C * Math.sqrt(ln / e.n);
+    if (v > bv) { bv = v; best = o; }
+  }
+  return best;
+}
+// 樹搜尋一步：回傳 [我方, 對手] 的選擇；stats＝要不要附上 out.stats＝{ opts 雙方的選擇, v 各組合的平均分數（0～1，我方角度）、
+// n 各組合試的次數, p 雙方的出招比例 }（給畫面、統計用）
+function simSearch(ctx, st, phase, iters, rnd, stats) {
+  const opts = [0, 1].map(s => simPhaseOpts(ctx, st, s, phase));
+  if (opts[0].length === 1 && opts[1].length === 1) return [opts[0][0], opts[1][0]];
+  const root = simNode(), rr = rnd || Math.random, pick = (c, s) => simGreedyPick(ctx, c, s);
+  for (let it = 0; it < iters; it++) {
+    const c = simClone(st), path = [];
+    let nd = root, ph = phase;
+    while (!simOver(c) && c.turn < SIM_MAX_TURN) {
+      const acts = [0, 1].map(s => simUcb(nd, s, simPhaseOpts(ctx, c, s, ph))), ka = simKey(acts[0]), kb = simKey(acts[1]);
+      path.push([nd, ka, kb]);
+      if (ph === 'turn') simTurn(ctx, c, acts, rr, 0, pick); else simReplace(c, acts, rr);
+      ph = simNeed(c, 0) || simNeed(c, 1) ? 'replace' : 'turn';
+      const next = nd.ch.get(ka + '|' + kb);
+      if (!next) { nd.ch.set(ka + '|' + kb, simNode()); break; }
+      nd = next;
+    }
+    const r = (simRollout(ctx, c, null) + 1.5) / 3;
+    for (const [n, ka, kb] of path) {
+      n.n++;
+      [[0, ka, r], [1, kb, 1 - r]].forEach(([s, k, w]) => { const e = n.s[s].get(k); if (e) { e.n++; e.w += w; } else n.s[s].set(k, { n: 1, w }); });
+    }
+    if (path.length) { const jk = path[0][1] + '|' + path[0][2], e = root.j.get(jk); if (e) { e.n++; e.w += r; } else root.j.set(jk, { n: 1, w: r }); }
+  }
+  // 根節點各組合的平均分數（沒試過的組合用雙方各自的平均補：我方那招的平均與 1 減對手那招的平均取中間）
+  const mean = (s, o) => { const e = root.s[s].get(simKey(o)); return e ? e.w / e.n : 0.5; };
+  const cell = (a, b) => root.j.get(simKey(a) + '|' + simKey(b));
+  const v = opts[0].map(a => opts[1].map(b => { const e = cell(a, b); return e ? e.w / e.n : (mean(0, a) + 1 - mean(1, b)) / 2; }));
+  const p = simMix(v), out = [0, 1].map(s => opts[s][simDraw(p[s], rnd)]);
+  if (stats) out.stats = { opts, v, n: opts[0].map(a => opts[1].map(b => cell(a, b)?.n || 0)), p };
+  return out;
+}
+// 照機率 p 抽一個索引（沒給 rnd 取機率最高的）
+function simDraw(p, rnd) {
+  if (!rnd) return p.indexOf(Math.max(...p));
+  let x = rnd();
+  const i = p.findIndex(q => (x -= q) < 0);
+  return i < 0 ? p.findLastIndex(q => q > 0) : i;
 }
 // ---------- 往前算一回合互相防 ----------
 // 兩人同時出招、一方得分＝另一方失分的賽局 v（我方是列、要大；對手是欄、要小）的混合策略：雙方各自「對手怎麼應對都最不吃虧」的出法，
@@ -871,8 +935,7 @@ function simMix(v) {
 // phase 'replace'：倒下的那方每種補位（另一方 pass，兩方都倒就兩方都選）同樣試算。
 // 雙方照 simMix 的比例抽一種（rnd 抽；沒給 rnd 取機率最高的）。回傳 [我方, 對手] 的選擇
 function simDecide(ctx, st, phase, rnd) {
-  const optsOf = s => phase === 'turn' ? simOpts(ctx, st, s) : simNeed(st, s) ? simBench(st, s).map(i => ({ t: 'sw', i })) : [{ t: 'pass' }];
-  const A = optsOf(0), B = optsOf(1);
+  const A = simPhaseOpts(ctx, st, 0, phase), B = simPhaseOpts(ctx, st, 1, phase);
   if (A.length === 1 && B.length === 1) return [A[0], B[0]];
   const pick = (c, s) => simGreedyPick(ctx, c, s);
   const run = (acts, tie) => {
@@ -884,26 +947,23 @@ function simDecide(ctx, st, phase, rnd) {
     const [x, tied] = run([a, b], 0);
     return tied ? (x + run([a, b], 1)[0]) / 2 : x;
   }));
-  const draw = p => {
-    if (!rnd) return p.indexOf(Math.max(...p));
-    let x = rnd();
-    const i = p.findIndex(q => (x -= q) < 0);
-    return i < 0 ? p.findLastIndex(q => q > 0) : i;
-  };
   const [pa, pb] = simMix(v);
-  return [A[draw(pa)], B[draw(pb)]];
+  return [A[simDraw(pa, rnd)], B[simDraw(pb, rnd)]];
 }
 // 打一場：sides 是 simSides 的結果（帶出場的隻會複製一份，不改到 sides）；rnd 亂數；log＝要不要逐回合紀錄。
-// 雙方每回合、每次補位都用 simDecide（照比例用 rnd 抽）；打完換人、被吹走換上誰用簡單規則（simGreedyPick）。
+// opt：{ algo 決策方式 'tree' 樹搜尋（simSearch，iters 次）／'ply1' 往前算一回合（simDecide），可以給 [我方, 對手] 各用一種；預設 'ply1' }。
+// 雙方每回合、每次補位都照決策方式選（照比例用 rnd 抽）；打完換人、被吹走換上誰用簡單規則（simGreedyPick）。
 // 回傳 { res 1 我方贏／-1 輸（同時全倒看 simWinner）／0 平手（打滿 SIM_MAX_TURN 回合）, turns, mons [我方, 對手] 帶出場的（kos、hp、max、out）, log }
-function simPlay(ctx, sides, rnd, log) {
+function simPlay(ctx, sides, rnd, log, opt = {}) {
   const st = { sd: sides.map(x => simSide0(x.mons.map(simCloneMon))), turn: 0, fut: [], idle: 0, log: log ? [] : null };
   st.sd.forEach(x => Object.assign(x.mons[0], { in: 0, out: true }));
   if (st.log) st.log.push(`先發：我方${MON[simAct(st, 0).key].zh}、對手${MON[simAct(st, 1).key].zh}`);
-  const pick = (c, s) => simGreedyPick(ctx, c, s);
+  const pick = (c, s) => simGreedyPick(ctx, c, s), algo = [].concat(opt.algo || 'ply1');
+  const by = (a, phase) => a === 'tree' ? simSearch(ctx, st, phase, opt.iters || 200, rnd) : simDecide(ctx, st, phase, rnd);
+  const decide = phase => algo.length < 2 || algo[0] === algo[1] ? by(algo[0], phase) : [by(algo[0], phase)[0], by(algo[1], phase)[1]];
   while (!simOver(st) && st.turn < SIM_MAX_TURN) {
-    simTurn(ctx, st, simDecide(ctx, st, 'turn', rnd), rnd, 0, pick);
-    if (!simOver(st) && (simNeed(st, 0) || simNeed(st, 1))) simReplace(st, simDecide(ctx, st, 'replace', rnd), rnd);
+    simTurn(ctx, st, decide('turn'), rnd, 0, pick);
+    if (!simOver(st) && (simNeed(st, 0) || simNeed(st, 1))) simReplace(st, decide('replace'), rnd);
   }
   const w = simWinner(st), res = w === 0 ? 1 : w === 1 ? -1 : 0, both = simDead(st, 0) && simDead(st, 1);
   if (st.log) st.log.push((both ? `雙方同時全倒，最後倒下的是${w ? '對手' : '我方'}，` : '') + (res > 0 ? '我方贏' : res < 0 ? '我方輸' : `打滿 ${SIM_MAX_TURN} 回合，平手`));

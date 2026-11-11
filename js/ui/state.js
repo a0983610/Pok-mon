@@ -12,7 +12,8 @@
 //   bi＝對手各格標的道具（沒標的空白、用預設，沒有道具寫 -）、bb＝對手各格選的特性、bx／by＝我方／對手各格選的型態、bw＝天氣、bf＝場地、br=1（戲法空間）、bg＝有順風的一方（me.opp）、
 //   bk＝我方這場帶的隊伍格子（. 分隔；照出戰選角時不寫，全部拿掉寫 -）、bv＝對手出場過的格子（. 分隔）、
 //   bu＝對手各格用過的招式（招式 key 用 + 接）、bz＝對手各格改過的能力點數與性格（「HP+攻擊+防禦+特攻+特防+速度.↑+↓」，沒改的那半空白）
-//   模擬對戰：sm=opp（對上出戰選角的對手；隨機熱門隊不寫）、sr＝隨機隊從排名前幾名挑（30 不寫）、sn＝場數（100 不寫）
+//   模擬對戰：sm=opp（對上出戰選角的對手；隨機熱門隊不寫）、sr＝隨機隊從排名前幾名挑（30 不寫）、sn＝場數（100 不寫）、
+//   sa＝決策方式 fast／fine（標準 std 不寫）
 const STATE_KEY = 'pkmn-champions-state';
 // 各格的值用逗號接起來，尾端空白的不寫
 const joinTrim = a => { const s = a.slice(); while (s.length && !s[s.length - 1]) s.pop(); return s.join(','); };
@@ -71,6 +72,7 @@ function stateQuery() {
   if (sim.mode !== SIM_MODES[0]) q.push('sm=' + sim.mode);
   if (sim.range !== SIM_RANGES[0]) q.push('sr=' + sim.range);
   if (sim.n !== SIM_NS[0]) q.push('sn=' + sim.n);
+  if (sim.algo !== 'std') q.push('sa=' + sim.algo);
   return q.join('&');
 }
 const stateHash = () => { const q = stateQuery(); return '#' + curTab + (q ? '?' + q : ''); };
@@ -180,6 +182,7 @@ function loadState(q) {
   sim.mode = SIM_MODES.includes(kv.sm) ? kv.sm : SIM_MODES[0];
   sim.range = SIM_RANGES.includes(+kv.sr) ? +kv.sr : SIM_RANGES[0];
   sim.n = SIM_NS.includes(+kv.sn) ? +kv.sn : SIM_NS[0];
+  sim.algo = SIM_ALGOS.some(a => a.id === kv.sa) ? kv.sa : 'std';
 }
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-copy]');
