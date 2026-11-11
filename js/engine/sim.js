@@ -1,7 +1,7 @@
 // 計算引擎：資料與純邏輯，不碰 DOM（畫面在 js/ui/）
 // ---------- 對戰模擬（單打：6 選 3，雙方每回合同時出招） ----------
 // 算攻擊招式的傷害與招式本身附帶的效果（使用限制、自己的能力變化、反作用力與吸血、打完換人），
-// 加上輔助招（強化、守住、回復、異常狀態、撒菱、擾亂，見 SIM_SUP）與相關的道具、特性、回合結束效果。
+// 加上輔助招（強化、守住、回復、異常狀態、撒菱、擾亂，見 SIM_SUP）與相關的道具、特性、回合結束效果，以及 PP（照 OP.GG 冠軍版的 PP，用完只能掙扎）。
 // 不算：攻擊招式的機率性追加效果（畏縮、灼傷、降能力…）、天氣場地、出場特性（威嚇等）、命中率（當全中）。
 // 各表的資料來源寫在表的上方；Showdown＝Pokémon Showdown 的 data/moves.ts、conditions.ts、items.ts、abilities.ts、
 // sim/battle-actions.ts、sim/battle.ts，冠軍版改過的照 data/mods/champions/（conditions.ts、moves.ts、abilities.ts）。
@@ -97,11 +97,27 @@ const SIM_ST0 = () => ({ atk: 0, def: 0, spa: 0, spd: 0, spe: 0 });
 // item 道具（沒給照 battler）、s 哪一方。能力點數、性格、特性同 battler；其餘是場上狀態：hp、item（會被打掉、用掉）、st 能力變化、
 // lock 講究圍巾鎖住的招式、chg 蓄力中的招式、hide 蓄力時打不到、rech 下一回合要休息、in 第幾回合上場（擊掌奇襲用）、kos 打倒幾隻、
 // out 有沒有上過場、status 異常狀態（tox 劇毒累積、slp 還要睡幾次）、v 換下場就清掉的狀態（sub 替身 HP、taunt、enc／encK 再來一次、seed、
-// curse、yawn、focus、charge、trap、prot／endure／stall／protUsed 守住類）、last 上一次用的招式（再來一次用）
+// curse、yawn、focus、charge、trap、prot／endure／stall／protUsed 守住類）、last 上一次用的招式（再來一次用）、pp 各招剩下的 PP（OP.GG 冠軍版的 PP）
 function simMon(key, set, item, s, fmt) {
   const b = battler(key, fmt, set), use = set?.moves.some(Boolean) ? set : defaultSet(key, fmt), max = hpOf(b);
-  return { id: `${s}:${key}`, key, b, moves: [...new Set((use?.moves || []).filter(k => k && MOVES[k] && (canCalc(k) || SIM_SUP[k])))], max, hp: max,
-    item: item ?? b.item, st: SIM_ST0(), lock: '', chg: '', hide: false, rech: false, in: -1, kos: 0, out: false, status: '', tox: 0, slp: 0, v: {}, last: '' };
+  const moves = [...new Set((use?.moves || []).filter(k => k && MOVES[k] && (canCalc(k) || SIM_SUP[k])))];
+  return { id: `${s}:${key}`, key, b, moves, max, hp: max, item: item ?? b.item, st: SIM_ST0(), lock: '', chg: '', hide: false, rech: false, in: -1, kos: 0,
+    out: false, status: '', tox: 0, slp: 0, v: {}, last: '', pp: Object.fromEntries(moves.map(k => [k, MOVES[k][5] ?? Infinity])) };
+}
+// 掙扎（招式都沒 PP、或剩下的都不能選時；Showdown struggle）：威力 50 的物理接觸招式，沒有屬性（onModifyMove 改成 ???：對誰都 ×1、沒有本系），
+// 自己扣最大 HP 的 1/4（四捨五入，struggleRecoil 是 directDamage，魔法防守、堅硬腦袋擋不了）。不在 OP.GG 資料裡，傷害自己算：
+// 基礎傷害 ⌊⌊22 × 50 × 攻擊 ÷ 防禦⌋ ÷ 50⌋ + 2（Lv50）→ 亂數 85～100% → 灼傷減半（毅力不減）→ 反射壁／極光幕 ×½；道具、特性的修正不算、不會急所
+const SIM_STRUGGLE = 'struggle';
+const simCat = k => k === SIM_STRUGGLE ? 'physical' : MOVES[k][2];
+const simMoveZh = k => k === SIM_STRUGGLE ? '掙扎' : MOVES[k][0];
+function simStruggleDmg(st, A, D, rnd) {
+  const [asp, anat] = invAt(A.b, 1, A.b.atkInv), [dsp, dnat] = invAt(D.b, 2, D.b.defInv);
+  const atk = stageStat(statOf(MON[A.key].bs[1], asp, 1, anat), A.st.atk), def = stageStat(statOf(MON[D.key].bs[2], dsp, 2, dnat), D.st.def);
+  const base = Math.floor(Math.floor(22 * 50 * atk / def) / 50) + 2, scr = st.sd[+D.id[0]].scr;
+  let d = Math.floor(base * (rnd ? 85 + Math.floor(rnd() * 16) : 92.5) / 100);
+  if (A.status === 'brn' && A.b.ab !== 'guts') d = Math.floor(d / 2);
+  if (scr.reflect || scr['aurora-veil']) d = Math.floor(d / 2);
+  return Math.max(1, d);
 }
 // 照 bringPlan 的結果 plan 帶出場（mems 是傳給 bringPlan 的隊員 { key, set, item }）：第 1 名組合、先發排第一；
 // 一場只能超級進化一隻，不進化的以原型上場、沒有道具（同出戰選角）
@@ -144,14 +160,23 @@ const simAct = (st, s) => st.sd[s].mons[st.sd[s].act];
 const simBench = (st, s) => st.sd[s].mons.map((m, i) => m.hp > 0 && i !== st.sd[s].act ? i : -1).filter(i => i >= 0);
 const simDead = (st, s) => st.sd[s].mons.every(m => m.hp <= 0);
 const simOver = st => simDead(st, 0) || simDead(st, 1);
+// 倒下的順序（ft，同時全倒時判勝負用）：HP 變 0 的地方都要呼叫
+const simFaint = (st, M) => { if (M.hp <= 0 && !M.ft) M.ft = st.seq = (st.seq || 0) + 1; };
+// 贏的一方（0／1；還沒分出勝負是 -1）：雙方同時全倒時最後倒下的那方贏（第五世代起，Showdown checkWin 的 faintData.target.side），
+// 例如打倒對手最後一隻後被反作用力打倒的算贏、大爆炸同歸於盡的算輸（使用者先倒下）
+function simWinner(st) {
+  const d0 = simDead(st, 0), d1 = simDead(st, 1);
+  if (d0 && d1) { const last = st.sd.map(x => Math.max(0, ...x.mons.map(m => m.ft || 0))); return last[0] > last[1] ? 0 : 1; }
+  return d1 ? 0 : d0 ? 1 : -1;
+}
 const simNeed = (st, s) => simAct(st, s).hp <= 0 && simBench(st, s).length > 0;
 const simName = (st, s, M = simAct(st, s)) => `${s ? '對手' : '我方'}${MON[M.key].zh}`;
 const simPct = (v, max) => Math.round(Math.max(0, v) / max * 100);
 const simLog = (st, t) => { if (st.log) st.log.push('　' + t); };
 const simSide0 = mons => ({ act: 0, mons, haz: { sr: 0, spikes: 0, tspikes: 0, web: 0 }, scr: {}, wish: null, hwish: false });
-const simCloneMon = m => ({ ...m, st: { ...m.st }, v: { ...m.v } });
+const simCloneMon = m => ({ ...m, st: { ...m.st }, v: { ...m.v }, pp: { ...m.pp } });
 const simClone = st => ({ sd: st.sd.map(x => ({ ...x, mons: x.mons.map(simCloneMon), haz: { ...x.haz }, scr: { ...x.scr }, wish: x.wish && { ...x.wish } })),
-  turn: st.turn, fut: st.fut.map(f => ({ ...f })), idle: st.idle, log: null });
+  turn: st.turn, fut: st.fut.map(f => ({ ...f })), idle: st.idle, seq: st.seq, log: null });
 const simTypes = M => MON[M.key].types;
 // 在地面上（撒菱、毒菱、黏黏網用）：不是飛行屬性、沒有飄浮、沒帶氣球（Showdown isGrounded）
 const simGround = M => !simTypes(M).includes('flying') && M.b.ab !== 'levitate' && M.item !== 'air-balloon';
@@ -183,6 +208,7 @@ const simRolls = (r, D, k) => k === 'knock-off' && !D.item ? r.later : r.rolls;
 // 期望傷害（各下的 16 個亂數取平均加總；氣勢披帶、結實撐住時最多打到剩 1）；輔助招是 0
 function simExp(ctx, st, A, D, k) {
   if (SIM_SUP[k]) return 0;
+  if (k === SIM_STRUGGLE) return simStruggleDmg(st, A, D, null);
   const r = simCalc(ctx, st, A, D, k, false);
   if (!r.eff) return 0;
   const e = simRolls(r, D, k).reduce((t, xs) => t + xs.reduce((a, x) => a + x, 0) / 16, 0);
@@ -202,6 +228,7 @@ function simHurt(st, s, M, v, why, magic = true) {
   if (M.hp <= 0 || v <= 0 || (magic && M.b.ab === 'magic-guard')) return 0;
   const d = Math.min(M.hp, Math.max(1, Math.floor(v)));
   M.hp -= d;
+  simFaint(st, M);
   simLog(st, `${simName(st, s, M)}${why} −${simPct(d, M.max)}%（剩 ${simPct(M.hp, M.max)}%）${M.hp <= 0 ? '，倒下' : ''}`);
   simSitrus(st, s, M);
   return d;
@@ -321,7 +348,7 @@ function simFutile(st, s, k) {
     case 'yawn': return !simCanStatus(T, 'slp', M) || !!T.v.yawn;
     case 'hazard': return tSide.haz[x.h] >= x.max;
     case 'defog': return bare && !Object.keys(tSide.scr).length;
-    case 'encore': return !T.last || !!T.v.enc || T.last === 'encore' || !T.moves.includes(T.last);
+    case 'encore': return !T.last || !!T.v.enc || T.last === 'encore' || !T.moves.includes(T.last) || !(T.pp[T.last] > 0);
     case 'taunt': return !!T.v.taunt || tb === 'oblivious';
     case 'subst': return !!M.v.sub || M.hp <= M.max / 4;
     case 'screen': return !!side.scr[k] || (k === 'aurora-veil' && M.b.ab !== 'snow-warning');
@@ -332,20 +359,23 @@ function simFutile(st, s, k) {
     default: return false;
   }
 }
-// 一方這回合能做的：招式（再來一次鎖住的那招；講究圍巾鎖住的那招；擊掌奇襲、迎頭一擊要上場後第一回合；被挑釁不能用輔助招；
-// 一定失敗的輔助招不列，見 simFutile）、換人（後排還站著的；背水一戰不能換）。要休息的、蓄力中的只能照做、不能換人；
-// 招式都不能用又不能換人時是 none（什麼都不做）。
+// 一方這回合能做的：招式（再來一次鎖住的那招；講究圍巾鎖住的那招；PP 用完的、被挑釁時的輔助招不能選；
+// 擊掌奇襲、迎頭一擊要上場後第一回合；一定失敗的輔助招不列，見 simFutile）、換人（後排還站著的；背水一戰不能換）。
+// 能選的招式（有 PP、沒被挑釁擋）一招都沒有時只能掙扎（或換人）；要休息的、蓄力中的只能照做、不能換人；
+// 招式都會失敗又不能換人時是 none（什麼都不做）。
 // 連續 SIM_IDLE 回合雙方都沒扣血也沒換人時，打不到對手場上那隻的攻擊招式不能選（不然雙方都出無效招式會原地空轉）；只剩這種招式又不能換人就照舊
 const SIM_IDLE = 2;
 function simOpts(ctx, st, s) {
   const M = simAct(st, s), T = simAct(st, 1 - s);
   if (M.rech) return [{ t: 'rech' }];
   if (M.chg) return [{ t: 'mv', k: M.chg }];
-  const ks = M.v.enc && M.moves.includes(M.v.encK) ? [M.v.encK] : M.lock ? [M.lock] : M.moves;
-  let mv = ks.filter(k => (!SIM_FIRST.has(k) || M.in === st.turn) && !(M.v.taunt && SIM_SUP[k]) && !simFutile(st, s, k)).map(k => ({ t: 'mv', k }));
+  const ks = M.v.enc && M.moves.includes(M.v.encK) && M.pp[M.v.encK] > 0 ? [M.v.encK] : M.lock ? [M.lock] : M.moves;
+  const can = ks.filter(k => M.pp[k] > 0 && !(M.v.taunt && SIM_SUP[k]));
+  let mv = !can.length ? [{ t: 'mv', k: SIM_STRUGGLE }]
+    : can.filter(k => (!SIM_FIRST.has(k) || M.in === st.turn) && !simFutile(st, s, k)).map(k => ({ t: 'mv', k }));
   const sw = M.v.trap ? [] : simBench(st, s).map(i => ({ t: 'sw', i }));
   if (st.idle >= SIM_IDLE) {
-    const hit = mv.filter(o => SIM_SUP[o.k] || simCalc(ctx, st, M, T, o.k, false).eff);
+    const hit = mv.filter(o => SIM_SUP[o.k] || o.k === SIM_STRUGGLE || simCalc(ctx, st, M, T, o.k, false).eff);
     if (hit.length || sw.length) mv = hit;
   }
   const all = [...mv, ...sw];
@@ -420,6 +450,7 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
       if (!simBench(st, s).length) return fail('沒有可以換上的');
       say('：自己倒下，換上來的會回滿');
       M.hp = 0;
+      simFaint(st, M);
       side.hwish = true;
       return;
     case 'split': {
@@ -506,13 +537,44 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
       say('：自己倒下');
       simBoost(st, 1 - s, T, x.d, s);
       M.hp = 0;
+      simFaint(st, M);
       return;
   }
+}
+// 被守住類擋下的接觸招式：王者盾牌攻擊 −1、尖刺防守扣 1/8、碉堡中毒（Showdown kingsshield／spikyshield／banefulbunker）
+function simProtHit(st, s, M, T, rnd) {
+  if (T.v.prot === 'kings') simBoost(st, s, M, { atk: -1 }, 1 - s);
+  if (T.v.prot === 'spiky') simHurt(st, s, M, M.max / 8, '被尖刺防守刺傷');
+  if (T.v.prot === 'bunker') simStatus(st, s, M, 'psn', rnd, T);
+}
+// 掙扎（傷害見 simStruggleDmg）：接觸招式，會被守住類擋、打在替身上、被氣勢披帶／結實／挺住撐住，接觸懲罰照算；最後自己扣 1/4
+function simStruggle(st, s, M, T, rnd) {
+  const me = simName(st, s), tn = simName(st, 1 - s);
+  if (T.hp <= 0) simLog(st, `${me}用掙扎，但沒有目標`);
+  else if (T.hide) simLog(st, `${me}用掙扎，但打不到`);
+  else if (T.v.prot) { simLog(st, `${me}用掙扎，被${tn}擋下`); simProtHit(st, s, M, T, rnd); }
+  else if (T.v.sub > 0) {
+    T.v.sub -= Math.min(simStruggleDmg(st, M, T, rnd), T.v.sub);
+    simLog(st, `${me}用掙扎 → 打在${tn}的替身上${T.v.sub <= 0 ? '，替身消失了' : ''}`);
+    if (T.v.sub <= 0) delete T.v.sub;
+  } else {
+    let d = simStruggleDmg(st, M, T, rnd), held = '';
+    if (d >= T.hp && T.hp >= T.max && (T.item === 'focus-sash' || T.b.ab === 'sturdy')) { d = T.hp - 1; held = T.item === 'focus-sash' ? ITEMS[T.item][0] : abilZh('sturdy'); if (T.item === 'focus-sash') T.item = ''; }
+    else if (T.v.endure && d >= T.hp) { d = T.hp - 1; held = '挺住'; }
+    T.hp -= Math.min(d, T.hp);
+    simFaint(st, T);
+    simLog(st, `${me}用掙扎 → ${tn} −${simPct(d, T.max)}%（剩 ${simPct(T.hp, T.max)}%）${held ? `，靠${held}撐住` : ''}${T.hp <= 0 ? `，${tn}倒下` : ''}`);
+    if (T.hp <= 0) M.kos++;
+    if (T.item === 'rocky-helmet') simHurt(st, s, M, M.max / 6, '被凸凸頭盔刺傷');
+    if (T.b.ab === 'rough-skin') simHurt(st, s, M, M.max / 8, '被粗糙皮膚刺傷');
+    simSitrus(st, 1 - s, T);
+  }
+  simHurt(st, s, M, Math.round(M.max / 4), '受到掙扎的反作用力', false);
 }
 // s 這方的 M 用招式 k 打對手場上那隻；oa＝對手這回合的選擇、oWill＝對手這回合還會出招（突襲、快手還擊、守住類、再來一次看這個）；
 // rnd 亂數（null＝期望值：傷害取平均、不會急所、麻痺不會不能動）；pick(st, s) 打完換人、被吹走時換上誰
 function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
-  const M = simAct(st, s), me = simName(st, s), mz = MOVES[k][0];
+  const M = simAct(st, s), me = simName(st, s), mz = simMoveZh(k);
   if (M.status === 'slp') {
     M.slp -= M.b.ab === 'early-bird' ? 2 : 1;
     if (M.slp > 0) return simLog(st, `${me}睡著了`);
@@ -522,10 +584,17 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
   // 麻痺：冠軍版 1/8 不能動（mods/champions/conditions.ts）
   if (M.status === 'par' && rnd && rnd() < 1 / 8) return simLog(st, `${me}麻痺了，不能動`);
   if (M.v.taunt && SIM_SUP[k]) return simLog(st, `${me}被挑釁，不能用${mz}`);
+  const T = simAct(st, 1 - s), tn = simName(st, 1 - s);
   M.last = k;
+  if (k === SIM_STRUGGLE) return simStruggle(st, s, M, T, rnd);
+  // PP：出招就扣 1（失敗也扣；睡著、麻痺不能動、被挑釁擋下的不扣；蓄力招第二回合不扣）；對手特性壓迫感、而且這招是打對手的（攻擊招式、
+  // 打對手的輔助招、撒菱類）多扣 1（Showdown deductPP、pressure onDeductPP）
+  if (M.chg !== k) {
+    const foe = !SIM_SUP[k] || SIM_SUP[k].tgt || ['hazard', 'defog'].includes(SIM_SUP[k].kind);
+    M.pp[k] = Math.max(0, M.pp[k] - 1 - (foe && T.hp > 0 && T.b.ab === 'pressure' ? 1 : 0));
+  }
   if (M.item === 'choice-scarf' && !M.lock) M.lock = k;
   if (SIM_SUP[k]) return simSupport(st, s, k, oa, oWill, rnd, pick, false);
-  const T = simAct(st, 1 - s), tn = simName(st, 1 - s);
   if (SIM_CHARGE.has(k) && M.chg !== k) {
     Object.assign(M, { chg: k, hide: SIM_HIDE.has(k) });
     simLog(st, `${me}用${mz}：蓄力，下一回合才攻擊`);
@@ -534,25 +603,23 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
   }
   Object.assign(M, { chg: '', hide: false });
   const fail = why => simLog(st, `${me}用${mz}，但失敗了（${why}）`);
-  if (k === 'sucker-punch' && (!oWill || MOVES[oa.k][2] === 'status')) return fail('對手沒有要出攻擊招式');
-  if (k === 'upper-hand' && (!oWill || MOVES[oa.k][2] === 'status' || simPri(T, oa.k) <= 0)) return fail('對手沒有要出先制招式');
+  if (k === 'sucker-punch' && (!oWill || simCat(oa.k) === 'status')) return fail('對手沒有要出攻擊招式');
+  if (k === 'upper-hand' && (!oWill || simCat(oa.k) === 'status' || simPri(T, oa.k) <= 0)) return fail('對手沒有要出先制招式');
   if (k === 'future-sight') {
     if (st.fut.some(f => f.s === 1 - s)) return fail('已經在預知未來');
     st.fut.push({ s: 1 - s, t: 3, src: simCloneMon(M) });
     simLog(st, `${me}用${mz}：兩回合後打中`);
     return;
   }
-  if (SIM_BOOM.has(k)) M.hp = 0;
+  // 自爆類：先倒下才打（Showdown selfdestruct always 在出招前 faint），同時全倒時算對手最後倒下
+  if (SIM_BOOM.has(k)) { M.hp = 0; simFaint(st, M); }
   const contact = FLAG.contact.has(k) && M.b.ab !== 'long-reach';
   let dealt = -1;
   if (T.hp <= 0) fail('沒有目標');
   else if (T.hide) simLog(st, `${me}用${mz}，但打不到（${tn}${T.chg === 'dig' ? '在地底' : '消失了'}）`);
   else if (T.v.prot && k !== 'phantom-force' && k !== 'feint') {
     simLog(st, `${me}用${mz}，被${tn}擋下`);
-    // 守住類的接觸懲罰（Showdown kingsshield／spikyshield／banefulbunker）
-    if (contact && T.v.prot === 'kings') simBoost(st, s, M, { atk: -1 }, 1 - s);
-    if (contact && T.v.prot === 'spiky') simHurt(st, s, M, M.max / 8, '被尖刺防守刺傷');
-    if (contact && T.v.prot === 'bunker') simStatus(st, s, M, 'psn', rnd, T);
+    if (contact) simProtHit(st, s, M, T, rnd);
   } else {
     if (T.v.prot) { delete T.v.prot; simLog(st, `${me}的${mz}打破了守住`); }
     let r = simCalc(ctx, st, M, T, k, false);
@@ -576,6 +643,7 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
         } else if (T.v.endure && dmg >= T.hp) { dmg = T.hp - 1; held = '挺住'; }
         dealt = Math.min(dmg, T.hp);
         T.hp -= dealt;
+        simFaint(st, T);
         if (r.berry) T.item = '';
         if (k === 'knock-off' && T.item && !MON[T.key].base && T.b.ab !== 'sticky-hold' && M.hp > 0) T.item = '';
         simLog(st, `${me}用${mz}${r.crit ? '（急所）' : ''} → ${tn} −${simPct(dealt, T.max)}%（剩 ${simPct(T.hp, T.max)}%）`
@@ -626,6 +694,7 @@ function simEnd(ctx, st, rnd) {
     if (!r.eff) return;
     const d = Math.min(T.hp, r.rolls.reduce((t, xs) => t + (rnd ? xs[Math.floor(rnd() * 16)] : xs.reduce((a, x) => a + x, 0) / 16), 0));
     T.hp -= d;
+    simFaint(st, T);
     simLog(st, `預知未來打中${simName(st, f.s)} −${simPct(d, T.max)}%（剩 ${simPct(T.hp, T.max)}%）${T.hp <= 0 ? '，倒下' : ''}`);
     simSitrus(st, f.s, T);
   });
@@ -654,7 +723,7 @@ function simEnd(ctx, st, rnd) {
   each((M, s) => { if (M.v.curse) simHurt(st, s, M, M.max / 4, '受到詛咒'); });
   each((M, s) => {
     if (M.v.taunt && !--M.v.taunt) delete M.v.taunt;
-    if (M.v.enc && !--M.v.enc) { delete M.v.enc; delete M.v.encK; }
+    if (M.v.enc && (!--M.v.enc || !(M.pp[M.v.encK] > 0))) { delete M.v.enc; delete M.v.encK; }
     if (M.v.yawn && !--M.v.yawn) { delete M.v.yawn; simStatus(st, s, M, 'slp', rnd, null); }
   });
   st.sd.forEach(side => Object.keys(side.scr).forEach(w => { if (!--side.scr[w]) delete side.scr[w]; }));
@@ -696,11 +765,11 @@ function simTurn(ctx, st, acts0, rnd, tie, pick) {
   st.idle = was === snap() ? (st.idle || 0) + 1 : 0;
   return tied;
 }
-// 局面對我方（第 0 方）的分數：一方全倒＝±1，再加上贏的一方剩下 HP 比例的一半；雙方同時全倒或還沒分出勝負＝雙方剩下 HP 比例差的一半
+// 局面對我方（第 0 方）的分數：分出勝負（simWinner）＝±1，再加上贏的一方剩下 HP 比例的一半；還沒分出勝負＝雙方剩下 HP 比例差的一半
 function simValue(st) {
   const frac = s => st.sd[s].mons.reduce((t, m) => t + Math.max(0, m.hp) / m.max, 0) / st.sd[s].mons.length;
-  const [a, b] = [frac(0), frac(1)], d0 = simDead(st, 0), d1 = simDead(st, 1);
-  return d1 && !d0 ? 1 + a / 2 : d0 && !d1 ? -1 - b / 2 : (a - b) / 2;
+  const [a, b] = [frac(0), frac(1)], w = simWinner(st);
+  return w === 0 ? 1 + a / 2 : w === 1 ? -1 - b / 2 : (a - b) / 2;
 }
 // ---------- 簡單規則（往前算之後的局面用） ----------
 // 出招：攻擊招式看期望傷害（打不倒時佔對方最大 HP 的比例），打得倒的再加 1、用先制打得倒的再加 0.5；要蓄力、要休息的打不倒時只算一半；
@@ -826,7 +895,7 @@ function simDecide(ctx, st, phase, rnd) {
 }
 // 打一場：sides 是 simSides 的結果（帶出場的隻會複製一份，不改到 sides）；rnd 亂數；log＝要不要逐回合紀錄。
 // 雙方每回合、每次補位都用 simDecide（照比例用 rnd 抽）；打完換人、被吹走換上誰用簡單規則（simGreedyPick）。
-// 回傳 { res 1 我方贏／-1 輸／0 平手（同時全倒或打滿 SIM_MAX_TURN 回合）, turns, mons [我方, 對手] 帶出場的（kos、hp、max、out）, log }
+// 回傳 { res 1 我方贏／-1 輸（同時全倒看 simWinner）／0 平手（打滿 SIM_MAX_TURN 回合）, turns, mons [我方, 對手] 帶出場的（kos、hp、max、out）, log }
 function simPlay(ctx, sides, rnd, log) {
   const st = { sd: sides.map(x => simSide0(x.mons.map(simCloneMon))), turn: 0, fut: [], idle: 0, log: log ? [] : null };
   st.sd.forEach(x => Object.assign(x.mons[0], { in: 0, out: true }));
@@ -836,7 +905,7 @@ function simPlay(ctx, sides, rnd, log) {
     simTurn(ctx, st, simDecide(ctx, st, 'turn', rnd), rnd, 0, pick);
     if (!simOver(st) && (simNeed(st, 0) || simNeed(st, 1))) simReplace(st, simDecide(ctx, st, 'replace', rnd), rnd);
   }
-  const d0 = simDead(st, 0), d1 = simDead(st, 1), res = d1 && !d0 ? 1 : d0 && !d1 ? -1 : 0;
-  if (st.log) st.log.push(res > 0 ? '我方贏' : res < 0 ? '我方輸' : d0 ? '雙方同時全倒，平手' : `打滿 ${SIM_MAX_TURN} 回合，平手`);
+  const w = simWinner(st), res = w === 0 ? 1 : w === 1 ? -1 : 0, both = simDead(st, 0) && simDead(st, 1);
+  if (st.log) st.log.push((both ? `雙方同時全倒，最後倒下的是${w ? '對手' : '我方'}，` : '') + (res > 0 ? '我方贏' : res < 0 ? '我方輸' : `打滿 ${SIM_MAX_TURN} 回合，平手`));
   return { res, turns: st.turn, mons: st.sd.map(x => x.mons), log: st.log };
 }

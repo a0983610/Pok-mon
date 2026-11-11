@@ -1,6 +1,7 @@
 # 從 OP.GG 寶可夢冠軍圖鑑頁擷取寶可夢名單（屬性、單打／雙打排名、超級進化原型），
 # 再逐隻抓有排名的寶可夢詳細頁，取單打／雙打的常用招式、特性、道具使用率，隊友、勝於、敗於名單，能力點數與性格的使用率，
-# 以及招式／特性／道具的中文名與效果，
+# 以及招式／特性／道具的中文名與效果（招式另存 PP、命中率、先制、範圍、追加效果、連續攻擊次數、招式標記等），
+# 和每隻可學的招式與可能的特性（LEARN；沒人常用的招式／特性另存 LEARN_MOVES／LEARN_ABILS），
 # 整個檔重寫到 index.html 旁邊的 mons-data.js。超級進化沒有獨立統計，網頁端沿用原型的；
 # 超級進化的特性是固定的，名單頁就有，另外存在名單裡。
 # 種族值不太會變，另外寫到 index.html 旁邊的 base-stats.js（不帶日期，資料沒變就不會有 diff）。
@@ -82,12 +83,39 @@ def clean(s):
 
 
 def detail(key):
-    # 一隻寶可夢詳細頁：單打／雙打統計（沒有統計時是 null）、這頁用到的特性、道具與性格對照，以及全部招式的字典
+    # 一隻寶可夢詳細頁：單打／雙打統計（沒有統計時是 null）、這頁用到的特性、道具與性格對照、全部招式的字典，
+    # 以及這隻的資料（pokemon：可學招式 moves、禁用招式 bannedMoves、可能的特性 abilities 等；沒有的話是 {}）
     txt = fetch(URL + '/' + key, rsc=True)
     det = {f: grab(txt, f + 'Detail', '{') if '"%sDetail":{' % f in txt else None for f in FMTS}
     lk = grab(txt, 'lookupData', '{') if '"lookupData":{' in txt else {}
     i = txt.index('"moves":[{"id":1,"key":"pound"')
-    return det, lk.get('abilities', []), lk.get('items', []), lk.get('natures', []), grab(txt[i:], 'moves', '[')
+    j = txt.find('"pokemon":{"id":')
+    mon = grab(txt[j:], 'pokemon', '{') if j >= 0 else {}
+    return det, lk.get('abilities', []), lk.get('items', []), lk.get('natures', []), grab(txt[i:], 'moves', '['), mon
+
+
+# OP.GG 招式的 meta／statChanges／moveTraits → 只留有值的欄位（見 mons-data.js 的 MOVES 說明）
+def move_extra(m):
+    meta, x = m.get('meta') or {}, {}
+    if meta.get('ailment') not in (None, 'none'):
+        x['ail'] = meta['ailment']
+    for k, o in (('ailmentChance', 'ailP'), ('flinchChance', 'fl'), ('critRate', 'cr'), ('drain', 'dr'), ('healing', 'hl'), ('statChance', 'stP')):
+        if meta.get(k):
+            x[o] = meta[k]
+    if meta.get('minHits') is not None or meta.get('maxHits') is not None:
+        x['hits'] = [meta.get('minHits'), meta.get('maxHits')]
+    if m.get('statChanges'):
+        x['st'] = [[c['stat'], c['change']] for c in m['statChanges']]
+    tr = [t for t in m.get('moveTraits') or [] if t != 'non-contact']
+    if tr:
+        x['tr'] = tr
+    return x
+
+
+def move_row(m):
+    # 招式一筆：[中文名, 屬性, 分類, 威力, 效果, PP, 命中率, 先制等級, 目標範圍, 其他（move_extra）]
+    return [m['name'], m['type'], m['category'], m['power'], clean(m['effect'] or m['description']),
+            m.get('pp'), m.get('accuracy'), m.get('priority') or 0, m.get('target'), move_extra(m)]
 
 
 def usage(det, names):
@@ -178,7 +206,7 @@ def remind(old_txt, js_dir, mv_out, ab_out, mega_a):
     print('\n【提醒】新出現、網頁程式還沒提到的招式／特性 %d 種（只列這一次，下次更新就算舊的了）：\n'
           '  網頁只照威力、屬性、分類算；先制、範圍、連續攻擊、特性效果等特殊效果要另外補進 js 的清單' % (len(new_m) + len(new_a)))
     for k in new_m:
-        zh, _, cat, power, eff = mv_out[k]
+        zh, _, cat, power, eff = mv_out[k][:5]
         print('  招式 %s %s（%s%s）：%s' % (k, zh, CAT_ZH.get(cat, cat), '' if power is None else '、威力 %s' % power, eff))
     for k in new_a:
         zh, eff = ab_out.get(k, ('', '沒有說明'))
@@ -213,10 +241,11 @@ def main(path):
 
     # 常用招式／特性：只抓有排名的非超級進化寶可夢
     targets = [r[0] for r in rows if not r[5] and (r[3] or r[4])]
-    use, moves, abils, items, nats, known = {}, {}, {}, {}, {}, {r[0] for r in rows}
+    use, moves, abils, items, nats, known, learn = {}, {}, {}, {}, {}, {r[0] for r in rows}, {}
     for n, key in enumerate(targets, 1):
-        det, ab, it, nt, mv = detail(key)
+        det, ab, it, nt, mv, mon = detail(key)
         moves = moves or {m['id']: m for m in mv}
+        learn[key] = mon
         abils.update({a['id']: a for a in ab})
         items.update({x['id']: x for x in it})
         nats.update({x['id']: x for x in nt})
@@ -233,9 +262,22 @@ def main(path):
     used_m = {s.split(':')[0] for u in use.values() for s in ' '.join(u[:2]).split()}
     used_a = {s.split(':')[0] for u in use.values() for s in ' '.join(u[2:4]).split()} | {k for ks in mega_a.values() for k in ks}
     used_i = {s.split(':')[0] for u in use.values() for s in ' '.join(u[4:6]).split()}
-    mv_out = {m['key']: [m['name'], m['type'], m['category'], m['power'], clean(m['effect'] or m['description'])]
-              for m in moves.values() if m['key'] in used_m}
+    mv_out = {m['key']: move_row(m) for m in moves.values() if m['key'] in used_m}
     ab_out = {a['key']: [a['name'], clean(a['description'])] for a in abils.values() if a['key'] in used_a}
+    # 可學招式（OP.GG 標為不可用、或這隻禁用的不收）與可能的特性；不在 MOVES／ABILS 的另外存 LEARN_MOVES／LEARN_ABILS，
+    # 網頁現有功能只看 MOVES／ABILS，不受影響
+    avail = {m['key'] for m in moves.values() if m.get('isAvailable', True)}
+    learn_out = {}
+    for key, mon in learn.items():
+        banned = {b if isinstance(b, str) else b.get('key') for b in mon.get('bannedMoves') or []}
+        ms = [k for k in mon.get('moves') or [] if k in avail and k not in banned]
+        ab = list(mon.get('abilities') or [])
+        if ms or ab:
+            learn_out[key] = ' '.join(ms) + '|' + ' '.join(ab)
+    learn_m = {k for v in learn_out.values() for k in v.split('|')[0].split()} - used_m
+    learn_a = {k for v in learn_out.values() for k in v.split('|')[1].split()} - used_a
+    lm_out = {m['key']: move_row(m) for m in moves.values() if m['key'] in learn_m}
+    la_out = {a['key']: [a['name'], clean(a['description'])] for a in abils.values() if a['key'] in learn_a}
     it_out = {x['key']: [x['name'], clean(x.get('effect') or x.get('description'))] for x in items.values() if x['key'] in used_i}
     miss = sorted({k for ks in mega_a.values() for k in ks} - set(ab_out))
     if miss:
@@ -257,17 +299,29 @@ def main(path):
                '//   （1 攻擊、2 防禦、3 特攻、4 特防、5 速度，不加減的寫 0.0）；這兩種依使用率高到低，0%% 的不收。\n'
                '//   沒有統計的是空字串，超級進化不在這裡（沿用原型）\n'
                'const USAGE_RAW = {\n%s\n};\n'
-               '// 招式：key → [中文名, 屬性, 分類（physical 物理／special 特殊／status 變化）, 威力（null＝沒有）, 效果]\n'
+               '// 招式（任一隻常用的）：key → [中文名, 屬性, 分類（physical 物理／special 特殊／status 變化）, 威力（null＝沒有）, 效果,\n'
+               '//   PP, 命中率（null＝必中）, 先制等級, 目標範圍（OP.GG target，如 selected-pokemon 單體、all-opponents 對手全體）, 其他]；\n'
+               '//   其他只列有值的：ail 異常／附加狀態（burn、paralysis…）、ailP 機率%%、fl 畏縮機率%%、cr 急所等級、dr 吸血%%（負的是反作用力）、\n'
+               '//   hl 回復%%、hits [最少, 最多] 連續攻擊次數、st [[能力, 變化]…] 能力變化、stP 能力變化機率%%（0＝輔助招必定）、tr 招式標記（contact 接觸、sound 聲音…）\n'
                'const MOVES = {\n%s\n};\n'
                '// 特性：key → [中文名, 效果]\n'
                'const ABILS = {\n%s\n};\n'
                '// 道具：key → [中文名, 效果]\n'
-               'const ITEMS = {\n%s\n};\n') % (
+               'const ITEMS = {\n%s\n};\n'
+               '// 可學招式與可能的特性（抓了詳細頁的寶可夢；超級進化沿用原型；不可用與禁用的招式不收）：寶可夢 key → "招式 key 空白分隔|特性 key 空白分隔"\n'
+               'const LEARN = {\n%s\n};\n'
+               '// 可學但不在 MOVES 的招式（沒有寶可夢常用），格式同 MOVES\n'
+               'const LEARN_MOVES = {\n%s\n};\n'
+               '// 可能但不在 ABILS 的特性，格式同 ABILS\n'
+               'const LEARN_ABILS = {\n%s\n};\n') % (
         today, today, body, MIN_PCT, LIST_N, SP_N,
         '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in use.items()),
         '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in sorted(mv_out.items())),
         '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in sorted(ab_out.items())),
-        '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in sorted(it_out.items())))
+        '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in sorted(it_out.items())),
+        '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in sorted(learn_out.items())),
+        '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in sorted(lm_out.items())),
+        '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in sorted(la_out.items())))
     stats_js = ('// 種族值：擷取自 OP.GG 寶可夢冠軍圖鑑（含超級進化）；這個檔由 tools/update_mons.py 產生，勿手改\n'
                 '// 寶可夢 key → [HP, 攻擊, 防禦, 特攻, 特防, 速度]\n'
                 'const BASE_STATS = {\n%s\n};\n') % '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in stats.items())
@@ -288,6 +342,7 @@ def main(path):
         len(rows), sum(1 for r in rows if r[5]), sum(1 for r in rows if r[3]), sum(1 for r in rows if r[4]),
         sum(1 for u in use.values() if u[0] or u[1]), sum(1 for u in use.values() if u[12] or u[13]),
         sum(1 for u in use.values() if u[14] or u[15]), len(mv_out), len(ab_out), len(it_out), len(mons_js.encode())))
+    print('可學招式表 %d 隻；可學但沒人常用的招式 %d 種、特性 %d 種' % (len(learn_out), len(lm_out), len(la_out)))
     print('前 3 筆：', rows[:3])
     remind(old_txt, os.path.join(out, 'js'), mv_out, ab_out, mega_a)
 
