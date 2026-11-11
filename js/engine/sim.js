@@ -159,6 +159,27 @@ function simOppScenarios(oppKeys, myKeys, fmt) {
   const keys = op.mems.map(x => x.key), items = simItems(keys, fmt), mems = keys.map((k, j) => ({ key: k, set: defaultSet(k, fmt), item: items[j] }));
   return op.combos.map((c, r) => ({ rank: r + 1, mons: simBring(op, mems, 1, fmt, c, op.leadOf(c).js[0]) }));
 }
+// 一步一步推演的對手（只看得到先發）：oppKeys 每一格當成的型態、配招、道具同 simOppScenarios。回傳 { mems 每一格的 { key, set, item }（沒填的格子 null）,
+// guess(lead) 先發是第 lead 格時猜的帶法 { slots [lead, 後排...], evo 超級進化的格子（沒有是 -1）}（「對手可能帶的」帶法裡有這隻的、排名最高那種）}；有一方是空的回傳 null
+function simOppRoster(oppKeys, myKeys, fmt) {
+  const op = oppBringPlan(oppKeys, myKeys, fmt);
+  if (!op) return null;
+  const keys = op.mems.map(x => x.key), items = simItems(keys, fmt), mems = oppKeys.map(() => null);
+  op.at.forEach((i, j) => { mems[i] = { key: keys[j], set: defaultSet(keys[j], fmt), item: items[j] }; });
+  const guess = lead => {
+    const j0 = op.at.indexOf(lead), c = op.combos.find(c => c.idx.includes(j0));
+    return c ? { slots: [lead, ...c.idx.filter(j => j !== j0).map(j => op.at[j])], evo: c.evo == null ? -1 : op.at[c.evo] } : null;
+  };
+  return { mems, guess };
+}
+// 推演的對手一隻：roster（simOppRoster）第 i 格，down＝不超級進化（以原型上場、沒有道具）；加上 slot（對手第幾格）
+const simOppMon = (roster, i, down, fmt) => { const x = roster.mems[i];
+  return Object.assign(simMon(down ? MON[x.key].base : x.key, x.set, down ? '' : x.item, 1, fmt), { slot: i }); };
+// 推演的對手帶出場的：格子 slots（先發排第一）；同 simMySide 一場只能超級進化一隻：evo 那格（不在裡面就是第一隻能超級進化的）進化
+function simOppSide(roster, slots, evo, fmt) {
+  const megas = slots.filter(i => MON[roster.mems[i].key].base), up = megas.includes(evo) ? evo : megas[0];
+  return slots.map(i => simOppMon(roster, i, !!MON[roster.mems[i].key].base && i !== up, fmt));
+}
 // 計算快取：同一組對戰可以共用（id 是「哪一方:寶可夢 key」，同一方同一隻的配招固定）
 const simCtx = fmt => ({ fmt, memo: new Map(), spd: new Map() });
 
@@ -322,6 +343,8 @@ function simSwitch(st, s, i, rnd) {
   }
   if (h.web && ground && M.hp > 0) simBoost(st, s, M, { spe: -1 }, 1 - s);
 }
+// 第 t 方被吹走（吼叫、吹飛、龍尾、巴投）換上誰：照亂數從後排抽一隻；期望值模式取後排第一隻，推演畫面指定了實際換上的（st.pin，見 simStep）就用那隻
+const simPhazeTo = (st, t, rnd) => { const bench = simBench(st, t); return rnd ? bench[Math.floor(rnd() * bench.length)] : bench.includes(st.pin?.[t]) ? st.pin[t] : bench[0]; };
 // 一定會失敗、或只會害到自己的輔助招（不列入選擇）：能力到頂、HP 全滿還回復、對手已經有異常／免疫、撒菱類滿層、牆還在、對手有替身而招式穿不過、
 // 對手特性黃金之軀（擋輔助招）、魔法鏡（會反彈回來）、惡作劇之心的輔助招打惡屬性…
 function simFutile(st, s, k) {
@@ -522,7 +545,7 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
       const bench = simBench(st, 1 - s);
       if (!bench.length) return fail('對手沒有可以換的');
       say('');
-      simSwitch(st, 1 - s, rnd ? bench[Math.floor(rnd() * bench.length)] : bench[0], rnd);
+      simSwitch(st, 1 - s, simPhazeTo(st, 1 - s, rnd), rnd);
       return;
     }
     case 'haze':
@@ -678,10 +701,7 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
         delete M.v.seed;
       }
       if (MOVES[k][1] === 'electric') delete M.v.charge;
-      if (SIM_PHAZE.has(k) && !subbed && T.hp > 0 && simBench(st, 1 - s).length && !simOver(st)) {
-        const bench = simBench(st, 1 - s);
-        simSwitch(st, 1 - s, rnd ? bench[Math.floor(rnd() * bench.length)] : bench[0], rnd);
-      }
+      if (SIM_PHAZE.has(k) && !subbed && T.hp > 0 && simBench(st, 1 - s).length && !simOver(st)) simSwitch(st, 1 - s, simPhazeTo(st, 1 - s, rnd), rnd);
     }
   }
   if (k === 'steel-beam' && M.hp > 0) simHurt(st, s, M, Math.round(M.max / 2), '自己受到傷害', false);
@@ -928,14 +948,22 @@ function simView(ctx, st, iters) {
   const phase = simPhase(st);
   return phase === 'over' ? { phase } : { phase, ...simSearch(ctx, st, phase, iters, null, true, true).stats };
 }
-// 樹狀圖往下一步：照期望值打 acts 這一回合（或補位）；回傳 { st 新局面, log 這一步的紀錄 }（不改到原本的 st）
-function simStep(ctx, st, acts) {
+// 樹狀圖往下一步：照期望值打 acts 這一回合（或補位）；pin[s]＝第 s 方被迫換人（打完換人、拋下狠話、被吹走）時實際換上的（沒給、或那隻不能換上就照簡單規則／後排第一隻）。
+// 回傳 { st 新局面, log 這一步的紀錄, forced [我方, 對手]：這一步被迫換了人的話，是開始時還站著、可能換上來的（不含原本該在場上那隻），沒有是 null }（不改到原本的 st）
+function simStep(ctx, st, acts, pin) {
   const c = simClone(st), phase = simPhase(st);
   c.log = [];
-  if (phase === 'turn') simTurn(ctx, c, acts, null, 0, (x, s) => simGreedyPick(ctx, x, s)); else simReplace(c, acts, null);
+  c.pin = pin;
+  const pick = (x, s) => simBench(x, s).includes(pin?.[s]) ? pin[s] : simGreedyPick(ctx, x, s);
+  if (phase === 'turn') simTurn(ctx, c, acts, null, 0, pick); else simReplace(c, acts, null);
+  const forced = [0, 1].map(s => {
+    const was = acts[s].t === 'sw' ? acts[s].i : st.sd[s].act;
+    return c.sd[s].act === was ? null : st.sd[s].mons.map((m, i) => m.hp > 0 && i !== was ? i : -1).filter(i => i >= 0);
+  });
   const log = c.log;
   c.log = null;
-  return { st: c, log };
+  delete c.pin;
+  return { st: c, log, forced };
 }
 // 照機率 p 抽一個索引（沒給 rnd 取機率最高的）
 function simDraw(p, rnd) {
