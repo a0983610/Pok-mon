@@ -9,7 +9,8 @@
 //   &cu=關掉「套用登錄配招」的一方（a.d）（和預設相同的不寫）&cp=關掉「能力點數用 OP.GG 最常見的」的一方（a.d）
 //   對戰中：bm＝我方場上位置 1.位置 2 的隊伍格子索引、bo＝對手場上位置的對手格子索引（空的位置空白）、bh＝我方各格剩下的 HP（全滿空白）、
 //   bp＝對手各格剩下的 HP %（100 空白）、bs＝場上位置的能力變化（我方位置 1, 我方位置 2, 對手位置 1, 對手位置 2，每個「攻擊.防禦.特攻.特防.速度」，都 0 空白）、
-//   bi＝對手各格標的道具（沒標的空白、用預設，沒有道具寫 -）、bb＝對手各格選的特性、bx／by＝我方／對手各格選的型態、bw＝天氣、bf＝場地、br=1（戲法空間）、bg＝有順風的一方（me.opp）
+//   bi＝對手各格標的道具（沒標的空白、用預設，沒有道具寫 -）、bb＝對手各格選的特性、bx／by＝我方／對手各格選的型態、bw＝天氣、bf＝場地、br=1（戲法空間）、bg＝有順風的一方（me.opp）、
+//   bk＝我方這場帶的隊伍格子（. 分隔；照出戰選角時不寫，全部拿掉寫 -）、bv＝對手出場過的格子（. 分隔）
 const STATE_KEY = 'pkmn-champions-state';
 // 各格的值用逗號接起來，尾端空白的不寫
 const joinTrim = a => { const s = a.slice(); while (s.length && !s[s.length - 1]) s.pop(); return s.join(','); };
@@ -61,7 +62,8 @@ function stateQuery() {
   [['bm', pos(battle.me)], ['bo', pos(battle.opp)], ['bh', joinTrim(battle.hp.map(v => v == null ? '' : String(v)))],
     ['bp', joinTrim(battle.ohp.map(v => v === 100 ? '' : String(v)))], ['bs', joinTrim([...battle.st.me, ...battle.st.opp].map(s => s.some(Boolean) ? s.join('.') : ''))],
     ['bi', joinTrim(battle.item)], ['bb', joinTrim(battle.ab)], ['bx', joinTrim(battle.form.me)], ['by', joinTrim(battle.form.opp)],
-    ['bw', battle.weather], ['bf', battle.terrain], ['br', battle.tr ? '1' : ''], ['bg', battle.tw.join('.')]].forEach(([k, v]) => { if (v) q.push(k + '=' + v); });
+    ['bw', battle.weather], ['bf', battle.terrain], ['br', battle.tr ? '1' : ''], ['bg', battle.tw.join('.')],
+    ['bk', battle.bring ? battle.bring.join('.') || '-' : ''], ['bv', battle.seen.map((v, i) => v ? i : -1).filter(i => i >= 0).join('.')]].forEach(([k, v]) => { if (v) q.push(k + '=' + v); });
   return q.join('&');
 }
 const stateHash = () => { const q = stateQuery(); return '#' + curTab + (q ? '?' + q : ''); };
@@ -155,6 +157,10 @@ function loadState(q) {
   battle.terrain = TERRAINS.includes(kv.bf) ? kv.bf : '';
   battle.tr = kv.br === '1';
   battle.tw = BT_SIDES.filter(s => (kv.bg || '').split('.').includes(s));
+  // 這場帶的：- 是自己全部拿掉，沒寫是照出戰選角；只收挑了寶可夢的格子。對手出場過的只收有對手的格子
+  const slots = s => [...new Set((s || '').split('.').filter(v => /^[0-5]$/.test(v)).map(Number))];
+  battle.bring = kv.bk === '-' ? [] : kv.bk ? slots(kv.bk).filter(i => team.mons[i]).sort((x, y) => x - y) : null;
+  battle.seen = [0, 1, 2, 3, 4, 5].map(i => !!bring.opp[i] && slots(kv.bv).includes(i));
 }
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-copy]');

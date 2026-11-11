@@ -5,13 +5,14 @@
 // st：場上位置的能力變化 [攻擊, 防禦, 特攻, 特防, 速度]（換下場就清掉，同遊戲）；hp：我方各格剩下的 HP（null＝全滿）；ohp：對手各格剩下的 HP %；
 // item：對手各格標的道具（空＝用預設 btOppItems、'-'＝沒有道具）；ab：對手各格選的特性（空＝用 defAbOf 的預設）；
 // form：各格選的型態（空＝隊伍分析／出戰選角裡的那個，用來切換超級進化前後）；weather、terrain、tr 戲法空間、tw 有順風的一方（'me'／'opp'）；
+// bring：我方這場帶的隊伍格子（null＝照出戰選角第 1 名組合，見 btBrought）；seen：對手各格出場過沒（放上場就標）；
 // keys：記錄時各格的寶可夢 key（隊伍或對手換了寶可夢，那格的紀錄就清掉）
 const BT_SIDES = ['me', 'opp'];
 const BT_STATS = [['atk', '攻擊'], ['def', '防禦'], ['spa', '特攻'], ['spd', '特防'], ['spe', '速度']];
 const btSt0 = () => [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]];
 const battle0 = () => ({ me: [-1, -1], opp: [-1, -1], sel: { me: 0, opp: 0 }, st: { me: btSt0(), opp: btSt0() },
   hp: Array(6).fill(null), ohp: Array(6).fill(100), item: Array(6).fill(''), ab: Array(6).fill(''), form: { me: Array(6).fill(''), opp: Array(6).fill('') },
-  weather: '', terrain: '', tr: false, tw: [], keys: { me: team.mons.slice(), opp: bring.opp.slice() } });
+  weather: '', terrain: '', tr: false, tw: [], bring: null, seen: Array(6).fill(false), keys: { me: team.mons.slice(), opp: bring.opp.slice() } });
 const battle = battle0();
 // 特性選單上算「影響這裡的計算」的（傷害、速度都看）
 const BT_REL = new Set([...ATK_REL, ...DEF_REL]);
@@ -26,16 +27,31 @@ function btForms(side, i) {
   const fam = MON[family(m0)], forms = side === 'me' ? (m0.base ? [fam, m0] : []) : [fam, ...megasOf(fam)];
   return forms.length > 1 ? forms : [];
 }
-// 隊伍或對手換了寶可夢：那格的紀錄清掉，在場上就下場
+// 隊伍或對手換了寶可夢：那格的紀錄清掉，在場上就下場；我方換了寶可夢時「這場帶的」改回照出戰選角
 function syncBattle() {
   BT_SIDES.forEach(side => btList(side).forEach((k, i) => {
     if (battle.keys[side][i] === k) return;
     battle.keys[side][i] = k;
     battle.form[side][i] = '';
-    if (side === 'me') battle.hp[i] = null;
-    else { battle.ohp[i] = 100; battle.item[i] = ''; battle.ab[i] = ''; }
+    if (side === 'me') { battle.hp[i] = null; battle.bring = null; }
+    else { battle.ohp[i] = 100; battle.item[i] = ''; battle.ab[i] = ''; battle.seen[i] = false; }
     battle[side].forEach((j, p) => { if (j === i) { battle[side][p] = -1; battle.st[side][p] = [0, 0, 0, 0, 0]; } });
   }));
+}
+// 我方這場帶的隊伍格子（只算挑了寶可夢的）：自己改過就照改的，不然照出戰選角第 1 名組合（bringPlan；還沒填對手就是全部）。
+// 隊伍、配招、對手、單打／雙打沒變就不重算
+const btPlan = { k: null, v: [] };
+function btBrought() {
+  const named = team.mons.map((k, i) => k ? i : -1).filter(i => i >= 0);
+  if (battle.bring) return battle.bring.filter(i => team.mons[i]);
+  const members = team.slots.map((s, i) => [s, i]).filter(([s]) => s.length), opps = bring.opp.filter(k => MON[k]).map(k => MON[k]);
+  if (!opps.length) return named;
+  const k = JSON.stringify([team.slots, team.mons, team.sets, bring.opp, team.fmt]);
+  if (btPlan.k !== k) {
+    const plan = bringPlan(members.map(([s, i]) => ({ defs: s, key: team.mons[i], set: team.sets[i] })), opps, team.fmt);
+    Object.assign(btPlan, { k, v: plan.combos[0].idx.map(j => members[j][1]) });
+  }
+  return btPlan.v.filter(i => team.mons[i]);
 }
 // 對手各格實際算的道具：標了的照標的（'-'＝沒有道具），沒標的預設牠 OP.GG 最常帶的。同一隊不能帶重複的道具：
 // 標了的先佔，其餘依使用率由高到低分配（同一顆給使用率高的那隻，另一隻改拿牠下一個常帶的）；超級進化帶自己的超級石（回傳 ''，不影響計算）。
@@ -116,11 +132,29 @@ function btPosHTML(side, p) {
 const btFold = {};
 const btIsOpen = k => k in btFold ? btFold[k] : matchMedia('(min-width: 901px)').matches;
 $('#p-battle').addEventListener('toggle', e => { const k = e.target.dataset?.fold; if (k) btFold[k] = e.target.open; }, true);
-// 下方的寶可夢按鈕：場上的標起來，HP 不滿的標剩下多少、對手標了的道具
-function btBenchHTML(side) {
+// 下方的寶可夢按鈕（btShown）：場上的標起來，HP 不滿的標剩下多少、對手標了的道具
+// 只列這場會出場的：我方列這場帶的（btBrought），對手出場過的滿了帶出場的隻數（單打 3、雙打 4）就不列其他的；在場上的一定列
+function btShown(side) {
   const on = battle[side].slice(0, btN());
+  if (side === 'me') { const b = btBrought(); return team.mons.map((k, i) => k && (b.includes(i) || on.includes(i))); }
+  const all = battle.seen.filter((v, i) => v && bring.opp[i]).length >= BRING_N[team.fmt];
+  return bring.opp.map((k, i) => !!k && (!all || battle.seen[i] || on.includes(i)));
+}
+// 「這場帶的」「對手出場過的」：收起時摘要列名字，點開可以改（點一下加入／拿掉）；我方自己改過的可以改回照出戰選角
+function btPickHTML(side) {
+  const me = side === 'me', list = btList(side), fold = 'pick.' + side;
+  const has = me ? (b => i => b.includes(i))(btBrought()) : i => battle.seen[i];
+  const names = list.map((k, i) => k && has(i) ? MON[btKey(side, i)].zh : '').filter(Boolean);
+  const head = me ? `這場帶的（${battle.bring ? '自己選的' : bring.opp.some(Boolean) ? '照出戰選角第 1 名' : '還沒填對手，全部列出'}）`
+    : `對手出場過的（${names.length}／${BRING_N[team.fmt]}，放上場就會標）`;
+  return `<details class="bt-pick" data-fold="${fold}"${btFold[fold] ? ' open' : ''}><summary>${head}：${names.join('、') || '（還沒有）'}</summary><div class="bt-bench">`
+    + list.map((k, i) => k ? `<button class="mini" data-bpick="${side}" data-i="${i}" aria-pressed="${has(i)}">${MON[btKey(side, i)].zh}</button>` : '').join('')
+    + (me && battle.bring ? '<button class="mini" data-bpick0>改回照出戰選角</button>' : '') + '</div></details>';
+}
+function btBenchHTML(side) {
+  const on = battle[side].slice(0, btN()), shown = btShown(side);
   return btList(side).map((k, i) => {
-    if (!k) return '';
+    if (!k || !shown[i]) return '';
     const key = btKey(side, i), v = side === 'me' ? battle.hp[i] : battle.ohp[i];
     const H = side === 'me' && v != null ? hpOf(battler(key, team.fmt, team.sets[i])) : 0;
     const hp = v === 0 ? '倒下' : side === 'me' ? (v == null || v >= H ? '' : `${hpPct(v, H)}%`) : v < 100 ? `${v}%` : '';
@@ -134,17 +168,19 @@ function btSideHTML(side) {
     + `${me ? '先到「隊伍分析」挑好寶可夢（只選屬性的隊員沒有能力值，不能算）。' : '先到「出戰選角」填對手的 6 隻。'}</p>`;
   return `<div class="b-label">${label}<span class="muted small">${btN() > 1 ? '先點位置，再點下方的寶可夢換上場' : '點下方的寶可夢換上場'}</span></div>`
     + Array.from({ length: btN() }, (_, p) => btPosHTML(side, p)).join('')
-    + `<div class="bt-bench" id="btBench-${side}">${btBenchHTML(side)}</div>`;
+    + `<div class="bt-bench" id="btBench-${side}">${btBenchHTML(side)}</div>` + btPickHTML(side);
 }
 // ----- 下方：每一組對位（我方 × 對手）的結果 -----
-// 一招一列：佔對方最大 HP 的 %、幾擊打倒（看剩下的 HP）
-function btMoveRow(x) {
+// 一招一列：佔對方最大 HP 的 %、幾擊打倒（看剩下的 HP）；「打中」＝照平均傷害（最低、最高的平均）扣挨打那一方（tgt：side、格子索引 i）剩下的 HP
+function btMoveRow(x, tgt) {
   const r = x.r;
   if (!r.eff) return `<div class="bt-mv"><b>${MOVES[x.k][0]}</b>${chip(r.type)}<span class="ko">沒有效果${r.immuneBy ? `（${abilZh(r.immuneBy)}）` : r.blockedBy ? `（${r.blockedBy}）` : ''}</span></div>`;
   const kt = koText(r.ko), tags = [FLAG.priority.has(x.k) && '先制', r.spread && '範圍 ×0.75',
     r.endured && `${ITEMS[r.endured]?.[0] || abilZh(r.endured)}撐住第一下`, r.berry && '樹果減半第一下'].filter(Boolean);
+  const avg = Math.round((r.min + r.max) / 2);
   return `<div class="bt-mv"><b>${MOVES[x.k][0]}</b>${chip(r.type)}${mtag(r.eff)}<span class="bt-pct">${hpPct(r.min, r.hp)}～${hpPct(r.max, r.hp)}%</span>`
-    + `${tags.length ? `<span class="meta">${tags.join('・')}</span>` : ''}<span class="ko k${kt.n}">${kt.text}</span></div>`;
+    + `${tags.length ? `<span class="meta">${tags.join('・')}</span>` : ''}<span class="ko k${kt.n}">${kt.text}</span>`
+    + `<button class="mini bt-hit" data-bhit="${tgt.side}.${tgt.i}" data-dmg="${avg}"${r.endured ? ' data-end' : ''} title="照平均傷害扣掉約 ${hpPct(avg, r.hp)}%">打中</button></div>`;
 }
 const btHit = x => `${mvName(x.k)} ${hpPct(x.r.min, x.r.hp)}～${hpPct(x.r.max, x.r.hp)}% ${koText(x.r.ko).text}`;
 const btHits = xs => xs.slice(0, 2).map(btHit).join('、');
@@ -163,13 +199,13 @@ function btPairHTML(M, O, f) {
   else if (btPri(kill).length) lines.push(['bad', `⚠ ${om.zh}的先制招式打得倒${mm.zh}：${btHits(btPri(kill))}`]);
   if (d.first !== 1 && mine.length) lines.push(['good', `✔ ${tie}${mm.zh}先動就打得倒${om.zh}：${btHits(mine)}`]);
   else if (btPri(mine).length) lines.push(['good', `✔ 先制招式打得倒${om.zh}：${btHits(btPri(mine))}`]);
-  const rows = (x, n) => x.ok.length ? x.ok.slice(0, n).map(btMoveRow).join('') : `<div class="meta">${x.use.length ? '沒有能算傷害的攻擊招式' : '沒有招式資料'}</div>`;
+  const rows = (x, n, tgt) => x.ok.length ? x.ok.slice(0, n).map(m => btMoveRow(m, tgt)).join('') : `<div class="meta">${x.use.length ? '沒有能算傷害的攻擊招式' : '沒有招式資料'}</div>`;
   return `<div class="bt-pair">${head(`<span class="bt-ord">${order}</span>`)}`
     + `<div class="meta">速度：${mm.zh} ${spd(0, M)}／${om.zh} ${spd(1, O)}${f.tr ? '（戲法空間：慢的先動）' : ''}</div>`
     + lines.map(([c, t]) => c ? `<div class="c-sum ${c}">${t}</div>` : `<div class="x-line"><span class="x-msg">${t}</span></div>`).join('')
-    + `<div class="bt-sub">${mm.zh}打${om.zh}</div>${rows(d.xy)}`
+    + `<div class="bt-sub">${mm.zh}打${om.zh}</div>${rows(d.xy, undefined, { side: 'opp', i: O.i })}`
     + Object.entries(d.xy.why).map(([w, ns]) => `<div class="x-line"><span class="x-msg">不算（${w}）：</span>${ns.join('、')}</div>`).join('')
-    + `<div class="bt-sub">${om.zh}打${mm.zh}<span class="meta">（最痛的 3 招）</span></div>${rows(d.yx, 3)}</div>`;
+    + `<div class="bt-sub">${om.zh}打${mm.zh}<span class="meta">（最痛的 3 招）</span></div>${rows(d.yx, 3, { side: 'me', i: M.i })}</div>`;
 }
 function btResultHTML() {
   const f = { fmt: team.fmt, weather: battle.weather, terrain: battle.terrain, tr: battle.tr };
@@ -186,7 +222,9 @@ function btResultHTML() {
     + '% 是佔對方最大 HP 的比例；「一擊」「二擊」是連用同一招打掉對方剩下的 HP（對手剩下的 % 換算成 HP 時無條件進位），'
     + '不是全滿時氣勢披帶、結實、多重鱗片沒有作用。招式看登錄的或 OP.GG 常用招式裡的攻擊招式，依傷害由高到低排。'
     + '先動看實際速度（能力變化、順風 ×2、戲法空間、講究圍巾、天氣／場地加速特性）；同速各 50%，先制招式不看速度。能力變化換下場就清掉。'
-    + '雙打的範圍招式一律以打到兩隻（×0.75）計；噴火／噴水以 HP 全滿計。不含灼傷、麻痺、牆、幫助、隊友與出場特性（如威嚇，請自己調能力變化）。</p>';
+    + '雙打的範圍招式一律以打到兩隻（×0.75）計；噴火／噴水以 HP 全滿計。不含灼傷、麻痺、牆、幫助、隊友與出場特性（如威嚇，請自己調能力變化）。'
+    + '「打中」照那一招的平均傷害（最低、最高的平均）扣挨打那一方剩下的 HP（HP 全滿時氣勢披帶、結實撐住剩 1），實際扣多少看遊戲畫面再拉 HP 調整。'
+    + '下方只列這場會出場的：我方列「這場帶的」（預設照出戰選角第 1 名組合，可以點開改），對手出場過的到了帶出場的隻數（單打 3、雙打 4）就不列其他的。</p>';
 }
 function renderBattle() {
   syncBattle();
@@ -200,9 +238,10 @@ function renderBattle() {
   $('#btResult').innerHTML = btResultHTML();
   saveState();
 }
-// 放上場：放進選中的位置（原本在別的位置就移過來），那個位置的能力變化清掉，再跳到下一個空位置；已在場上就只選中牠的位置
+// 放上場：放進選中的位置（原本在別的位置就移過來），那個位置的能力變化清掉，再跳到下一個空位置；已在場上就只選中牠的位置。對手放上場就標出場過
 function btPut(side, i) {
   const n = btN(), at = battle[side].indexOf(i);
+  if (side === 'opp') battle.seen[i] = true;
   if (at >= 0 && at < n) { battle.sel[side] = at; return; }
   const p = Math.min(battle.sel[side], n - 1);
   battle[side] = battle[side].map(j => j === i ? -1 : j);
@@ -230,6 +269,19 @@ $('#p-battle').addEventListener('click', e => {
   }
   else if (d.bw != null) battle.weather = d.bw;
   else if (d.bf != null) battle.terrain = d.bf;
+  // 這場帶的／對手出場過的：點一下加入或拿掉（我方第一次改時從目前照出戰選角的名單開始改）
+  else if (d.bpick === 'me') { const i = +d.i, b = btBrought(); battle.bring = b.includes(i) ? b.filter(j => j !== i) : [...b, i].sort((x, y) => x - y); }
+  else if (d.bpick === 'opp') battle.seen[+d.i] = !battle.seen[+d.i];
+  else if (d.bpick0 != null) battle.bring = null;
+  // 打中：照平均傷害扣挨打那一方剩下的 HP（data-end：HP 全滿時氣勢披帶、結實撐住剩 1）
+  else if (d.bhit) {
+    const [side, s] = d.bhit.split('.'), i = +s, key = btKey(side, i);
+    const H = hpOf(side === 'me' ? battler(key, team.fmt, team.sets[i]) : battler(key, team.fmt));
+    const cur = side === 'me' ? Math.min(H, battle.hp[i] ?? H) : Math.ceil(H * battle.ohp[i] / 100);
+    const v = Math.max(cur === H && d.end != null ? 1 : 0, cur - +d.dmg);
+    if (side === 'me') battle.hp[i] = v >= H ? null : v;
+    else battle.ohp[i] = v ? Math.max(1, Math.round(v * 100 / H)) : 0;
+  }
   else return;
   renderBattle();
 });

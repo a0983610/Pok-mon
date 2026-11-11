@@ -377,3 +377,24 @@ function duel(x, y, f) {
   const spe = b => ({ key: b.key, inv: b.speInv, sp: b.sp, nat: b.nat, st: st(b, 'spe'), item: b.item, ab: b.ab, tw: !!b.tw });
   return { xy: dmgRows(atk(x), def(y), o), yx: dmgRows(atk(y), def(x), o), ...speedPair(spe(x), spe(y), { weather: o.weather, terrain: o.terrain, tr: !!f.tr }) };
 }
+// dmgRows 的結果裡最快打倒對方的：n＝連用同一招幾下打倒（每招取打倒機率過半的次數，取最少的；四擊打不倒是 9）、
+// pri＝有沒有先制招式也是 n 下打倒
+function fastestKO(rows) {
+  const ns = rows.ok.map(x => [x.r.ko ? x.r.ko.findIndex(p => p >= 0.5) + 1 || 9 : 9, FLAG.priority.has(x.k)]);
+  const n = Math.min(9, ...ns.map(([h]) => h));
+  return { n, pri: n < 9 && ns.some(([h, p]) => p && h === n) };
+}
+// 一對一誰先打倒誰：a 我方、b 對手（fastestKO），first 同 duel。幾下少的贏；一樣多時有先制招式的一方先出手，
+// 都有或都沒有看速度（同速算我方沒贏）；雙方四擊都打不倒算沒贏
+const winKO = (a, b, first) => a.n < 9 && (a.n < b.n || a.n === b.n && (a.pri !== b.pri ? a.pri : first === 0));
+// 出戰選角的一對一：x 我方、y 對手（battler），f 同 duel。回傳
+//   head：正面對打（雙方全滿）先打倒牠；sw：換上來先吃牠最痛的一招（最高傷害），剩下的 HP 對打還先打倒牠（換上來吃過一下，
+//   氣勢披帶、多重鱗片就沒用了）；ohko：沒贏、而且牠一下就打得倒我又比我先出手（速度或先制招式）；
+//   first、spd（同 duel）、me／opp（fastestKO 的 n）給畫面說明用
+function matchup(x, y, f) {
+  const d = duel(x, y, f), a = fastestKO(d.xy), b = fastestKO(d.yx), head = winKO(a, b, d.first);
+  const cur = hpOf(x) - Math.max(0, ...d.yx.ok.map(r => r.r.max || 0));
+  let sw = false;
+  if (cur > 0) { const d2 = duel({ ...x, cur }, y, f); sw = winKO(fastestKO(d2.xy), fastestKO(d2.yx), d2.first); }
+  return { head: head || sw, sw, ohko: !head && !sw && b.n === 1 && (b.pri || d.first !== 0), first: d.first, spd: d.spd.map(s => s.v), me: a.n, opp: b.n };
+}

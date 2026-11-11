@@ -330,7 +330,13 @@ function realHTML(m, named) {
 }
 // 對手的攻擊（monUnit 的 atk）寫成「地震、龍尾、流星群」；沒有統計看本系的寫「本系龍」
 const oppAtkText = u => u.atk.length ? u.atk.map(a => a.zh || `本系${T[a.ty].zh}`).join('、') : '（沒有常用攻擊招式）';
-// 熱門威脅：沒解的排前面，同一級再依排名
+// 可收合的區塊（熱門威脅的有解、速度線的排行）：預設收起，點過就照點的（不存網址；重畫時保持）
+const tFold = {};
+const tFoldHTML = (k, summary, body) => `<details class="t-fold" data-tfold="${k}"${tFold[k] ? ' open' : ''}><summary>${summary}</summary>${body}</details>`;
+$('#p-team').addEventListener('toggle', e => { const k = e.target.dataset?.tfold; if (k) tFold[k] = e.target.open; }, true);
+// 跳轉列：捲到那張卡片（不用 #id 連結，網址的 # 是存狀態用的）
+$('#tJump').addEventListener('click', e => { const b = e.target.closest('[data-jump]'); if (b) $('#' + b.dataset.jump).scrollIntoView({ block: 'start' }); });
+// 熱門威脅：沒解的排前面，同一級再依排名；有解的收起來
 function threatHTML(members) {
   const units = members.map(unitOf);
   const list = threatCheck(units, team.fmt, THREAT_N)
@@ -341,15 +347,18 @@ function threatHTML(members) {
     + [...new Set(units[j].atk.filter(a => defsList.some(ts => eff(a.ty, ts) >= 2)).map(a => a.zh || '本系'))].join('、') + '）').join('、') : '（無）';
   const LV = ['✘ 沒解', '△ 半解', '✔ 有解'], cnt = [0, 1, 2].map(l => list.filter(t => t.level === l).length);
   const named = members.filter(([, i]) => team.mons[i]).map(([, i]) => i);
+  const row = t => {
+    const mg = megaInfo(t.mon, team.fmt).filter(x => x.counted);
+    return `<div class="threat lv${t.level}"><span class="lv">${LV[t.level]}</span><span class="meta">#${t.mon.rank[team.fmt]}</span>`
+      + `<b>${t.mon.zh}</b>${chips(t.mon.types)}${mg.length ? `<span class="who">可能超級進化：${megaText(mg)}</span>` : ''}`
+      + `<span class="who">牠的攻擊：${oppAtkText(monUnit(t.mon, team.fmt))}</span>`
+      + `<span class="who">不怕牠：${who(t.safe)}・招式剋牠：${whoHit(t.hit, [t.mon.types, ...mg.map(x => x.mon.types)])}</span>${realHTML(t.mon, named)}</div>`;
+  };
+  const ok = list.filter(t => t.level === 2);
   return `<div class="res-head">熱門威脅檢查<span class="muted small">（${FMT_ZH[team.fmt]}排名前 ${THREAT_N}）</span></div>`
     + `<p class="b-sum">沒解 <b>${cnt[0]}</b> 隻、半解 <b>${cnt[1]}</b> 隻、有解 <b>${cnt[2]}</b> 隻。</p>`
-    + list.map(t => {
-      const mg = megaInfo(t.mon, team.fmt).filter(x => x.counted);
-      return `<div class="threat lv${t.level}"><span class="lv">${LV[t.level]}</span><span class="meta">#${t.mon.rank[team.fmt]}</span>`
-        + `<b>${t.mon.zh}</b>${chips(t.mon.types)}${mg.length ? `<span class="who">可能超級進化：${megaText(mg)}</span>` : ''}`
-        + `<span class="who">牠的攻擊：${oppAtkText(monUnit(t.mon, team.fmt))}</span>`
-        + `<span class="who">不怕牠：${who(t.safe)}・招式剋牠：${whoHit(t.hit, [t.mon.types, ...mg.map(x => x.mon.types)])}</span>${realHTML(t.mon, named)}</div>`;
-    }).join('')
+    + list.filter(t => t.level < 2).map(row).join('')
+    + (ok.length ? tFoldHTML('threat', `有解的 ${ok.length} 隻（點開看）`, ok.map(row).join('')) : '')
     + `<p class="note">※「不怕牠」＝牠${FMT_ZH[team.fmt]}常帶的攻擊招式打這隻都 ×1 以下；「招式剋牠」＝這隻${FMT_ZH[team.fmt]}常帶的攻擊招式能對牠效果絕佳。`
     + `兩邊算法相同：同屬性的攻擊招式使用率加總 ${ROLE_PCT}% 以上才算這個屬性（如龍尾、流星群各 28%，加起來 56% 就算龍），`
     + '擊掌奇襲、冰凍之風這類輔助用的攻擊招式和固定傷害、反擊類招式不算；只選屬性或沒有統計的看本系。'
@@ -381,9 +390,10 @@ function speedHTML(members) {
         + `同速 ${n((t, m) => t === m)} 隻、比 ${n((t, m) => t > m)} 隻慢</span></div>`;
     }).join('')
     + (members.some(([, i]) => !team.mons[i]) ? '<p class="muted small b-intro">只選屬性的格子沒有速度資料，挑了寶可夢才會列進速度線。</p>' : '')
-    + `<div style="margin-top:8px">${rows.map(x => `<div class="spd${x.i != null ? ' me' : ''}"><b class="v">${x.mon.spe}</b><b>${x.mon.zh}</b>${chips(x.mon.types)}`
+    + tFoldHTML('speed', `速度排行（我方＋熱門前 ${THREAT_N}，共 ${rows.length} 行，點開看）`,
+      rows.map(x => `<div class="spd${x.i != null ? ' me' : ''}"><b class="v">${x.mon.spe}</b><b>${x.mon.zh}</b>${chips(x.mon.types)}`
       + `<span class="meta">${x.i != null ? `我方第 ${x.i + 1} 隻` : `#${x.mon.rank[team.fmt]}`}`
-      + `${x.mega ? `・超級進化${x.p != null ? `（帶超級石 ${x.p}%）` : ''}` : ''}${scarf(x.mon, x.i != null ? team.sets[x.i] : undefined)}</span></div>`).join('')}</div>`
+      + `${x.mega ? `・超級進化${x.p != null ? `（帶超級石 ${x.p}%）` : ''}` : ''}${scarf(x.mon, x.i != null ? team.sets[x.i] : undefined)}</span></div>`).join(''))
     + '<p class="note">※ 只比速度種族值，不含性格、能力投資、道具、特性與場地（如順風、戲法空間）；'
     + '種族值相同時實際誰快要看投資，所以算同速。我方超級進化看超級進化後的速度；'
     + `熱門寶可夢 OP.GG 道具統計有 ${ROLE_PCT}% 以上帶超級石的，超級進化型態另列一行（標「超級進化」），上方「比幾隻快／慢」取進化前後較快的那個。`

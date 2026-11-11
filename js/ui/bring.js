@@ -3,23 +3,30 @@
 const bring = { opp: ['', '', '', '', '', ''], pick: [] };
 // members：[[屬性, 格子索引]...]；opps：[[寶可夢, 格子索引]...]
 function bringHTML(members, opps) {
-  const { k, lead, units, alt, oppUnits, oppMegas, setupBy, setups, combos, pick } =
+  const { k, lead, alt, oppMegas, setupBy, setups, combos, pick, pairOf } =
     bringPlan(members.map(([s, i]) => ({ defs: s, key: team.mons[i], set: team.sets[i] })), opps.map(([m]) => m), team.fmt);
   const best = combos[0], monOf = j => MON[team.mons[members[j][1]]];
   const name = j => `${members[j][1] + 1} ${slotName(members[j][1])}`;
   const spe = j => monOf(j)?.spe || 0;
   const leads = pick.js;
   const setupText = o => `${opps[o][0].zh}（${setupBy[o].map(([zh, p]) => `${zh} ${p}%`).join('、')}）`;
-  const leadInfo = [lead === 2 && `兩隻合起來有解 ${pick.cover}／${opps.length} 隻`,
+  const leadInfo = [`${lead === 2 ? '兩隻合起來' : ''}正面打得贏 ${pick.cover}／${opps.length} 隻`,
     lead === 2 && (pick.weak.length ? `共同弱點 ${pick.weak.map(ty => T[ty].zh).join('、')}` : '沒有共同弱點'),
     pick.sup.length && `輔助 ${pick.sup.map(([j, by]) => `${slotName(members[j][1])}（${by.join('、')}）`).join('、')}`,
     setups.length && `強化手壓得住 ${setups.length - pick.loose.length}／${setups.length} 隻`].filter(Boolean);
   const pairText = leadInfo.length ? `（${leadInfo.join('・')}）` : '';
   const pairWarn = (pick.noAtk ? `<span class="who x-msg">⚠ 這組沒有打手，先發${lead === 2 ? '兩隻都是' : '是'}輔助手，對手強化後容易被打穿</span>` : '')
+    + (pick.danger.length ? `<span class="who x-msg">⚠ 先發會被先手一擊：${pick.danger.map(o => opps[o][0].zh).join('、')}（對手這隻先發時先換人）</span>` : '')
     + (pick.loose.length ? `<span class="who x-msg">⚠ 先發壓不住的強化手：${pick.loose.map(setupText).join('、')}，留後排或換人處理</span>` : '');
   const evoText = c => c.evo == null ? '' : `<span class="who x-msg">⚠ 一場只能超級進化一隻：進化 ${name(c.evo)}，`
     + `${c.idx.filter(j => alt[j] && j !== c.evo).map(j => MON[monOf(j).base].zh).join('、')}以原型上場（帶超級石但不能進化，等於沒道具）</span>`;
-  const cell = (safe, hit) => safe && hit ? ['✔', 'm2'] : hit ? ['剋', 'm1'] : safe ? ['擋', 'm1'] : ['✘', 'mh'];
+  // 對位表的格子（pairOf，隊員照隊伍分析選的型態）：✔ 換上能扛、贏 正面打得贏、⚠ 會被先手一擊、✘ 打不贏；滑鼠停留看速度與幾下打倒
+  const cell = r => r.sw ? ['✔', 'm2'] : r.head ? ['贏', 'm1'] : r.ohko ? ['⚠', 'mh'] : ['✘', 'mh'];
+  const ORD = ['先動', '後動'];
+  const tip = (r, me, o) => r.type ? `${me}對${opps[o][0].zh}：只看屬性（${r.sw ? '不怕牠又剋得到' : r.head ? '招式剋得到' : '剋不到'}）`
+    : [opps[o][0], ...oppMegas[o]].map((m, n) => { const f = r.forms[n];
+      return `${me}對${m.zh}：${f.first < 0 ? '同速' : ORD[f.first]}（速度 ${f.spd.join('／')}）・我 ${f.me < 9 ? f.me + ' 下' : '四下打不倒'}、牠 ${f.opp < 9 ? f.opp + ' 下' : '四下打不倒'}`
+        + (f.sw ? '・換上來吃一下還打得贏' : f.head ? '・正面打得贏' : f.ohko ? '・牠先動一下打倒我' : ''); }).join('；');
   let t = '<thead><tr><th class="corner">我方 ↓<br>對手 →</th>'
     + opps.map(([m, i], o) => `<th title="${m.zh}${oppMegas[o].length ? `（可能超級進化成${oppMegas[o].map(x => x.zh).join('、')}）` : ''}">`
       + `<span class="tcol"><span class="slot-n">${i + 1}${oppMegas[o].length ? '・超' : ''}</span><span class="duo">`
@@ -30,21 +37,23 @@ function bringHTML(members, opps) {
   members.forEach((_, j) => {
     const me = team.mons[members[j][1]];
     t += `<tr><th>${best.idx.includes(j) ? '★ ' : ''}${name(j)}${spe(j) ? ` <span class="meta">${spe(j)}</span>` : ''}</th>`
-      + oppUnits.map((u, o) => {
-        const r = answerOf([units[j]], u), [v, c] = cell(r.safe.length > 0, r.hit.length > 0), op = opps[o][0];
-        return `<td class="${c}">${me ? `<button class="vs-go" data-ca="${me}" data-cd="${op.key}" title="到傷害計算看${MON[me].zh}打${op.zh}">${v}</button>` : v}</td>`;
+      + opps.map(([op], o) => {
+        const r = pairOf(j, o), [v, c] = cell(r), tt = tip(r, me ? MON[me].zh : slotName(members[j][1]), o);
+        return `<td class="${c}">${me ? `<button class="vs-go" data-ca="${me}" data-cd="${op.key}" title="${tt}（點一下到傷害計算看細節）">${v}</button>` : `<span title="${tt}">${v}</span>`}</td>`;
       }).join('') + '</tr>';
   });
   return `<div class="res-head">建議出戰<span class="muted small">（${FMT_ZH[team.fmt]}帶 ${k} 隻，共 ${combos.length} 種帶法）</span></div>`
     + (members.length < BRING_N[team.fmt] ? `<p class="muted small b-intro">我方只有 ${members.length} 隻，全部帶上。</p>` : '')
-    + '<p class="muted small b-intro">超級石最多帶 1 顆的組合排前面（一場只能超級進化一隻，多帶的那隻等於沒道具），'
-    + '再依對手裡「沒解」的數量由少到多、「有解」的數量由多到少排序，最後比同一隻兩者兼具的配對數。'
+    + '<p class="muted small b-intro">每隻對手看組合裡有沒有人應付得了：有人換上來先吃牠最痛的一招、還打得贏＝有解；'
+    + '有人正面對打打得贏（照速度和幾下打倒，見下方對位表）＝半解；都打不贏＝沒解。'
+    + '超級石最多帶 1 顆的組合排前面（一場只能超級進化一隻，多帶的那隻等於沒道具），'
+    + '再依「沒解」的數量由少到多、「有解」的數量由多到少排序，最後比換上能扛的配對數。'
     + (lead === 2 ? '先發從第 1 名組合裡挑兩隻一起看搭配：至少要有一隻打手（隊伍角色是物攻或特攻輸出；兩隻都是輔助手的排最後），'
-      + '再依序比兩隻合起來有解的對手數、壓不住的強化手少的、共同弱點（對手常帶的攻擊屬性裡兩隻都怕的）少的、'
-      + '有沒有先發輔助（順風、戲法空間、擊掌奇襲、跟我來、幫助、威嚇、開天氣／場地等），最後比兩隻的速度種族值。'
-      : '先發從第 1 名組合裡挑打手（隊伍角色是物攻或特攻輸出；輔助手排最後），再依序比兩者兼具的對手數、壓不住的強化手少的，'
-      + '同數時速度種族值高的優先。')
-    + `強化手＝常帶劍舞、詭計、龍之舞這類強化招式（使用率 ${ROLE_PCT}% 以上）的對手；先發有一隻招式剋得到牠，`
+      + '再依序比「兩隻合起來正面打得贏的對手數 − 會被先手一擊的對手數」（同分時被一擊的少的優先）、壓不住的強化手少的、'
+      + '共同弱點（對手常帶的攻擊屬性裡兩隻都怕的）少的、有沒有先發輔助（順風、戲法空間、擊掌奇襲、跟我來、幫助、威嚇、開天氣／場地等），最後比兩隻的速度種族值。'
+      : '先發從第 1 名組合裡挑打手（隊伍角色是物攻或特攻輸出；輔助手排最後），再依序比「正面打得贏的對手數 − 會被先手一擊的對手數」'
+      + '（同分時被一擊的少的優先）、壓不住的強化手少的，同數時速度種族值高的優先。')
+    + `強化手＝常帶劍舞、詭計、龍之舞這類強化招式（使用率 ${ROLE_PCT}% 以上）的對手；先發有一隻正面打得贏牠，`
     + `或常帶挑釁、再來一次、黑霧、清除之煙、吼叫、吹飛、龍尾、巴投，或特性是純樸，就算壓得住。${lead === 2 ? '輔助後面的 % 是 OP.GG 使用率。' : ''}</p>`
     + combos.slice(0, 3).map((c, r) => `<div class="combo${r ? '' : ' top'}"><span class="rank">${r + 1}</span><b>${c.idx.map(name).join('、')}</b>`
       + `<span class="meta">沒解 ${c.none}・半解 ${opps.length - c.none - c.solved}・有解 ${c.solved}</span>`
@@ -52,16 +61,20 @@ function bringHTML(members, opps) {
       + (c.none ? `<span class="who x-msg">沒解：${c.res.map((x, o) => x.level ? '' : opps[o][0].zh).filter(Boolean).join('、')}</span>` : '')
       + '</div>').join('')
     + `<h3>對位表</h3><div class="mwrap cover"><table class="matrix vs">${t}</tbody></table></div>`
-    + '<p class="note">※ ✔＝不怕牠的攻擊、招式又剋得到；剋＝招式剋得到，但會被牠的攻擊剋；擋＝不怕牠的攻擊，但剋不到；✘＝兩者都沒有。'
-    + `「剋得到」看我方、「不怕」看對手${FMT_ZH[team.fmt]}常帶的攻擊招式（同屬性招式使用率加總 ${ROLE_PCT}% 以上，判斷方式同「隊伍分析」的熱門威脅檢查；`
-    + '對手帶哪些見下方「對手情報」），只選屬性或沒有統計的看本系。'
-    + '點格子會帶到「傷害計算」算我方打牠的傷害（按「⇄ 對調」看牠打我方；只選屬性的隊員不能點）。'
+    + '<p class="note">※ ✔＝換上來先吃牠最痛的一招（取最高傷害）、剩下的 HP 對打還打得贏；贏＝正面對打（雙方 HP 全滿）打得贏；'
+    + '⚠＝打不贏，而且牠一下就打得倒我、又比我先出手（速度較快、同速或用先制招式），還沒出手就倒；✘＝其他打不贏的。'
+    + '「打得贏」＝我連用同一招打倒牠的次數比牠打倒我的少；一樣多時，有先制招式能打倒的一方先出手，不然看實際速度（同速算打不贏），'
+    + '四下都打不倒算打不贏。幾下打倒取打倒機率過半的次數（例如亂數一擊 60% 算一下、40% 算兩下）。'
+    + '傷害、速度、配招、道具、能力點數的算法同下方「出招表」（我方照登錄的配招，對手照 OP.GG 最常見的）；換上來吃過一下後，氣勢披帶、多重鱗片就沒用了。'
+    + '滑鼠停在格子上看誰先動與幾下打倒，點格子帶到「傷害計算」看每一招（按「⇄ 對調」看牠打我方；只選屬性的隊員不能點）。'
+    + `只選屬性沒挑寶可夢、或沒有招式統計的，改看屬性：不怕牠${FMT_ZH[team.fmt]}常帶的攻擊又招式剋得到算 ✔、招式剋得到算「贏」（同「隊伍分析」的熱門威脅檢查）。`
     + `對手選一般型態、但 OP.GG 道具統計有 ${ROLE_PCT}% 以上帶超級石的（表頭標「超」，如噴火龍多半帶噴火龍進化石Ｙ），`
-    + '「不怕」「剋得到」要對進化前後每種型態都成立才算；各型態的超級石使用率見下方「對手情報」。'
+    + '要對進化前後每種型態都成立才算（⚠ 任一種成立就標）；各型態的超級石使用率見下方「對手情報」。'
     + '★＝第 1 名組合的成員；名字旁和表頭下方的數字是速度種族值（對手超級進化後速度不同的，下面多一行「超」和進化後的速度）。'
     + '帶幾隻依攻略網站整理的排位規則（單打 6 選 3、雙打 6 選 4），'
     + '一場只能超級進化一隻也是同一來源：有其他帶法時不會帶 2 顆以上超級石；隊上超級進化多到非帶不可時，逐一試只進化其中一隻、'
-    + '其他以原型的屬性計（帶著超級石，等於沒道具），取結果最好的並標出進化哪隻（對位表的每一列仍是進化後的樣子）。只看屬性、常用攻擊招式與速度種族值，不含特性、道具、能力投資。</p>'
+    + '其他以原型計（帶著超級石，等於沒道具），取結果最好的並標出進化哪隻（對位表的每一列仍是進化後的樣子）。'
+    + '不含天氣、場地、能力變化、出場特性（如威嚇）與雙打的隊友配合；雙打的範圍招式以打到兩隻（×0.75）計。</p>'
     + moveTableHTML(members, opps, best, alt, oppMegas);
 }
 // 出招表：第 1 名組合 best 的每隻（一場只能超級進化一隻，不進化的用原型）對上每隻對手（常帶超級石的另列超級進化後），
