@@ -185,6 +185,10 @@ table.matrix { border-collapse: separate; border-spacing: 0; margin: 0 auto; }
 .pair .chip { font-size: 13px; padding: 0 8px; }
 .b-more summary { cursor: pointer; font-size: 14px; color: var(--muted); }
 .b-more[open] summary { margin-bottom: 6px; }
+.c-f.t-save { margin: 0 0 6px; }
+.t-save #tSaveName { width: 16em; }
+.t-saved { margin: 4px 0 12px; }
+.set-ed .c-sts { min-width: 0; }
 .top-actions { display: flex; gap: 4px; }
 .sel {
   font: inherit; font-size: 14px; color: var(--text); background: var(--surface);
@@ -436,9 +440,11 @@ footer a { color: inherit; }
   <section id="p-team" role="tabpanel" hidden>
     <div class="card">
       <div class="look-top">
-        <p class="muted small b-intro">先點隊伍格子，再選屬性（1～2 個），從下方列出的寶可夢挑一隻；放好會自動跳到下一個空格。只選屬性不挑寶可夢也能看屬性分析，但看不到角色、常用招式與特性。挑好寶可夢時配招會先填好 OP.GG 使用率前 4 招、最常用的特性與道具；點已經挑了寶可夢的格子，可以在下方改成自己的配招（招式、特性、道具、能力點數、性格）。</p>
+        <p class="muted small b-intro">先點隊伍格子，再選屬性（1～2 個），從下方列出的寶可夢挑一隻；挑好會留在這格、下方接著顯示配招，下一隻再點下一個格子。只選屬性不挑寶可夢也能看屬性分析，但看不到角色、常用招式與特性。挑好寶可夢時配招會先填好 OP.GG 使用率前 4 招、最常用的特性與道具、最常見的能力點數與性格，可以在下方改成自己的配招（招式、特性、道具、能力點數、性格）。</p>
         <div class="top-actions"><button class="btn ghost" data-copy>複製連結</button><button class="btn ghost" id="tClear">清除</button></div>
       </div>
+      <div class="c-f t-save"><span class="c-l">記憶的隊伍</span><input type="text" class="sel" id="tSaveName" maxlength="30" placeholder="隊伍名稱（沒填用隊員名）" aria-label="隊伍名稱"><button class="mini" id="tSave">記住這隊</button><span class="muted small" id="tSaveMsg" role="status"></span></div>
+      <details class="b-more t-saved" id="tSavedBox" hidden><summary id="tSavedSum"></summary><div id="tSavedList"></div></details>
       <div class="slots" id="tSlots"></div>
       <div class="t-row">
         <div class="seg" id="tFmt" aria-label="排名依據">
@@ -520,6 +526,7 @@ footer a { color: inherit; }
           <div class="pick sm c-pick" id="cAtkP" data-side="atk" aria-label="用屬性篩選攻擊方寶可夢"></div>
           <div id="cAtkL"></div>
           <div class="c-f" id="cASet" hidden></div>
+          <div class="c-f" id="cATop" hidden></div>
           <div class="c-f"><span class="c-l">投資</span><div class="seg" id="cAi"></div></div>
           <div class="c-f"><span class="c-l">速度投資</span><div class="seg" id="cSa"></div></div>
           <div class="c-f"><span class="c-l">能力變化</span><div class="c-sts"><span class="c-st"><label for="cSt0">攻擊</label><select class="sel" id="cSt0"></select></span><span class="c-st"><label for="cSt1">特攻</label><select class="sel" id="cSt1"></select></span><span class="c-st"><label for="cSt4">速度</label><select class="sel" id="cSt4"></select></span></div></div>
@@ -536,6 +543,7 @@ footer a { color: inherit; }
           <div class="pick sm c-pick" id="cDefP" data-side="def" aria-label="用屬性篩選防守方寶可夢"></div>
           <div id="cDefL"></div>
           <div class="c-f" id="cDSet" hidden></div>
+          <div class="c-f" id="cDTop" hidden></div>
           <div class="c-f"><span class="c-l">HP 投資</span><div class="seg" id="cHi"></div></div>
           <div class="c-f"><span class="c-l">防禦／特防投資</span><div class="seg" id="cDi"></div></div>
           <div class="c-f"><span class="c-l">速度投資</span><div class="seg" id="cSd"></div></div>

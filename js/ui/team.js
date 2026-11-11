@@ -281,9 +281,12 @@ function typeListHTML() {
 }
 // 目前格子挑了寶可夢時的配招登錄（team.sets，見 useOf）：4 招、特性、道具（超級進化的特性固定、道具固定是超級石，不能選；
 // 一般型態的道具不列超級石，要超級進化就在格子選超級進化型態）、6 項能力點數、性格。
-// 招式／特性／道具選單先列這隻在 fmt 的 OP.GG 常用（依使用率），其他依中文名排；資料只收得到任一隻寶可夢使用率 5% 以上的招式／特性／道具，
-// 也不檢查這隻學不學得會。性格是「↑哪項・↓哪項」（攻擊～速度，HP 沒有性格）
+// 招式／特性／道具／性格選單先列這隻在 fmt 的 OP.GG 常用（依使用率），其他依中文名排（性格照能力順序）；資料只收得到任一隻寶可夢使用率 5% 以上的招式／特性／道具，
+// 也不檢查這隻學不學得會。能力點數可以從「常見配點」一次填好 6 格。性格是「↑哪項・↓哪項」（攻擊～速度，HP 沒有性格）
 const NATURES = [1, 2, 3, 4, 5].flatMap(u => [1, 2, 3, 4, 5].filter(d => d !== u).map(d => [u, d]));
+// 能力點數 [6 項] 寫成「HP 2・攻擊 32・速度 32」（0 的不寫）；性格 [↑, ↓] 寫成「速度 ↑・特攻 ↓」（隊伍分析、傷害計算共用）
+const spText = sp => sp.map((v, n) => v ? `${STAT_ZH[n]} ${v}` : '').filter(Boolean).join('・') || '都沒投';
+const natText = ([u, d]) => u && d && u !== d ? `${STAT_ZH[u]} ↑・${STAT_ZH[d]} ↓` : '性格不加減';
 function setEditorHTML() {
   const i = team.cur, key = team.mons[i];
   if (!key) return '';
@@ -295,20 +298,26 @@ function setEditorHTML() {
     return opt('', '（未填）', cur) + (top.length ? `<optgroup label="${fz}常用">${top.map(k => opt(k, dict[k][0], cur)).join('')}</optgroup>` : '')
       + `<optgroup label="${top.length ? '其他' : '全部'}">${rest.map(k => opt(k, dict[k][0], cur)).join('')}</optgroup>`;
   };
-  const sum = s.sp.reduce((a, v) => a + v, 0), nat = s.nat[0] ? s.nat.join('+') : '';
-  return `<div class="set-ed"><div class="b-label">第 ${i + 1} 隻 ${m.zh} 的配招<span class="muted small">挑好寶可夢時先填好 OP.GG ${fz}使用率前 4 招、最常用的特性與道具，照自己的配招改；`
-    + `清空的欄位照 OP.GG 統計；各分頁都照這份判斷</span></div>`
+  const sum = s.sp.reduce((a, v) => a + v, 0), nat = s.nat[0] ? s.nat.join('+') : '', top = !hasSpread(s) && topSpread(key, team.fmt);
+  // 常見配點：OP.GG 最常見的幾種點數（附使用率），選了就填好 6 格；和目前 6 格相同的那種顯示成選取
+  const sps = use?.spreads || [], nats = (use?.natures || []).filter(([n]) => n[0]), natKeys = nats.map(([n]) => n.join('+'));
+  const spPick = sps.length ? `<select class="sel" data-spq aria-label="常見配點">${opt('', `${fz}常見配點…`, '')}`
+    + sps.map(([sp, p]) => opt(sp.join('+'), `${spText(sp)}（${p}%）`, s.sp.join('+'))).join('') + '</select>' : '';
+  return `<div class="set-ed"><div class="b-label">第 ${i + 1} 隻 ${m.zh} 的配招<span class="muted small">挑好寶可夢時先填好 OP.GG ${fz}使用率前 4 招、最常用的特性與道具、`
+    + `最常見的能力點數與性格，照自己的配招改；清空的欄位照 OP.GG 統計；各分頁都照這份判斷</span></div>`
     + `<div class="c-f"><span class="c-l">招式</span>${s.moves.map((k, n) => `<select class="sel" data-mv="${n}" aria-label="招式 ${n + 1}">${opts(MOVES, use?.moves || [], k)}</select>`).join('')}</div>`
     + `<div class="c-f"><span class="c-l">特性</span>${m.base ? `<span>${m.megaAbils.map(abilZh).join('、')}<span class="meta">（超級進化後固定）</span></span>`
       : `<select class="sel" data-ab aria-label="特性">${opts(ABILS, use?.abils || [], s.ab)}</select>`}</div>`
     + `<div class="c-f"><span class="c-l">道具</span>${m.base ? `<span>${stoneOf(m) ? ITEMS[stoneOf(m)][0] : '專屬的超級石'}<span class="meta">（超級進化固定）</span></span>`
       : `<select class="sel" data-it aria-label="道具">${opts(ITEMS, use?.items || [], s.item, k => !isStone(k))}</select>`}</div>`
-    + `<div class="c-f"><span class="c-l">能力點數</span><div class="c-sts">${STAT_ZH.map((zh, n) => `<span class="c-st"><label for="tSp${n}">${zh}</label>`
+    + `<div class="c-f"><span class="c-l">能力點數</span><div class="c-sts">${spPick}${STAT_ZH.map((zh, n) => `<span class="c-st"><label for="tSp${n}">${zh}</label>`
       + `<input type="number" class="sel c-num" id="tSp${n}" data-sp="${n}" min="0" max="32" step="1" value="${s.sp[n]}"></span>`).join('')}`
     + `<span class="${sum > 66 ? 'x-msg' : 'muted small'}">${sum > 66 ? '⚠ ' : ''}合計 ${sum}／66${sum > 66 ? '，超過上限' : ''}</span></div></div>`
     + `<div class="c-f"><span class="c-l">性格</span><select class="sel" data-nat aria-label="性格">${opt('', '不加減', nat)}`
-    + NATURES.map(([u, d]) => opt(`${u}+${d}`, `${STAT_ZH[u]} ↑・${STAT_ZH[d]} ↓`, nat)).join('') + '</select></div>'
-    + `<div class="c-f"><button class="mini" data-setreset>恢復預設</button><span class="muted small">改回使用率前 4 招、最常用的特性與道具（能力點數、性格清空）</span></div></div>`;
+    + (nats.length ? `<optgroup label="${fz}常用">${nats.map(([n, p]) => opt(n.join('+'), `${natText(n)}（${p}%）`, nat)).join('')}</optgroup><optgroup label="其他">` : '')
+    + NATURES.filter(n => !natKeys.includes(n.join('+'))).map(n => opt(n.join('+'), natText(n), nat)).join('') + (nats.length ? '</optgroup>' : '') + '</select></div>'
+    + (top ? `<p class="muted small b-intro">能力點數和性格都沒填：照 OP.GG ${fz}最常見的算（${spText(top.sp)}；${natText(top.nat)}）。</p>` : '')
+    + `<div class="c-f"><button class="mini" data-setreset>恢復預設</button><span class="muted small">改回使用率前 4 招、最常用的特性與道具、最常見的能力點數與性格</span></div></div>`;
 }
 // 實戰：OP.GG 對手 m 的敗於／勝於名單裡有我方挑了寶可夢的隊員（named 是格子索引，同家族算）；
 // 兩份名單都有的不列（名單依次數排，兩隻都熱門時常常兩邊都上榜，看不出誰剋誰）。熱門威脅和出戰選角共用
@@ -433,13 +442,12 @@ function pickTeamType(id) {
   toggleSel(team.slots[team.cur], id, 2);
   renderTeam();
 }
-// 把寶可夢放進目前格子，再跳到後面的空格；換了寶可夢就登錄預設配招（defaultSet：使用率前 4 招、最常用的特性與道具）
+// 把寶可夢放進目前格子，留在這格（下方接著顯示這隻的配招，可以馬上改；下一隻自己點格子）；
+// 換了寶可夢就登錄預設配招（defaultSet：使用率前 4 招、最常用的特性與道具、最常見的能力點數與性格）
 function pickTeamMon(key) {
   if (team.mons[team.cur] !== key) team.sets[team.cur] = defaultSet(key, team.fmt);
   team.slots[team.cur] = MON[key].types.slice();
   team.mons[team.cur] = key;
-  const n = team.slots.findIndex((x, i) => i > team.cur && !x.length);
-  if (n >= 0) team.cur = n;
   renderTeam();
 }
 $('#monsDate').textContent = MONS_DATE + ' 擷取';
@@ -470,7 +478,22 @@ $('#tList').addEventListener('change', e => {
   if (d.mv != null) s.moves = s.moves.map((k, n) => n === +d.mv ? el.value : k === el.value ? '' : k);
   else if (d.ab != null) s.ab = el.value;
   else if (d.it != null) s.item = el.value;
-  else if (d.sp != null) { const v = Math.round(Number(el.value)); s.sp[+d.sp] = Number.isFinite(v) ? Math.max(0, Math.min(32, v)) : 0; }
+  else if (d.sp != null) {
+    const v = Math.round(Number(el.value)), prev = team.sets[i];
+    s.sp[+d.sp] = Number.isFinite(v) ? Math.max(0, Math.min(32, v)) : 0;
+    team.sets[i] = setFilled(s) ? s : null;
+    // 點數欄只更新這格、合計、常見配點與網址，不整區重畫（打完數字直接點旁邊的選單或按鈕時，點的東西才不會被換掉；點數不影響其他卡片）；
+    // 登錄有無、或點數＋性格有沒有填改變（要顯示／收起「照 OP.GG 最常見的算」）時才重畫
+    if (!prev || !team.sets[i] || !hasSpread(prev) || !hasSpread(s)) { renderTeam(); return; }
+    const sum = s.sp.reduce((a, x) => a + x, 0), box = el.closest('.c-sts'), tot = box.lastElementChild, q = box.querySelector('[data-spq]');
+    el.value = s.sp[+d.sp];
+    tot.className = sum > 66 ? 'x-msg' : 'muted small';
+    tot.textContent = `${sum > 66 ? '⚠ ' : ''}合計 ${sum}／66${sum > 66 ? '，超過上限' : ''}`;
+    if (q) q.value = [...q.options].some(o => o.value === s.sp.join('+')) ? s.sp.join('+') : '';
+    saveState();
+    return;
+  }
+  else if (d.spq != null) { if (!el.value) return; s.sp = el.value.split('+').map(Number); }
   else if (d.nat != null) s.nat = el.value ? el.value.split('+').map(Number) : [0, 0];
   team.sets[i] = setFilled(s) ? s : null;
   renderTeam();
@@ -485,3 +508,56 @@ $('#tSum').addEventListener('click', e => {
   if (b && k >= 0) { team.cur = k; pickTeamMon(b.dataset.mon); }
 });
 $('#tClear').addEventListener('click', () => { team.slots = team.slots.map(() => []); team.mons = team.mons.map(() => ''); team.sets = team.sets.map(() => null); team.cur = 0; renderTeam(); });
+// ---------- 記憶的隊伍：存在這台電腦的瀏覽器（localStorage），[{ name 名稱, q 隊伍的網址片段（teamQuery：p、ps、f）}...]，新記住的排前面 ----------
+const SAVED_KEY = 'pkmn-champions-teams';
+const savedTeams = () => {
+  try { const a = JSON.parse(localStorage.getItem(SAVED_KEY) || '[]'); return Array.isArray(a) ? a.filter(x => typeof x?.name === 'string' && typeof x.q === 'string') : []; }
+  catch (e) { return []; }
+};
+const putSaved = list => { try { localStorage.setItem(SAVED_KEY, JSON.stringify(list)); return true; } catch (e) { return false; } };
+const escHTML = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const qKv = q => Object.fromEntries(q.split('&').map(s => s.split('=')));
+// 摘要「單打・烈咬陸鯊、噴火龍、水/飛行」（挑了寶可夢的寫名字，只選屬性的寫屬性）
+function savedText(q) {
+  const kv = qKv(q), mems = (kv.p || '').split(',').filter(Boolean)
+    .map(s => s[0] === '@' ? MON[s.slice(1)]?.zh : s.split('.').map(id => T[id]?.zh).filter(Boolean).join('/')).filter(Boolean);
+  return `${FMT_ZH[kv.f === 'd' ? 'd' : 's']}・${mems.join('、') || '（空）'}`;
+}
+function renderSaved() {
+  const list = savedTeams();
+  $('#tSavedBox').hidden = !list.length;
+  $('#tSavedSum').textContent = `已記憶 ${list.length} 隊（點開載入或刪除）`;
+  $('#tSavedList').innerHTML = list.map((x, n) => `<div class="x-line"><b>${escHTML(x.name)}</b><span class="meta">${savedText(x.q)}</span>`
+    + `<button class="mini" data-load="${n}">載入</button><button class="mini" data-del="${n}">刪除</button></div>`).join('');
+}
+const savedMsg = text => { $('#tSaveMsg').textContent = text; clearTimeout(savedMsg.t); savedMsg.t = setTimeout(() => { $('#tSaveMsg').textContent = ''; }, 2500); };
+// 記住這隊：名稱沒填用隊員名（slotName），同名的覆蓋原本那筆
+$('#tSave').addEventListener('click', () => {
+  const names = team.slots.map((s, i) => s.length ? slotName(i) : '').filter(Boolean);
+  if (!names.length) { savedMsg('隊伍是空的，先選隊員'); return; }
+  const name = $('#tSaveName').value.trim() || names.join('・'), list = savedTeams(), n = list.findIndex(x => x.name === name);
+  if (n >= 0) list[n].q = teamQuery().join('&'); else list.unshift({ name, q: teamQuery().join('&') });
+  if (!putSaved(list)) { savedMsg('瀏覽器不允許儲存（無痕模式或封鎖了網站資料）'); return; }
+  $('#tSaveName').value = name;
+  renderSaved();
+  savedMsg(n >= 0 ? `已更新「${name}」` : `已記住「${name}」`);
+});
+// 載入：換掉目前的 6 隻、配招和單打／雙打（各分頁一起重畫），名稱帶進名稱欄，改完再按「記住這隊」就是更新這筆；刪除先確認
+$('#tSavedList').addEventListener('click', e => {
+  const b = e.target.closest('[data-load], [data-del]');
+  if (!b) return;
+  const list = savedTeams(), n = +(b.dataset.load ?? b.dataset.del), x = list[n];
+  if (!x) return;
+  if (b.dataset.load != null) {
+    loadTeam(qKv(x.q));
+    team.cur = 0;
+    $('#tSaveName').value = x.name;
+    renderTeam(); renderBring(); renderBattle(); renderCalc();
+    savedMsg(`已載入「${x.name}」`);
+  } else if (confirm(`刪除記憶的隊伍「${x.name}」？`)) {
+    list.splice(n, 1);
+    putSaved(list);
+    renderSaved();
+  }
+});
+renderSaved();

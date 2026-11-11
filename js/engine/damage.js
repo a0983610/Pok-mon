@@ -356,10 +356,11 @@ function dmgRows(a, d, o, extra) {
   return { use, ok, why, kos: ok.filter(x => x.r.ko?.[0] > 1e-9), top: ok.find(x => x.r.ko) };
 }
 // 對位的一方（出招表、對戰中共用）：寶可夢 key、fmt；set＝我方登錄的配招（對手不傳）。
-// 沒登錄的欄位照傷害計算的預設（CALC0）：攻擊／特攻 32＋性格、速度 32＋性格、HP／防禦／特防 0、特性用 defAbOf；
+// 能力點數與性格：登錄了就用登錄的，沒有就用 OP.GG 最常見的（topSpread，同傷害計算的預設），沒有統計才照傷害計算的固定投資（CALC0：
+// 攻擊／特攻 32＋性格、速度 32＋性格、HP／防禦／特防 0）；特性：登錄的，沒有用 defAbOf；
 // 道具：登錄了就用登錄的，沒有就帶 OP.GG 最常帶的（topItem，同傷害計算的預設）
 function battler(key, fmt, set) {
-  const sp = set && hasSpread(set) ? { sp: set.sp, nat: set.nat } : {};
+  const sp = set && hasSpread(set) ? { sp: set.sp, nat: set.nat } : topSpread(key, fmt) || {};
   return { key, set, ab: set?.ab || defAbOf(key, fmt), item: set?.item || topItem(key, fmt), ...sp, atkInv: [32, 11], hp: [0, 10], defInv: [0, 10], speInv: [32, 11] };
 }
 // battler b 的最大 HP

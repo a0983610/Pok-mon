@@ -1,12 +1,14 @@
 // 計算引擎：資料與純邏輯，不碰 DOM（畫面在 js/ui/）
 // ---------- 角色：依 OP.GG 常用招式與特性判斷 ----------
 // USAGE[寶可夢 key][s 單打／d 雙打] = { moves／abils／items: [[招式／特性／道具 key, 使用率%]...],
-//   mates 隊友、win 勝於、lose 敗於: [寶可夢 key...]（OP.GG 的順序，前幾名） }
+//   mates 隊友、win 勝於、lose 敗於: [寶可夢 key...]（OP.GG 的順序，前幾名），
+//   spreads: [[[HP, 攻擊, 防禦, 特攻, 特防, 速度 的能力點數], 使用率%]...]、natures: [[[↑能力索引, ↓能力索引]（不加減是 [0, 0]）, 使用率%]...] }
 const parseUse = s => s ? s.split(' ').map(x => { const [k, p] = x.split(':'); return [k, +p]; }) : [];
 const parseKeys = s => s ? s.split(' ') : [];
-const USAGE = Object.fromEntries(Object.entries(USAGE_RAW).map(([k, [sm, dm, sa, da, si, di, st, dt, sw, dw, sl, dl]]) =>
-  [k, { s: { moves: parseUse(sm), abils: parseUse(sa), items: parseUse(si), mates: parseKeys(st), win: parseKeys(sw), lose: parseKeys(sl) },
-        d: { moves: parseUse(dm), abils: parseUse(da), items: parseUse(di), mates: parseKeys(dt), win: parseKeys(dw), lose: parseKeys(dl) } }]));
+const parseNums = s => parseUse(s).map(([k, p]) => [k.split('.').map(Number), p]);
+const USAGE = Object.fromEntries(Object.entries(USAGE_RAW).map(([k, [sm, dm, sa, da, si, di, st, dt, sw, dw, sl, dl, ss, ds, sn, dn]]) =>
+  [k, { s: { moves: parseUse(sm), abils: parseUse(sa), items: parseUse(si), mates: parseKeys(st), win: parseKeys(sw), lose: parseKeys(sl), spreads: parseNums(ss), natures: parseNums(sn) },
+        d: { moves: parseUse(dm), abils: parseUse(da), items: parseUse(di), mates: parseKeys(dt), win: parseKeys(dw), lose: parseKeys(dl), spreads: parseNums(ds), natures: parseNums(dn) } }]));
 // 功能標籤：清單裡的招式或特性使用率達 ROLE_PCT% 就標上。sup＝輔助類：這類招式（含擊掌奇襲、冰凍之風這種
 // 威力低、主要拿來輔助的攻擊招式）和特性都算「輔助招」，用來判斷這隻偏輸出還是偏輔助；守住、替身等不算任何一類
 const ROLE_PCT = 30;
@@ -73,20 +75,33 @@ function useOf(key, fmt, set) {
 // 空的配招；setFilled＝有沒有填任何一欄（什麼都沒填就當沒登錄，存 null）
 const emptySet = () => ({ moves: ['', '', '', ''], item: '', ab: '', sp: [0, 0, 0, 0, 0, 0], nat: [0, 0] });
 const setFilled = s => s.moves.some(Boolean) || !!s.item || !!s.ab || s.sp.some(Boolean) || !!s.nat[0];
-// 配招有填能力點數或性格才用登錄的投資，不然照預設（傷害計算分頁是那頁的投資檔位）
+// 配招有填能力點數或性格才用登錄的投資，不然用 OP.GG 最常見的（topSpread），沒有統計才照預設（傷害計算分頁是那頁的投資檔位）
 const hasSpread = set => set.sp.some(Boolean) || !!set.nat[0];
 // 統計清單依使用率由高到低（同使用率照原本順序）
 const byUse = list => list.slice().sort((x, y) => y[1] - x[1]);
 // 寶可夢 key 在 fmt 最常帶的道具（不算超級石：一般型態不帶超級石，超級進化型態固定帶自己的超級石，回傳 ''）；沒有統計回傳 ''
 const topItem = (key, fmt) => !MON[key] || MON[key].base ? '' : byUse(useOf(key, fmt)?.items || []).find(([k]) => !isStone(k))?.[0] || '';
-// 挑好寶可夢時預填的配招：OP.GG fmt 使用率前 4 招、最常用的特性、最常帶的道具（超級進化的特性、道具是固定的，不填）；
-// 能力點數與性格沒有統計，不填。沒有統計回傳 null（沒登錄）
+// 寶可夢 key 在 fmt 最常見的能力點數＋性格 { sp, nat }（超級進化沿用原型的統計）。OP.GG 的點數和性格分開統計，各取第一可能對不上
+// （例如點數投攻擊、性格卻降攻擊），所以在對得上的組合（性格降的那項沒投點數，不加減的都對得上）裡挑兩者使用率相乘最高的；
+// 同分取點數使用率高的。沒有性格統計時性格不加減；沒有點數統計回傳 null
+function topSpread(key, fmt) {
+  const use = MON[key] && useOf(key, fmt);
+  if (!use?.spreads?.length) return null;
+  let best = null, top = -1;
+  byUse(use.spreads).forEach(([sp, p]) => [...byUse(use.natures), [[0, 0], 0]].forEach(([nat, q]) => {
+    if ((!nat[1] || !sp[nat[1]]) && p * q > top) { top = p * q; best = { sp: sp.slice(), nat: nat.slice() }; }
+  }));
+  return best;
+}
+// 挑好寶可夢時預填的配招：OP.GG fmt 使用率前 4 招、最常用的特性、最常帶的道具（超級進化的特性、道具是固定的，不填）、
+// 最常見的能力點數＋性格（topSpread）。沒有統計回傳 null（沒登錄）
 function defaultSet(key, fmt) {
   const use = useOf(key, fmt);
   if (!use) return null;
-  const s = emptySet();
+  const s = emptySet(), t = topSpread(key, fmt);
   byUse(use.moves).slice(0, 4).forEach(([k], n) => { s.moves[n] = k; });
   if (!MON[key].base) { s.ab = byUse(use.abils)[0]?.[0] || ''; s.item = topItem(key, fmt); }
+  if (t) Object.assign(s, t);
   return setFilled(s) ? s : null;
 }
 function attacksOf(key, defs, fmt, set) {
