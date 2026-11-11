@@ -215,21 +215,24 @@ function answerOf(members, opp) {
 // 熱門寶可夢逐隻檢查隊員 members（連常帶超級石的超級進化型態一起看）
 const threatCheck = (members, fmt, n) => topMons(fmt, n).map(m => ({ mon: m, ...answerOf(members, oppUnit(m, fmt)) }));
 // 從隊員 members（格式同 answerOf）挑 k 隻對上對手 opps（每個是 monUnit）：列出所有組合（idx 是 members 的索引），
-// 依沒解的對手數（少→多）、有解的對手數（多→少）、同一隻兩者兼具的配對總數（多→少）排序。
+// 依多帶的超級石數（少→多）、沒解的對手數（少→多）、有解的對手數（多→少）、同一隻兩者兼具的配對總數（多→少）排序。
 // 一場只能超級進化一隻：alt[i]＝隊員 i 是超級進化時，不進化（原型）的版本。組合裡有 2 隻以上超級進化時，
-// 逐一試只讓其中一隻進化、其他用原型，取排序最好的那種；evo＝進化的那隻（組合裡超級進化不到 2 隻時是 null）
+// 逐一試只讓其中一隻進化、其他用原型，取排序最好的那種；evo＝進化的那隻（組合裡超級進化不到 2 隻時是 null）。
+// waste＝沒進化的超級進化隻數（帶著超級石卻不能進化，等於沒道具）：屬性算分看不出這個損失，所以排第一順位，
+// 有其他帶法就不選，只有超級進化多到非帶不可時才會出現
 function bringCombos(members, opps, k, alt = []) {
   const combos = [];
   (function rec(start, cur) {
     if (cur.length === k) return combos.push(cur.slice());
     for (let i = start; i < members.length; i++) { cur.push(i); rec(i + 1, cur); cur.pop(); }
   })(0, []);
-  const cmp = (x, y) => x.none - y.none || y.solved - x.solved || y.pairs - x.pairs;
+  const cmp = (x, y) => x.waste - y.waste || x.none - y.none || y.solved - x.solved || y.pairs - x.pairs;
   const score = (idx, evo) => {
     const res = opps.map(o => answerOf(idx.map(i => alt[i] && evo != null && i !== evo ? alt[i] : members[i]), o));
     // full[p]：組合裡第 p 隻能兩者兼具的對手數
     const full = idx.map((_, p) => res.filter(r => r.safe.includes(p) && r.hit.includes(p)).length);
-    return { idx, evo, res, full, none: res.filter(r => !r.level).length, solved: res.filter(r => r.level === 2).length, pairs: full.reduce((s, n) => s + n, 0) };
+    return { idx, evo, res, full, waste: Math.max(0, idx.filter(i => alt[i]).length - 1),
+      none: res.filter(r => !r.level).length, solved: res.filter(r => r.level === 2).length, pairs: full.reduce((s, n) => s + n, 0) };
   };
   return combos.map(idx => {
     const megas = idx.filter(i => alt[i]);

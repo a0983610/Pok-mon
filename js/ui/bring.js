@@ -17,8 +17,8 @@ function bringHTML(members, opps) {
   const pairText = leadInfo.length ? `（${leadInfo.join('・')}）` : '';
   const pairWarn = (pick.noAtk ? `<span class="who x-msg">⚠ 這組沒有打手，先發${lead === 2 ? '兩隻都是' : '是'}輔助手，對手強化後容易被打穿</span>` : '')
     + (pick.loose.length ? `<span class="who x-msg">⚠ 先發壓不住的強化手：${pick.loose.map(setupText).join('、')}，留後排或換人處理</span>` : '');
-  const evoText = c => c.evo == null ? '' : `<span class="who">一場只能超級進化一隻：進化 ${name(c.evo)}，`
-    + `${c.idx.filter(j => alt[j] && j !== c.evo).map(j => MON[monOf(j).base].zh).join('、')}以原型上場</span>`;
+  const evoText = c => c.evo == null ? '' : `<span class="who x-msg">⚠ 一場只能超級進化一隻：進化 ${name(c.evo)}，`
+    + `${c.idx.filter(j => alt[j] && j !== c.evo).map(j => MON[monOf(j).base].zh).join('、')}以原型上場（帶超級石但不能進化，等於沒道具）</span>`;
   const cell = (safe, hit) => safe && hit ? ['✔', 'm2'] : hit ? ['剋', 'm1'] : safe ? ['擋', 'm1'] : ['✘', 'mh'];
   let t = '<thead><tr><th class="corner">我方 ↓<br>對手 →</th>'
     + opps.map(([m, i], o) => `<th title="${m.zh}${oppMegas[o].length ? `（可能超級進化成${oppMegas[o].map(x => x.zh).join('、')}）` : ''}">`
@@ -37,7 +37,8 @@ function bringHTML(members, opps) {
   });
   return `<div class="res-head">建議出戰<span class="muted small">（${FMT_ZH[team.fmt]}帶 ${k} 隻，共 ${combos.length} 種帶法）</span></div>`
     + (members.length < BRING_N[team.fmt] ? `<p class="muted small b-intro">我方只有 ${members.length} 隻，全部帶上。</p>` : '')
-    + '<p class="muted small b-intro">依對手裡「沒解」的數量由少到多、「有解」的數量由多到少排序，再比同一隻兩者兼具的配對數。'
+    + '<p class="muted small b-intro">超級石最多帶 1 顆的組合排前面（一場只能超級進化一隻，多帶的那隻等於沒道具），'
+    + '再依對手裡「沒解」的數量由少到多、「有解」的數量由多到少排序，最後比同一隻兩者兼具的配對數。'
     + (lead === 2 ? '先發從第 1 名組合裡挑兩隻一起看搭配：至少要有一隻打手（隊伍角色是物攻或特攻輸出；兩隻都是輔助手的排最後），'
       + '再依序比兩隻合起來有解的對手數、壓不住的強化手少的、共同弱點（對手常帶的攻擊屬性裡兩隻都怕的）少的、'
       + '有沒有先發輔助（順風、戲法空間、擊掌奇襲、跟我來、幫助、威嚇、開天氣／場地等），最後比兩隻的速度種族值。'
@@ -59,8 +60,8 @@ function bringHTML(members, opps) {
     + '「不怕」「剋得到」要對進化前後每種型態都成立才算；各型態的超級石使用率見下方「對手情報」。'
     + '★＝第 1 名組合的成員；名字旁和表頭下方的數字是速度種族值（對手超級進化後速度不同的，下面多一行「超」和進化後的速度）。'
     + '帶幾隻依攻略網站整理的排位規則（單打 6 選 3、雙打 6 選 4），'
-    + '一場只能超級進化一隻也是同一來源：組合裡有 2 隻以上超級進化時，逐一試只進化其中一隻、其他以原型的屬性計，取結果最好的並標出進化哪隻'
-    + '（對位表的每一列仍是進化後的樣子）。只看屬性、常用攻擊招式與速度種族值，不含特性、道具、能力投資。</p>'
+    + '一場只能超級進化一隻也是同一來源：有其他帶法時不會帶 2 顆以上超級石；隊上超級進化多到非帶不可時，逐一試只進化其中一隻、'
+    + '其他以原型的屬性計（帶著超級石，等於沒道具），取結果最好的並標出進化哪隻（對位表的每一列仍是進化後的樣子）。只看屬性、常用攻擊招式與速度種族值，不含特性、道具、能力投資。</p>'
     + moveTableHTML(members, opps, best, alt, oppMegas);
 }
 // 出招表：第 1 名組合 best 的每隻（一場只能超級進化一隻，不進化的用原型）對上每隻對手（常帶超級石的另列超級進化後），
