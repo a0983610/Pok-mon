@@ -4,6 +4,7 @@
 # 整個檔重寫到 index.html 旁邊的 mons-data.js。超級進化沒有獨立統計，網頁端沿用原型的；
 # 超級進化的特性是固定的，名單頁就有，另外存在名單裡。
 # 種族值不太會變，另外寫到 index.html 旁邊的 base-stats.js（不帶日期，資料沒變就不會有 diff）。
+# 寫完後列出這次新出現（舊的 mons-data.js 沒有）、網頁程式（js 資料夾）也還沒提到的招式與特性，提醒特殊效果要另外補程式。
 # 用法：python tools/update_mons.py [index.html 路徑，預設為 repo 根目錄的 index.html；只用來決定寫到哪個資料夾，不會改 index.html]
 # 有排名的寶可夢約 250 隻要逐頁抓，跑一次約 3～5 分鐘。
 import datetime
@@ -27,6 +28,7 @@ SP_N = 6  # 能力點數配法只收前幾種（使用率四捨五入到整數�
 FMTS = ('single', 'double')
 # OP.GG 性格的 increased／decreased → 能力索引（1 攻擊、2 防禦、3 特攻、4 特防、5 速度，同網頁的 STAT_ZH）
 NAT_STAT = {'attack': 1, 'defense': 2, 'spAttack': 3, 'spDefense': 4, 'speed': 5}
+CAT_ZH = {'physical': '物理', 'special': '特殊', 'status': '變化'}
 
 
 def fetch(url=URL, rsc=False):
@@ -131,6 +133,58 @@ def ranked(det, sec, sub, known):
     return ' '.join([p['key'] for p in (det.get(sec) or {}).get(sub) or [] if p['key'] in known][:LIST_N])
 
 
+def section(txt, name):
+    # mons-data.js 裡「const <name> = {」或「[」到「};」或「];」之間的各行
+    m = re.search(r'^const %s = [\[{]\n(.*?)\n[\]}];' % name, txt, re.S | re.M)
+    return m.group(1).split('\n') if m else []
+
+
+def old_keys(txt):
+    # 舊的 mons-data.js 收了哪些招式 key、特性 key（ABILS，加上超級進化名單的特性：沒有說明的不在 ABILS）
+    txt = txt.replace('\r\n', '\n')
+    keys = lambda name: {re.match(r'"([^"]+)":', l).group(1) for l in section(txt, name) if l.startswith('"')}
+    megas = {a for l in section(txt, 'MONS_RAW') for r in [json.loads(l.rstrip(','))] if len(r) > 6 for a in r[6].split('.') if a}
+    return keys('MOVES'), keys('ABILS') | megas
+
+
+def js_words(folder):
+    # 網頁程式（folder 底下的 .js）字串裡的詞（含空白分隔的招式清單）與物件 key（如 { levitate: 'ground' }）：
+    # 招式／特性 key 出現在這裡＝程式已經有考慮它的效果。只看字串與物件 key，免得 key 剛好和變數名相同（如 endure）被當成提到過
+    words = set()
+    for root, _, files in os.walk(folder):
+        for fn in files:
+            if fn.endswith('.js'):
+                with open(os.path.join(root, fn), encoding='utf-8') as f:
+                    s = f.read()
+                for lit in re.findall(r"'[^'\n]*'|\"[^\"\n]*\"|`[^`]*`", s):
+                    words.update(re.findall(r'[a-z0-9]+(?:-[a-z0-9]+)*', lit))
+                words.update(re.findall(r'[{,]\s*([a-z][a-z0-9]*)\s*:', s))
+    return words
+
+
+def remind(old_txt, js_dir, mv_out, ab_out, mega_a):
+    # 印出這次新出現（舊的 mons-data.js 沒有）、網頁程式也還沒提到的招式與特性：網頁只會照威力、屬性、分類算，
+    # 先制、範圍、連續攻擊、特性效果這類特殊效果要另外補程式。下次更新時它們就算舊的了，只會列這一次
+    if old_txt is None:
+        print('沒有舊的 mons-data.js 可以比，略過新招式／特性的提醒')
+        return
+    om, oa = old_keys(old_txt)
+    known = js_words(js_dir)
+    new_m = sorted(k for k in mv_out if k not in om and k not in known)
+    new_a = sorted(k for k in set(ab_out) | {k for ks in mega_a.values() for k in ks} if k not in oa and k not in known)
+    if not new_m and not new_a:
+        print('沒有新出現、網頁程式還沒提到的招式／特性')
+        return
+    print('\n【提醒】新出現、網頁程式還沒提到的招式／特性 %d 種（只列這一次，下次更新就算舊的了）：\n'
+          '  網頁只照威力、屬性、分類算；先制、範圍、連續攻擊、特性效果等特殊效果要另外補進 js 的清單' % (len(new_m) + len(new_a)))
+    for k in new_m:
+        zh, _, cat, power, eff = mv_out[k]
+        print('  招式 %s %s（%s%s）：%s' % (k, zh, CAT_ZH.get(cat, cat), '' if power is None else '、威力 %s' % power, eff))
+    for k in new_a:
+        zh, eff = ab_out.get(k, ('', '沒有說明'))
+        print('  特性 %s%s：%s' % (k, ' ' + zh if zh else '', eff))
+
+
 def main(path):
     txt = payload(fetch())
     mons = grab(txt, 'pokemon', '[')
@@ -219,12 +273,14 @@ def main(path):
                 'const BASE_STATS = {\n%s\n};\n') % '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in stats.items())
     out = os.path.dirname(os.path.abspath(path))
     mons_path = os.path.join(out, 'mons-data.js')
-    # 換行沿用既有的 mons-data.js（Windows 上 git 取出來是 CRLF），檔案還不存在就用 LF
+    # 換行沿用既有的 mons-data.js（Windows 上 git 取出來是 CRLF），檔案還不存在就用 LF；舊內容留著，寫完後比出新出現的招式／特性
+    old_txt = None
     if os.path.exists(mons_path):
-        with open(mons_path, 'rb') as f:
-            if f.readline().endswith(b'\r\n'):
-                mons_js = mons_js.replace('\n', '\r\n')
-                stats_js = stats_js.replace('\n', '\r\n')
+        with open(mons_path, encoding='utf-8', newline='') as f:
+            old_txt = f.read()
+        if old_txt.split('\n', 1)[0].endswith('\r'):
+            mons_js = mons_js.replace('\n', '\r\n')
+            stats_js = stats_js.replace('\n', '\r\n')
     for p, s in ((mons_path, mons_js), (os.path.join(out, 'base-stats.js'), stats_js)):
         with open(p, 'w', encoding='utf-8', newline='') as f:
             f.write(s)
@@ -233,6 +289,7 @@ def main(path):
         sum(1 for u in use.values() if u[0] or u[1]), sum(1 for u in use.values() if u[12] or u[13]),
         sum(1 for u in use.values() if u[14] or u[15]), len(mv_out), len(ab_out), len(it_out), len(mons_js.encode())))
     print('前 3 筆：', rows[:3])
+    remind(old_txt, os.path.join(out, 'js'), mv_out, ab_out, mega_a)
 
 
 if __name__ == '__main__':
