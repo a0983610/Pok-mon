@@ -12,8 +12,8 @@
 //   bi＝對手各格標的道具（沒標的空白、用預設，沒有道具寫 -）、bb＝對手各格選的特性、bx／by＝我方／對手各格選的型態、bw＝天氣、bf＝場地、br=1（戲法空間）、bg＝有順風的一方（me.opp）、
 //   bk＝我方這場帶的隊伍格子（. 分隔；照出戰選角時不寫，全部拿掉寫 -）、bv＝對手出場過的格子（. 分隔）、
 //   bu＝對手各格用過的招式（招式 key 用 + 接）、bz＝對手各格改過的能力點數與性格（「HP+攻擊+防禦+特攻+特防+速度.↑+↓」，沒改的那半空白）
-//   模擬對戰：sm=opp（對上出戰選角的對手；隨機熱門隊不寫）、sr＝隨機隊從排名前幾名挑（30 不寫）、sn＝場數（100 不寫）、
-//   sa＝決策方式 fast／fine（標準 std 不寫）
+//   模擬對戰：sb＝我方自己點的帶出場格子（先發排第一，. 分隔；照出戰選角建議時不寫）、sv＝超級進化的格子（自己點過才寫）、
+//   sk＝對手每種帶法打幾場（10 不寫）、sa＝決策方式 fast／fine（標準 std 不寫）
 const STATE_KEY = 'pkmn-champions-state';
 // 各格的值用逗號接起來，尾端空白的不寫
 const joinTrim = a => { const s = a.slice(); while (s.length && !s[s.length - 1]) s.pop(); return s.join(','); };
@@ -69,9 +69,12 @@ function stateQuery() {
     ['bk', battle.bring ? battle.bring.join('.') || '-' : ''], ['bv', battle.seen.map((v, i) => v ? i : -1).filter(i => i >= 0).join('.')],
     ['bu', joinTrim(battle.used.map(u => u.join('+')))], ['bz', joinTrim(battle.osp.map(o => o ? `${o.sp ? o.sp.join('+') : ''}.${o.nat ? o.nat.join('+') : ''}` : ''))]]
     .forEach(([k, v]) => { if (v) q.push(k + '=' + v); });
-  if (sim.mode !== SIM_MODES[0]) q.push('sm=' + sim.mode);
-  if (sim.range !== SIM_RANGES[0]) q.push('sr=' + sim.range);
-  if (sim.n !== SIM_NS[0]) q.push('sn=' + sim.n);
+  if (sim.sel) {
+    const pk = simMyPick();
+    q.push('sb=' + (pk.slots.join('.') || '-'));
+    if (sim.evo >= 0) q.push('sv=' + sim.evo);
+  }
+  if (sim.k !== SIM_KS[0]) q.push('sk=' + sim.k);
   if (sim.algo !== 'std') q.push('sa=' + sim.algo);
   return q.join('&');
 }
@@ -179,9 +182,10 @@ function loadState(q) {
       nat: nat.length === 2 && nat.every(v => Number.isInteger(v) && v >= 0 && v <= 5) && (nat[0] ? nat[1] && nat[0] !== nat[1] : !nat[1]) ? nat : undefined };
     return o.sp || o.nat ? o : null;
   });
-  sim.mode = SIM_MODES.includes(kv.sm) ? kv.sm : SIM_MODES[0];
-  sim.range = SIM_RANGES.includes(+kv.sr) ? +kv.sr : SIM_RANGES[0];
-  sim.n = SIM_NS.includes(+kv.sn) ? +kv.sn : SIM_NS[0];
+  // 我方帶出場：只收挑了寶可夢、不重複的格子（- 是全部拿掉）；先發是第一個
+  const sb = kv.sb == null ? null : kv.sb === '-' ? [] : [...new Set(kv.sb.split('.').filter(v => /^[0-5]$/.test(v)).map(Number))].filter(i => team.mons[i]).slice(0, BRING_N.s);
+  Object.assign(sim, { sel: sb, lead: sb?.[0] ?? -1, evo: /^[0-5]$/.test(kv.sv || '') ? +kv.sv : -1 });
+  sim.k = SIM_KS.includes(+kv.sk) ? +kv.sk : SIM_KS[0];
   sim.algo = SIM_ALGOS.some(a => a.id === kv.sa) ? kv.sa : 'std';
 }
 document.addEventListener('click', async e => {

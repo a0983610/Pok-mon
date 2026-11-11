@@ -313,6 +313,7 @@ table.matrix { border-collapse: separate; border-spacing: 0; margin: 0 auto; }
 .c-sum.bad { background: var(--bad-bg); }
 .c-sum.good { background: var(--good-bg); }
 .c-sum.info { background: var(--hl); }
+#sTree .matrix th { white-space: nowrap; }
 .dmg { padding: 8px 0; border-top: 1px solid var(--border); font-size: 14px; }
 .dmg-h { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
 .dmg-h .chip { font-size: 11px; padding: 0 6px; }
@@ -588,30 +589,23 @@ footer a { color: inherit; }
   <section id="p-sim" role="tabpanel" hidden>
     <div class="card">
       <div class="look-top">
-        <p class="muted small b-intro">用電腦讓我方隊伍和對手打很多場單打（6 選 3），雙方每回合都替自己挑最不吃虧的一步，統計勝率、我方每隻的表現和最難對付的對手。我方沿用「隊伍分析」（含登錄的配招）。</p>
+        <p class="muted small b-intro">選好我方這場帶的 3 隻與先發，對手照「出戰選角」的 6 隻，把對手每一種帶法（6 選 3 共 20 種）都用電腦打打看（單打），雙方每回合都替自己挑最不吃虧的一步，列出各帶法下我方的勝率；點「看怎麼打」看開局雙方各種出招的勝率，一步一步往下看。我方沿用「隊伍分析」（含登錄的配招）。</p>
         <div class="top-actions"><button class="btn ghost" data-copy>複製連結</button></div>
       </div>
+      <div class="b-label">我方帶出場<span class="muted small">點 3 隻（點第 4 隻會換掉最早點的），預設是「出戰選角」建議的</span><button class="mini" id="sReset">恢復建議</button></div>
+      <div class="t-row" id="sMine"></div>
+      <div class="t-row" id="sLeadRow"><span class="c-l">先發</span><div class="seg" id="sLead" aria-label="先發"></div></div>
+      <div class="t-row" id="sEvoRow" hidden><span class="c-l">超級進化</span><div class="seg" id="sEvo" aria-label="超級進化哪一隻"></div><span class="muted small">一場只能超級進化一隻，其他以原型上場</span></div>
       <div class="t-row">
-        <div class="seg" id="sMode" aria-label="對手">
-          <button aria-pressed="true">隨機熱門隊</button>
-          <button aria-pressed="false">出戰選角的對手</button>
-        </div>
-      </div>
-      <div class="t-row" id="sRangeRow">
-        <div class="seg" id="sRange" aria-label="隨機隊從單打排名前幾名挑">
-          <button aria-pressed="true">排名前 30</button>
-          <button aria-pressed="false">前 60</button>
-          <button aria-pressed="false">前 100</button>
-        </div>
-      </div>
-      <div class="t-row">
-        <div class="seg" id="sN" aria-label="場數">
-          <button aria-pressed="true">100 場</button>
-          <button aria-pressed="false">300 場</button>
-          <button aria-pressed="false">1000 場</button>
+        <span class="c-l">對手每種帶法</span>
+        <div class="seg" id="sK" aria-label="對手每種帶法打幾場">
+          <button aria-pressed="true">10 場</button>
+          <button aria-pressed="false">30 場</button>
+          <button aria-pressed="false">100 場</button>
         </div>
       </div>
       <div class="t-row">
+        <span class="c-l">決策方式</span>
         <div class="seg" id="sAlgo" aria-label="決策方式">
           <button aria-pressed="false">快速</button>
           <button aria-pressed="true">標準</button>
@@ -626,6 +620,7 @@ footer a { color: inherit; }
       </div>
     </div>
     <div class="card b-card" id="sResult"></div>
+    <div class="card b-card" id="sTree" hidden></div>
   </section>
 
 

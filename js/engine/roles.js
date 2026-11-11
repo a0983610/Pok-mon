@@ -363,7 +363,8 @@ const BRING_N = { s: 3, d: 4 }, LEAD_N = { s: 1, d: 2 };
 // 我方 mems（[{ defs 屬性, key 寶可夢 key（只選屬性的是空字串）, set 登錄的配招（見 useOf）}...]）對上對手 opps（寶可夢）在 fmt 該帶誰、誰先發。回傳
 //   k 帶幾隻、lead 先發幾隻、alt 超級進化不進化時的原型 unit（沒有超級進化是 null）、
 //   oppMegas 對手可能超級進化成的寶可夢、setupBy 每隻對手撐起「強化」標籤的招式、setups 強化手的對手索引、
-//   combos 所有帶法（bringCombos，第一個最好）、pick 第 1 名組合的先發（leadPick）、pairOf 對位（見下）
+//   combos 所有帶法（bringCombos，第一個最好）、pick 第 1 名組合的先發（leadPick）、pairOf 對位（見下）、
+//   leadOf(c) 任一種帶法 c（combos 的一項）的先發（同 pick 的挑法；對戰模擬試對手每種帶法用）
 function bringPlan(mems, opps, fmt) {
   const k = Math.min(BRING_N[fmt], mems.length), lead = Math.min(LEAD_N[fmt], k);
   const units = mems.map(x => ({ defs: x.defs, atk: attacksOf(x.key, x.defs, fmt, x.set) })), monOf = j => MON[mems[j].key];
@@ -393,8 +394,8 @@ function bringPlan(mems, opps, fmt) {
   // 對手的強化手：常帶強化招式（隊伍角色的「強化」標籤，如劍舞、詭計、龍之舞）的，存對手索引和撐起標籤的招式
   const setupBy = opps.map(m => roleOf(m.key, fmt)?.tags.find(t => t.id === 'setup')?.by || []);
   const setups = setupBy.map((by, o) => by.length ? o : -1).filter(o => o >= 0);
-  const pick = leadPick(best, lead, j => unitIn(best, j), j => speIn(best, j), j => keyIn(j, best.evo), oppUnits, setups, fmt, j => mems[j].set);
-  return { k, lead, alt, oppMegas, setupBy, setups, combos, pick, pairOf };
+  const leadOf = c => leadPick(c, lead, j => unitIn(c, j), j => speIn(c, j), j => keyIn(j, c.evo), oppUnits, setups, fmt, j => mems[j].set);
+  return { k, lead, alt, oppMegas, setupBy, setups, combos, pick: leadOf(best), pairOf, leadOf };
 }
 // 猜對手帶誰、誰先發：把對手當成也用 bringPlan 選角，對手 oppKeys（6 格寶可夢 key，空字串＝沒填）對上我方 myKeys（隊伍格子的 key，只選屬性的不算）。
 // 對手看不到我方的配招，雙方都照 OP.GG 最常見的配置算（不傳 set）；對手選一般型態、但某顆超級石使用率過半的，當成那個超級進化型態

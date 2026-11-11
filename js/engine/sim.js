@@ -119,12 +119,11 @@ function simStruggleDmg(st, A, D, rnd) {
   if (scr.reflect || scr['aurora-veil']) d = Math.floor(d / 2);
   return Math.max(1, d);
 }
-// 照 bringPlan 的結果 plan 帶出場（mems 是傳給 bringPlan 的隊員 { key, set, item }）：第 1 名組合、先發排第一；
+// 照 bringPlan 的結果 plan 的帶法 c（combos 的一項）帶出場（mems 是傳給 bringPlan 的隊員 { key, set, item }），先發 lead 排第一；
 // 一場只能超級進化一隻，不進化的以原型上場、沒有道具（同出戰選角）
-function simBring(plan, mems, s, fmt) {
-  const best = plan.combos[0], lead = plan.pick.js[0];
-  return [lead, ...best.idx.filter(j => j !== lead)].map(j => {
-    const x = mems[j], down = !!plan.alt[j] && best.evo != null && j !== best.evo;
+function simBring(plan, mems, s, fmt, c, lead) {
+  return [lead, ...c.idx.filter(j => j !== lead)].map(j => {
+    const x = mems[j], down = !!plan.alt[j] && c.evo != null && j !== c.evo;
     return simMon(down ? MON[x.key].base : x.key, x.set, down ? '' : x.item, s, fmt);
   });
 }
@@ -136,22 +135,29 @@ function simItems(keys, fmt) {
     .forEach(({ i, it }) => { if (!done.has(i) && !taken.has(it)) { out[i] = it; taken.add(it); done.add(i); } });
   return out;
 }
-// 雙方帶誰：我方 mine（[{ key, set }]，隊伍分析挑了寶可夢的）照 bringPlan 選（對手照填的型態看）；對手 oppKeys（6 格以內的寶可夢 key）
-// 當成也用 bringPlan 選（oppBringPlan：超級石過半的當超級進化，看不到我方配招），配招照 OP.GG 常見（defaultSet）、道具不重複（simItems）。
-// 回傳 [我方, 對手]，每方 { plan bringPlan 的結果, keys 隊員 key, mons 帶出場的（simMon，先發排第一）}；有一方是空的回傳 null
-function simSides(mine, oppKeys, fmt) {
+// 出戰選角對我方的建議：mine（[{ key, set, slot 隊伍格子 }]，隊伍分析挑了寶可夢的）對上對手 oppKeys 的 bringPlan 第 1 名帶法；
+// 回傳 { slots 帶的格子（先發排第一）, evo 超級進化的格子（組合裡超級進化不到 2 隻是 -1）}；有一方是空的回傳 null
+function simMyPlan(mine, oppKeys, fmt) {
   const opps = oppKeys.filter(k => MON[k]);
   if (!mine.length || !opps.length) return null;
-  const my = bringPlan(mine.map(x => ({ defs: MON[x.key].types, key: x.key, set: x.set })), opps.map(k => MON[k]), fmt);
-  const op = oppBringPlan(opps, mine.map(x => x.key), fmt), keys = op.mems.map(x => x.key), items = simItems(keys, fmt);
-  const oppMems = keys.map((k, j) => ({ key: k, set: defaultSet(k, fmt), item: items[j] }));
-  return [{ plan: my, keys: mine.map(x => x.key), mons: simBring(my, mine, 0, fmt) }, { plan: op, keys, mons: simBring(op, oppMems, 1, fmt) }];
+  const plan = bringPlan(mine.map(x => ({ defs: MON[x.key].types, key: x.key, set: x.set })), opps.map(k => MON[k]), fmt), best = plan.combos[0], lead = plan.pick.js[0];
+  return { slots: [lead, ...best.idx.filter(j => j !== lead)].map(j => mine[j].slot), evo: best.evo == null ? -1 : mine[best.evo].slot };
 }
-// 從 fmt 排名前 n 隨機挑 6 隻（不含超級進化、不重複）
-function simRandTeam(fmt, n, rnd) {
-  const pool = topMons(fmt, n).map(m => m.key);
-  for (let i = 0; i < Math.min(6, pool.length); i++) { const j = i + Math.floor(rnd() * (pool.length - i)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
-  return pool.slice(0, 6);
+// 我方帶出場的：mine 裡格子 slots 的（先發排第一），配招照登錄的；一場只能超級進化一隻：帶了 2 隻以上超級進化時只有 evo 那格進化
+// （evo 不在裡面就是第一隻超級進化），其他以原型上場、沒有道具
+function simMySide(mine, slots, evo, fmt) {
+  const xs = slots.map(i => mine.find(m => m.slot === i)), megas = xs.filter(x => MON[x.key].base).map(x => x.slot);
+  const up = megas.includes(evo) ? evo : megas[0];
+  return xs.map(x => { const down = !!MON[x.key].base && x.slot !== up; return simMon(down ? MON[x.key].base : x.key, x.set, down ? '' : undefined, 0, fmt); });
+}
+// 對手的每一種帶法：對手 oppKeys（6 格以內）當成也用出戰選角的方法選（oppBringPlan：看得到我方 6 隻 myKeys、看不到配招；超級石過半的當超級進化），
+// 每種帶法（6 選 3 是 20 種）的先發照它對這種帶法的挑法（leadOf）；配招照 OP.GG 常見（defaultSet）、道具同一隊不重複（simItems）。
+// 回傳 [{ rank 這種帶法在對手建議裡排第幾, mons 帶出場的（simMon，先發排第一）}...]（照 rank 排）；沒有對手回傳 []
+function simOppScenarios(oppKeys, myKeys, fmt) {
+  const op = oppBringPlan(oppKeys, myKeys, fmt);
+  if (!op) return [];
+  const keys = op.mems.map(x => x.key), items = simItems(keys, fmt), mems = keys.map((k, j) => ({ key: k, set: defaultSet(k, fmt), item: items[j] }));
+  return op.combos.map((c, r) => ({ rank: r + 1, mons: simBring(op, mems, 1, fmt, c, op.leadOf(c).js[0]) }));
 }
 // 計算快取：同一組對戰可以共用（id 是「哪一方:寶可夢 key」，同一方同一隻的配招固定）
 const simCtx = fmt => ({ fmt, memo: new Map(), spd: new Map() });
@@ -871,16 +877,19 @@ function simUcb(nd, s, opts) {
   return best;
 }
 // 樹搜尋一步：回傳 [我方, 對手] 的選擇；stats＝要不要附上 out.stats＝{ opts 雙方的選擇, v 各組合的平均分數（0～1，我方角度）、
-// n 各組合試的次數, p 雙方的出招比例 }（給畫面、統計用）
-function simSearch(ctx, st, phase, iters, rnd, stats) {
+// win 各組合我方的勝率（打到最後贏 1、輸 0、沒分出勝負 0.5 的平均；沒試過是 null）、n 各組合試的次數, p 雙方的出招比例 }（給畫面、統計用）；
+// uniform＝根節點不用 UCB1、輪流試每一格（樹狀圖要每一格的勝率都有差不多的次數）
+function simSearch(ctx, st, phase, iters, rnd, stats, uniform) {
   const opts = [0, 1].map(s => simPhaseOpts(ctx, st, s, phase));
-  if (opts[0].length === 1 && opts[1].length === 1) return [opts[0][0], opts[1][0]];
-  const root = simNode(), rr = rnd || Math.random, pick = (c, s) => simGreedyPick(ctx, c, s);
+  if (!stats && opts[0].length === 1 && opts[1].length === 1) return [opts[0][0], opts[1][0]];
+  const root = simNode(), rr = rnd || Math.random, pick = (c, s) => simGreedyPick(ctx, c, s), m = opts[0].length;
   for (let it = 0; it < iters; it++) {
     const c = simClone(st), path = [];
     let nd = root, ph = phase;
     while (!simOver(c) && c.turn < SIM_MAX_TURN) {
-      const acts = [0, 1].map(s => simUcb(nd, s, simPhaseOpts(ctx, c, s, ph))), ka = simKey(acts[0]), kb = simKey(acts[1]);
+      const acts = uniform && nd === root ? [opts[0][it % m], opts[1][Math.floor(it / m) % opts[1].length]]
+        : [0, 1].map(s => simUcb(nd, s, simPhaseOpts(ctx, c, s, ph)));
+      const ka = simKey(acts[0]), kb = simKey(acts[1]);
       path.push([nd, ka, kb]);
       if (ph === 'turn') simTurn(ctx, c, acts, rr, 0, pick); else simReplace(c, acts, rr);
       ph = simNeed(c, 0) || simNeed(c, 1) ? 'replace' : 'turn';
@@ -893,15 +902,40 @@ function simSearch(ctx, st, phase, iters, rnd, stats) {
       n.n++;
       [[0, ka, r], [1, kb, 1 - r]].forEach(([s, k, w]) => { const e = n.s[s].get(k); if (e) { e.n++; e.w += w; } else n.s[s].set(k, { n: 1, w }); });
     }
-    if (path.length) { const jk = path[0][1] + '|' + path[0][2], e = root.j.get(jk); if (e) { e.n++; e.w += r; } else root.j.set(jk, { n: 1, w: r }); }
+    // 勝負：simValue 1 以上＝我方贏（r ≥ 5/6）、−1 以下＝輸（r ≤ 1/6），中間是還沒分出勝負
+    const k = r >= 5 / 6 ? 1 : r <= 1 / 6 ? 0 : 0.5;
+    if (path.length) { const jk = path[0][1] + '|' + path[0][2], e = root.j.get(jk); if (e) { e.n++; e.w += r; e.k += k; } else root.j.set(jk, { n: 1, w: r, k }); }
   }
   // 根節點各組合的平均分數（沒試過的組合用雙方各自的平均補：我方那招的平均與 1 減對手那招的平均取中間）
   const mean = (s, o) => { const e = root.s[s].get(simKey(o)); return e ? e.w / e.n : 0.5; };
   const cell = (a, b) => root.j.get(simKey(a) + '|' + simKey(b));
   const v = opts[0].map(a => opts[1].map(b => { const e = cell(a, b); return e ? e.w / e.n : (mean(0, a) + 1 - mean(1, b)) / 2; }));
   const p = simMix(v), out = [0, 1].map(s => opts[s][simDraw(p[s], rnd)]);
-  if (stats) out.stats = { opts, v, n: opts[0].map(a => opts[1].map(b => cell(a, b)?.n || 0)), p };
+  if (stats) out.stats = { opts, v, n: opts[0].map(a => opts[1].map(b => cell(a, b)?.n || 0)),
+    win: opts[0].map(a => opts[1].map(b => { const e = cell(a, b); return e ? e.k / e.n : null; })), p };
   return out;
+}
+// 一場的開頭局面：sides＝[我方, 對手]，每方 { mons 帶出場的（simMon，先發排第一）}（會複製一份）；先發都在場上
+function simStart(sides, log) {
+  const st = { sd: sides.map(x => simSide0(x.mons.map(simCloneMon))), turn: 0, fut: [], idle: 0, log: log ? [] : null };
+  st.sd.forEach(x => Object.assign(x.mons[0], { in: 0, out: true }));
+  return st;
+}
+// 這個局面接下來是哪個階段：'over' 分出勝負（或打滿回合）、'replace' 有人倒下要補位、'turn' 選這回合的招式
+const simPhase = st => simOver(st) || st.turn >= SIM_MAX_TURN ? 'over' : simNeed(st, 0) || simNeed(st, 1) ? 'replace' : 'turn';
+// 樹狀圖的一層：局面 st 每一格「我方出 X × 對手出 Y」用樹搜尋平均試（共 iters 次），回傳 simSearch 的 stats 加上 phase
+function simView(ctx, st, iters) {
+  const phase = simPhase(st);
+  return phase === 'over' ? { phase } : { phase, ...simSearch(ctx, st, phase, iters, null, true, true).stats };
+}
+// 樹狀圖往下一步：照期望值打 acts 這一回合（或補位）；回傳 { st 新局面, log 這一步的紀錄 }（不改到原本的 st）
+function simStep(ctx, st, acts) {
+  const c = simClone(st), phase = simPhase(st);
+  c.log = [];
+  if (phase === 'turn') simTurn(ctx, c, acts, null, 0, (x, s) => simGreedyPick(ctx, x, s)); else simReplace(c, acts, null);
+  const log = c.log;
+  c.log = null;
+  return { st: c, log };
 }
 // 照機率 p 抽一個索引（沒給 rnd 取機率最高的）
 function simDraw(p, rnd) {
@@ -950,13 +984,13 @@ function simDecide(ctx, st, phase, rnd) {
   const [pa, pb] = simMix(v);
   return [A[simDraw(pa, rnd)], B[simDraw(pb, rnd)]];
 }
-// 打一場：sides 是 simSides 的結果（帶出場的隻會複製一份，不改到 sides）；rnd 亂數；log＝要不要逐回合紀錄。
+// 打一場：sides＝[我方, 對手]，每方 { mons 帶出場的（simMySide／simOppScenarios 的 mons，先發排第一）}（會複製一份，不改到 sides）；
+// rnd 亂數；log＝要不要逐回合紀錄。
 // opt：{ algo 決策方式 'tree' 樹搜尋（simSearch，iters 次）／'ply1' 往前算一回合（simDecide），可以給 [我方, 對手] 各用一種；預設 'ply1' }。
 // 雙方每回合、每次補位都照決策方式選（照比例用 rnd 抽）；打完換人、被吹走換上誰用簡單規則（simGreedyPick）。
 // 回傳 { res 1 我方贏／-1 輸（同時全倒看 simWinner）／0 平手（打滿 SIM_MAX_TURN 回合）, turns, mons [我方, 對手] 帶出場的（kos、hp、max、out）, log }
 function simPlay(ctx, sides, rnd, log, opt = {}) {
-  const st = { sd: sides.map(x => simSide0(x.mons.map(simCloneMon))), turn: 0, fut: [], idle: 0, log: log ? [] : null };
-  st.sd.forEach(x => Object.assign(x.mons[0], { in: 0, out: true }));
+  const st = simStart(sides, log);
   if (st.log) st.log.push(`先發：我方${MON[simAct(st, 0).key].zh}、對手${MON[simAct(st, 1).key].zh}`);
   const pick = (c, s) => simGreedyPick(ctx, c, s), algo = [].concat(opt.algo || 'ply1');
   const by = (a, phase) => a === 'tree' ? simSearch(ctx, st, phase, opt.iters || 200, rnd) : simDecide(ctx, st, phase, rnd);
