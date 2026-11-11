@@ -73,6 +73,7 @@ function bringHTML(members, opps) {
       + (r ? '' : `<span class="who">先發：${leads.map(name).join('、')}${pairText}</span>${pairWarn}`) + synText(c) + evoText(c)
       + (c.none ? `<span class="who x-msg">沒解：${c.res.map((x, o) => x.level ? '' : opps[o][0].zh).filter(Boolean).join('、')}</span>` : '')
       + '</div>').join('')
+    + oppGuessHTML()
     + `<h3>對位表</h3><div class="mwrap cover"><table class="matrix vs">${t}</tbody></table></div>`
     + '<p class="note">※ ✔＝換上來先吃牠最痛的一招（取最高傷害）、剩下的 HP 對打還打得贏；贏＝正面對打（雙方 HP 全滿）打得贏；'
     + '⚠＝打不贏，而且牠一下就打得倒我、又比我先出手（速度較快、同速或用先制招式），還沒出手就倒；✘＝其他打不贏的。'
@@ -93,6 +94,16 @@ function bringHTML(members, opps) {
     + Object.entries(ALLY_SAFE).map(([ty, ks]) => `${ks.filter(k => ABILS[k]).map(k => ABILS[k][0]).join('／')}（${T[ty].zh}）`).filter(s => !s.startsWith('（')).join('、')
     + `${ITEMS['air-balloon'] ? `，或帶${ITEMS['air-balloon'][0]}（${T.ground.zh}）` : ''}就不算。</p>`
     + moveTableHTML(members, opps, best, alt, oppMegas);
+}
+// 對手可能帶的（oppBringPlan）：前 3 種帶法，第 1 種附先發；名字照對手格子選的型態
+function oppGuessHTML() {
+  const g = oppBringPlan(bring.opp, team.mons, team.fmt), head = '<h3>對手可能帶的</h3>';
+  if (!g) return head + '<p class="muted small b-intro">我方都只選屬性、沒挑寶可夢，沒有能力值可以替對手算。</p>';
+  const nm = j => `${g.at[j] + 1} ${MON[bring.opp[g.at[j]]].zh}`;
+  return head + '<p class="muted small b-intro">把對手當成也用上面同一套方法選角猜的，只是參考：對手看不到我方的配招，所以我方也照 OP.GG 最常見的配置算'
+    + '（只選屬性的隊員不算）；對手選一般型態、但某顆超級石使用率過半的，當成會超級進化。到「對戰中」放上場的對手會標成出場過，再改猜還沒出場的。</p>'
+    + g.combos.slice(0, 3).map((c, r) => `<div class="combo"><span class="rank">${r + 1}</span><b>${c.idx.map(nm).join('、')}</b>`
+      + (r ? '' : `<span class="who">先發：${g.pick.js.map(nm).join('、')}</span>`) + '</div>').join('');
 }
 // 出招表：第 1 名組合 best 的每隻（一場只能超級進化一隻，不進化的用原型）對上每隻對手（常帶超級石的另列超級進化後），
 // 用 duel 算誰先動、我方最痛的一招、對手打回來最痛的一招；我方有登錄配招的照登錄的算

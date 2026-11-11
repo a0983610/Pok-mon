@@ -366,11 +366,11 @@ function battler(key, fmt, set) {
 // battler b 的最大 HP
 const hpOf = b => statOf(MON[b.key].bs[0], invAt(b, 0, b.hp)[0], 0);
 // 一對一對位：x、y 是 battler，對戰中另外帶 st { atk, def, spa, spd, spe } 能力變化、cur 目前剩下的 HP、tw 順風（沒給的當沒有、全滿）；
-// f：{ fmt, weather, terrain, tr }（沒給的當沒有）；灼傷、麻痺、幫助、牆、開場特性都不算。
+// f：{ fmt, weather, terrain, tr, crit 雙方都急所（對戰中反推傷害用）}（沒給的當沒有）；灼傷、麻痺、幫助、牆、開場特性都不算。
 // 道具兩個方向都帶著（damageCalc 只讀這個方向用得到的效果，如攻擊方不看樹果）。
 // 回傳 xy＝x 打 y、yx＝y 打 x（dmgRows 的結果）、spd／first（speedPair：first 0＝x 先動、1＝y 先動、-1＝同速）
 function duel(x, y, f) {
-  const o = { fmt: f.fmt, weather: f.weather || '', crit: false, terrain: f.terrain || '', hh: false, walls: [], burn: false };
+  const o = { fmt: f.fmt, weather: f.weather || '', crit: !!f.crit, terrain: f.terrain || '', hh: false, walls: [], burn: false };
   const st = (b, k) => b.st?.[k] || 0;
   const atk = b => ({ key: b.key, inv: b.atkInv, sp: b.sp, nat: b.nat, st: { atk: st(b, 'atk'), spa: st(b, 'spa') }, item: b.item, ab: b.ab, set: b.set });
   const def = b => ({ key: b.key, hp: b.hp, inv: b.defInv, sp: b.sp, nat: b.nat, st: { def: st(b, 'def'), spd: st(b, 'spd') }, item: b.item, ab: b.ab, cur: b.cur });
@@ -387,15 +387,16 @@ function fastestKO(rows) {
 // 一對一誰先打倒誰：a 我方、b 對手（fastestKO），first 同 duel。幾下少的贏；一樣多時有先制招式的一方先出手，
 // 都有或都沒有看速度（同速算我方沒贏）；雙方四擊都打不倒算沒贏
 const winKO = (a, b, first) => a.n < 9 && (a.n < b.n || a.n === b.n && (a.pri !== b.pri ? a.pri : first === 0));
-// 出戰選角的一對一：x 我方、y 對手（battler），f 同 duel。回傳
-//   head：正面對打（雙方全滿）先打倒牠；sw：換上來先吃牠最痛的一招（最高傷害），剩下的 HP 對打還先打倒牠（換上來吃過一下，
+// 出戰選角的一對一：x 我方、y 對手（battler；對戰中的換人另外帶 cur 等，同 duel），f 同 duel。回傳
+//   head：正面對打（雙方全滿，有 cur 的照 cur）先打倒牠；sw：換上來先吃牠最痛的一招（最高傷害），剩下的 HP 對打還先打倒牠（換上來吃過一下，
 //   氣勢披帶、多重鱗片就沒用了）；ohko：沒贏、而且牠一下就打得倒我又比我先出手（速度或先制招式）；
-//   first、spd（同 duel）、me／opp（fastestKO 的 n）給畫面說明用
+//   first、spd（同 duel）、me／opp（fastestKO 的 n）、left 換上來吃過最痛的一招後剩下的 HP（0 以下＝會倒）、big 那一招（沒有會痛的招式是 ''）給畫面說明用
 function matchup(x, y, f) {
   const d = duel(x, y, f), a = fastestKO(d.xy), b = fastestKO(d.yx), head = winKO(a, b, d.first);
   // 換上來剩下的 HP 比全滿少，正面都打不贏的換上來也打不贏，不用再算
-  const cur = hpOf(x) - Math.max(0, ...d.yx.ok.map(r => r.r.max || 0));
+  const cur = (x.cur ?? hpOf(x)) - Math.max(0, ...d.yx.ok.map(r => r.r.max || 0));
   let sw = false;
   if (head && cur > 0) { const d2 = duel({ ...x, cur }, y, f); sw = winKO(fastestKO(d2.xy), fastestKO(d2.yx), d2.first); }
-  return { head, sw, ohko: !head && b.n === 1 && (b.pri || d.first !== 0), first: d.first, spd: d.spd.map(s => s.v), me: a.n, opp: b.n };
+  return { head, sw, ohko: !head && b.n === 1 && (b.pri || d.first !== 0), first: d.first, spd: d.spd.map(s => s.v), me: a.n, opp: b.n,
+    left: cur, big: d.yx.ok[0]?.r.max ? d.yx.ok[0].k : '' };
 }
