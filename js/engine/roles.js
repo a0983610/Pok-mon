@@ -249,17 +249,18 @@ const threatCheck = (members, fmt, n) => topMons(fmt, n).map(m => ({ mon: m, ...
 // 從 n 隻隊員挑 k 隻對上 oppN 隻對手：列出所有組合（idx 是隊員索引），每隻對手看組合裡的對位（pairOf，見 bringPlan）：
 // 有人換上來吃一下還打得贏（sw）＝有解(2)、有人正面打得贏（head）＝半解(1)、都沒有＝沒解(0)。
 // res[o]＝{ safe 換上能扛的、hit 正面打得贏的、ohko 會被牠先手一擊的（都是組合裡的位置）, level }。
-// 依多帶的超級石數（少→多）、沒解的對手數（少→多）、有解的對手數（多→少）、換上能扛的配對總數（多→少）排序。
+// 依多帶的超級石數（少→多）、沒解的對手數（少→多）、有解的對手數（多→少）、組合內的搭配（synOf 的 score：
+// 一起帶才成立的攻擊搭配數減搭配提醒數）（高→低）、換上能扛的配對總數（多→少）排序。
 // 一場只能超級進化一隻：mega[i]＝隊員 i 是超級進化。組合裡有 2 隻以上超級進化時，逐一試只讓其中一隻進化、其他用原型，
 // 取排序最好的那種；evo＝進化的那隻（組合裡超級進化不到 2 隻時是 null）。
 // waste＝沒進化的超級進化隻數（帶著超級石卻不能進化，等於沒道具）：排第一順位，有其他帶法就不選，只有超級進化多到非帶不可時才會出現
-function bringCombos(n, oppN, k, mega, pairOf) {
+function bringCombos(n, oppN, k, mega, pairOf, synOf = () => ({ score: 0 })) {
   const combos = [];
   (function rec(start, cur) {
     if (cur.length === k) return combos.push(cur.slice());
     for (let i = start; i < n; i++) { cur.push(i); rec(i + 1, cur); cur.pop(); }
   })(0, []);
-  const cmp = (x, y) => x.waste - y.waste || x.none - y.none || y.solved - x.solved || y.pairs - x.pairs;
+  const cmp = (x, y) => x.waste - y.waste || x.none - y.none || y.solved - x.solved || y.syn.score - x.syn.score || y.pairs - x.pairs;
   const score = (idx, evo) => {
     const res = Array.from({ length: oppN }, (_, o) => {
       const prs = idx.map(i => pairOf(i, o, mega[i] && evo != null && i !== evo)), at = f => prs.map((x, p) => x[f] ? p : -1).filter(p => p >= 0);
@@ -268,7 +269,7 @@ function bringCombos(n, oppN, k, mega, pairOf) {
     });
     // full[p]：組合裡第 p 隻換上能扛的對手數
     const full = idx.map((_, p) => res.filter(r => r.safe.includes(p)).length);
-    return { idx, evo, res, full, waste: Math.max(0, idx.filter(i => mega[i]).length - 1),
+    return { idx, evo, res, full, waste: Math.max(0, idx.filter(i => mega[i]).length - 1), syn: synOf(idx, evo),
       none: res.filter(r => !r.level).length, solved: res.filter(r => r.level === 2).length, pairs: full.reduce((s, x) => s + x, 0) };
   };
   return combos.map(idx => {
@@ -288,15 +289,55 @@ function antiSetupOf(key, fmt, set) {
     : (use?.abils || []).filter(([k, p]) => k === 'unaware' && p >= ROLE_PCT).map(([k, p]) => `特性${abilZh(k)}` + (use.reg?.abils ? '' : ` ${p}%`));
   return [...moves, ...abils];
 }
+// 雙打會打到隊友的範圍招式，和讓隊友不受影響的特性（屬性免疫另外看 eff；飄浮之外，地面招式帶氣球也打不到）
+const ALLY_HIT = ['earthquake', 'bulldoze', 'magnitude', 'surf', 'discharge', 'lava-plume', 'sludge-wave', 'boomburst', 'explosion', 'self-destruct',
+  'petal-blizzard', 'parabolic-charge', 'searing-shot', 'brutal-swing'];
+const ALLY_SAFE = { ground: ['levitate'], water: ['water-absorb', 'storm-drain', 'dry-skin'], electric: ['volt-absorb', 'lightning-rod', 'motor-drive'],
+  fire: ['flash-fire', 'well-baked-body'], grass: ['sap-sipper'] };
+// 雙打先發兩隻（a、b：{ key, set }，只選屬性的 key 是空字串）一起上場的搭配：good＝加分的、bad＝扣分的說明（都是「誰怎樣」的短句）。
+// 招式看 fmt 常用（使用率 ROLE_PCT% 以上，登錄的照登錄），特性、道具同 battler（登錄的，沒有用預設）。
+//   加分：擊掌奇襲＋另一隻是打手、引誘（跟我來、憤怒粉）＋另一隻常帶強化招式、順風／戲法空間＋另一隻是慢速打手
+//   （不是輔助手、又不比熱門前 THREAT_N 的一半快，同隊伍特性的「攻擊搭配」）、開天氣／場地＋另一隻靠它
+//   扣分：會打到隊友的範圍招式（ALLY_HIT）而另一隻不免疫（屬性、ALLY_SAFE 特性、地面招式帶氣球）、兩隻開不同天氣（或場地）、順風＋戲法空間
+function leadSyn(a, b, fmt) {
+  const good = [], bad = [];
+  if (!a.key || !b.key) return { good, bad };
+  const top = topMons(fmt, THREAT_N), info = x => {
+    const use = useOf(x.key, fmt, x.set), moves = (use?.moves || []).filter(([, p]) => p >= ROLE_PCT).map(([k]) => k), m = MON[x.key];
+    const ab = x.set?.ab || defAbOf(x.key, fmt), r = roleOf(x.key, fmt, x.set);
+    const sets = [ab, ...moves].filter(k => FIELD_SET[k]).map(k => FIELD_SET[k]), needs = [ab, ...moves].filter(k => FIELD_NEED[k]).map(k => FIELD_NEED[k]);
+    return { zh: m.zh, types: m.types, moves, ab, item: x.set?.item || topItem(x.key, fmt), atk: r && r.main !== 'sup',
+      slow: r && r.main !== 'sup' && top.filter(t => t.spe < m.spe).length * 2 < top.length, setup: moves.some(k => ROLE.setup.moves.includes(k)), sets, needs };
+  };
+  const [x, y] = [info(a), info(b)], mv = (p, k) => p.moves.includes(k) ? MOVES[k][0] : '';
+  [[x, y], [y, x]].forEach(([p, q]) => {
+    if (p.moves.includes('fake-out') && q.atk) good.push(`${p.zh}擊掌奇襲掩護${q.zh}`);
+    const rd = mv(p, 'follow-me') || mv(p, 'rage-powder');
+    if (rd && q.setup) good.push(`${p.zh}${rd}讓${q.zh}強化`);
+    ['tailwind', 'trick-room'].forEach(k => { if (p.moves.includes(k) && q.slow) good.push(`${p.zh}${MOVES[k][0]}讓${q.zh}先動`); });
+    p.sets.filter(f => q.needs.includes(f)).forEach(f => good.push(`${p.zh}開${FIELD_ZH[f]}給${q.zh}`));
+    p.moves.filter(k => ALLY_HIT.includes(k)).forEach(k => {
+      const ty = MOVES[k][1];
+      if (!(eff(ty, q.types) === 0 || ALLY_SAFE[ty]?.includes(q.ab) || ty === 'ground' && q.item === 'air-balloon')) bad.push(`${p.zh}的${MOVES[k][0]}會打到${q.zh}`);
+    });
+  });
+  const wx = f => WEATHERS.includes(f);
+  [wx, f => !wx(f)].forEach(isKind => { const fs = new Set([...x.sets, ...y.sets].filter(isKind)); if (fs.size > 1) bad.push(`兩隻開不同${isKind('sun') ? '天氣' : '場地'}（${[...fs].map(f => FIELD_ZH[f]).join('、')}）`); });
+  if ([x, y].some(p => p.moves.includes('tailwind')) && [x, y].some(p => p.moves.includes('trick-room'))) bad.push('順風和戲法空間互相衝突');
+  return { good: [...new Set(good)], bad: [...new Set(bad)] };
+}
 // 先發：從組合 c（bringCombos 的結果）任挑 n 隻（單打 1 隻、雙打 2 隻），依序比
 //   1. noAtk：都是輔助手（隊伍角色的 main 是 sup）的排最後；只選屬性、沒有統計的隊員當打手
-//   2. 正面打得贏的對手數 cover 減掉會被先手一擊的對手數 danger（res 的 ohko：牠一下打得倒先發其中一隻、又比牠先出手）（高→低）：
-//      只看不被一擊會挑到什麼都打不贏的先發，只看打得贏又會挑到常被秒的，兩個一起算；同分時 danger 少的優先
-//   3. loose：壓不住的對手強化手（setups 裡的對手索引；正面都打不贏、也都沒有 antiSetupOf 的招式／特性）（少→多）
-//   4. weak：共同弱點＝對手常帶的攻擊屬性（含算進去的超級進化型態）裡兩隻都受到 ×2 以上的（少→多；雙打才看）
-//   5. sup：有沒有先發輔助（LEAD_SUP，看 fmt 的 OP.GG 常用招式／特性，寫成「順風 57%」；雙打才看，只選屬性的隊員沒有）
-//   6. 速度種族值加總（高→低）
-// uOf、sOf、kOf、setOf：members 索引 → unit（不進化的超級進化用原型）、速度、寶可夢 key、登錄的配招（見 useOf）；opps 是對手的 unit（oppUnit）
+//   2. 正面打得贏的對手數 cover 減掉會被先手一擊的對手數 danger（res 的 ohko：牠一下打得倒先發其中一隻、又比牠先出手），
+//      再加上兩隻一起上場的搭配 syn（leadSyn，加分的數量減扣分的數量；雙打才有）（高→低）：只看不被一擊會挑到什麼都打不贏的先發，
+//      只看打得贏又會挑到常被秒的；搭配（天氣、順風、擊掌奇襲…）是對位計算沒算進去的效果，每個當一隻對手的分量
+//   3. 同分時 danger 少的、syn 多的優先
+//   4. loose：壓不住的對手強化手（setups 裡的對手索引；正面都打不贏、也都沒有 antiSetupOf 的招式／特性）（少→多）
+//   5. weak：共同弱點＝對手常帶的攻擊屬性（含算進去的超級進化型態）裡兩隻都受到 ×2 以上的（少→多；雙打才看）
+//   6. sup：有沒有先發輔助（LEAD_SUP，看 fmt 的 OP.GG 常用招式／特性，寫成「順風 57%」；雙打才看，只選屬性的隊員沒有）
+//   7. 速度種族值加總（高→低）
+// uOf、sOf、kOf、setOf：members 索引 → unit（不進化的超級進化用原型）、速度、寶可夢 key（不進化的超級進化用原型）、登錄的配招（見 useOf）；
+// opps 是對手的 unit（oppUnit）
 function leadPick(c, n, uOf, sOf, kOf, opps, setups, fmt, setOf = () => undefined) {
   const atk = [...new Set(opps.flatMap(u => [u, ...(u.megas || [])].flatMap(f => f.atk.map(a => a.ty))))];
   const roleIn = j => kOf(j) && roleOf(kOf(j), fmt, setOf(j));
@@ -306,14 +347,16 @@ function leadPick(c, n, uOf, sOf, kOf, opps, setups, fmt, setOf = () => undefine
   const sets = n === 1 ? c.idx.map((_, p) => [p]) : c.idx.flatMap((_, p) => c.idx.slice(p + 1).map((__, d) => [p, p + 1 + d]));
   return sets.map(ps => {
     const js = ps.map(p => c.idx[p]), anti = js.some(j => antiOf(j).length);
-    return { js, noAtk: js.every(j => roleIn(j)?.main === 'sup'),
+    const syn = n === 2 ? leadSyn(...js.map(j => ({ key: kOf(j), set: setOf(j) })), fmt) : { good: [], bad: [] };
+    return { js, syn, noAtk: js.every(j => roleIn(j)?.main === 'sup'),
       danger: c.res.map((r, o) => ps.some(x => r.ohko.includes(x)) ? o : -1).filter(o => o >= 0),
       cover: c.res.filter(r => ps.some(x => r.hit.includes(x))).length,
       loose: anti ? [] : setups.filter(o => !ps.some(x => c.res[o].hit.includes(x))),
       weak: n === 2 ? atk.filter(ty => js.every(j => eff(ty, uOf(j).defs) >= 2)) : [],
       sup: n === 2 ? js.map(j => [j, supOf(j)]).filter(([, by]) => by.length) : [], spe: js.reduce((s, j) => s + sOf(j), 0) };
-  }).sort((x, y) => x.noAtk - y.noAtk || (y.cover - y.danger.length) - (x.cover - x.danger.length) || x.danger.length - y.danger.length
-    || x.loose.length - y.loose.length || x.weak.length - y.weak.length || (y.sup.length > 0) - (x.sup.length > 0) || y.spe - x.spe)[0];
+  }).map(x => ({ ...x, synN: x.syn.good.length - x.syn.bad.length }))
+    .sort((x, y) => x.noAtk - y.noAtk || (y.cover - y.danger.length + y.synN) - (x.cover - x.danger.length + x.synN) || x.danger.length - y.danger.length
+      || y.synN - x.synN || x.loose.length - y.loose.length || x.weak.length - y.weak.length || (y.sup.length > 0) - (x.sup.length > 0) || y.spe - x.spe)[0];
 }
 // 出戰選角：帶幾隻、先發幾隻依攻略網站整理的排位規則（單打 6 選 3、雙打 6 選 4）
 const BRING_N = { s: 3, d: 4 }, LEAD_N = { s: 1, d: 2 };
@@ -332,7 +375,17 @@ function bringPlan(mems, opps, fmt) {
   // 隊員 j（base＝這場不進化、以原型上場，帶著超級石等於沒道具）對上對手 o：duelVs（速度與傷害）；只選屬性、或沒有招式資料的看屬性（typeVs，type＝true）
   const pairOf = (j, o, base = false) => duelVs(mems[j].key && (base ? MON[mems[j].key].base : mems[j].key), mems[j].set, fmt, opps[o], base)
     || typeVs(base ? alt[j] : units[j], oppUnits[o]);
-  const combos = bringCombos(mems.length, opps.length, k, alt.map(Boolean), pairOf), best = combos[0];
+  // 這場上場的寶可夢 key（evo＝這場進化的隊員；不進化的超級進化用原型），只選屬性的是空字串
+  const keyIn = (j, evo) => mems[j].key && (alt[j] && evo != null && j !== evo ? MON[mems[j].key].base : mems[j].key);
+  // 組合內的搭配：帶的隊員（挑了寶可夢的）照「隊伍特性與場地招式」的 traitScan，syn＝一起帶才成立的攻擊搭配、warns＝搭配提醒
+  // （traitScan 的 j 是 js 的索引），score＝兩者數量相減
+  const synOf = (idx, evo) => {
+    const js = idx.filter(j => mems[j].key), keys = js.map(j => keyIn(j, evo));
+    if (!keys.length) return { syn: [], warns: [], js, score: 0 };
+    const t = traitScan(keys, fmt, Object.fromEntries(js.map((j, n) => [keys[n], mems[j].set])));
+    return { syn: t.syn, warns: t.warns, js, score: t.syn.length - t.warns.length };
+  };
+  const combos = bringCombos(mems.length, opps.length, k, alt.map(Boolean), pairOf, synOf), best = combos[0];
   const spe = j => monOf(j)?.spe || 0;
   // 先發（不進化的超級進化看原型的屬性和速度）：從第 1 名組合挑（leadPick；單打 1 隻，雙打 2 隻一起看搭配）
   const speIn = (c, j) => alt[j] && c.evo != null && j !== c.evo ? MON[monOf(j).base].spe : spe(j);
@@ -340,6 +393,6 @@ function bringPlan(mems, opps, fmt) {
   // 對手的強化手：常帶強化招式（隊伍角色的「強化」標籤，如劍舞、詭計、龍之舞）的，存對手索引和撐起標籤的招式
   const setupBy = opps.map(m => roleOf(m.key, fmt)?.tags.find(t => t.id === 'setup')?.by || []);
   const setups = setupBy.map((by, o) => by.length ? o : -1).filter(o => o >= 0);
-  const pick = leadPick(best, lead, j => unitIn(best, j), j => speIn(best, j), j => mems[j].key, oppUnits, setups, fmt, j => mems[j].set);
+  const pick = leadPick(best, lead, j => unitIn(best, j), j => speIn(best, j), j => keyIn(j, best.evo), oppUnits, setups, fmt, j => mems[j].set);
   return { k, lead, alt, oppMegas, setupBy, setups, combos, pick, pairOf };
 }

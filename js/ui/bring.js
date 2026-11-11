@@ -11,13 +11,22 @@ function bringHTML(members, opps) {
   const leads = pick.js;
   const setupText = o => `${opps[o][0].zh}（${setupBy[o].map(([zh, p]) => `${zh} ${p}%`).join('、')}）`;
   const leadInfo = [`${lead === 2 ? '兩隻合起來' : ''}正面打得贏 ${pick.cover}／${opps.length} 隻`,
+    pick.syn.good.length && `搭配 ${pick.syn.good.join('、')}`,
     lead === 2 && (pick.weak.length ? `共同弱點 ${pick.weak.map(ty => T[ty].zh).join('、')}` : '沒有共同弱點'),
     pick.sup.length && `輔助 ${pick.sup.map(([j, by]) => `${slotName(members[j][1])}（${by.join('、')}）`).join('、')}`,
     setups.length && `強化手壓得住 ${setups.length - pick.loose.length}／${setups.length} 隻`].filter(Boolean);
   const pairText = leadInfo.length ? `（${leadInfo.join('・')}）` : '';
   const pairWarn = (pick.noAtk ? `<span class="who x-msg">⚠ 這組沒有打手，先發${lead === 2 ? '兩隻都是' : '是'}輔助手，對手強化後容易被打穿</span>` : '')
     + (pick.danger.length ? `<span class="who x-msg">⚠ 先發會被先手一擊：${pick.danger.map(o => opps[o][0].zh).join('、')}（對手這隻先發時先換人）</span>` : '')
+    + (pick.syn.bad.length ? `<span class="who x-msg">⚠ 先發搭配：${pick.syn.bad.join('、')}</span>` : '')
     + (pick.loose.length ? `<span class="who x-msg">⚠ 先發壓不住的強化手：${pick.loose.map(setupText).join('、')}，留後排或換人處理</span>` : '');
+  // 組合內的搭配（bringCombos 的 syn）：✔ 一起帶才成立的攻擊搭配（提供的 → 受惠的）、⚠ 搭配提醒
+  const synText = c => {
+    const s = c.syn, nm = n => MON[team.mons[members[s.js[n]][1]]].zh;
+    const list = [...s.syn.map(([zh, by, js]) => `✔ ${zh}（${[...new Set(by.map(h => nm(h.j)))].join('、')} → ${js.map(nm).join('、')}）`),
+      ...s.warns.map(w => `⚠ ${w.h ? nm(w.h.j) + ' ' : ''}${warnShort(w)}`)];
+    return list.length ? `<span class="who">搭配：${list.join('・')}</span>` : '';
+  };
   const evoText = c => c.evo == null ? '' : `<span class="who x-msg">⚠ 一場只能超級進化一隻：進化 ${name(c.evo)}，`
     + `${c.idx.filter(j => alt[j] && j !== c.evo).map(j => MON[monOf(j).base].zh).join('、')}以原型上場（帶超級石但不能進化，等於沒道具）</span>`;
   // 對位表的格子（pairOf，隊員照隊伍分析選的型態）：✔ 換上能扛、贏 正面打得贏、⚠ 會被先手一擊、✘ 打不贏；滑鼠停留看速度與幾下打倒
@@ -47,9 +56,13 @@ function bringHTML(members, opps) {
     + '<p class="muted small b-intro">每隻對手看組合裡有沒有人應付得了：有人換上來先吃牠最痛的一招、還打得贏＝有解；'
     + '有人正面對打打得贏（照速度和幾下打倒，見下方對位表）＝半解；都打不贏＝沒解。'
     + '超級石最多帶 1 顆的組合排前面（一場只能超級進化一隻，多帶的那隻等於沒道具），'
-    + '再依「沒解」的數量由少到多、「有解」的數量由多到少排序，最後比換上能扛的配對數。'
+    + '再依「沒解」的數量由少到多、「有解」的數量由多到少排序，再比組合內的搭配（一起帶才成立的攻擊搭配，'
+    + '如晴天＋靠晴天的、戲法空間＋慢速打手，每個加 1；帶進來的搭配提醒，如靠天氣卻沒帶開天氣的、兩種天氣，每個扣 1），最後比換上能扛的配對數。'
     + (lead === 2 ? '先發從第 1 名組合裡挑兩隻一起看搭配：至少要有一隻打手（隊伍角色是物攻或特攻輸出；兩隻都是輔助手的排最後），'
-      + '再依序比「兩隻合起來正面打得贏的對手數 − 會被先手一擊的對手數」（同分時被一擊的少的優先）、壓不住的強化手少的、'
+      + '再依序比「兩隻合起來正面打得贏的對手數 − 會被先手一擊的對手數 ＋ 兩隻一起上場的搭配」'
+      + '（搭配：擊掌奇襲＋打手、引誘＋強化手、順風／戲法空間＋慢速打手、開天氣場地＋靠它的各加 1；'
+      + '地震、衝浪這類會打到隊友的範圍招式而隊友不免疫、兩隻開不同天氣、順風＋戲法空間各扣 1；這些是對位表沒算進去的效果，'
+      + '每個當一隻對手的分量；同分時被一擊的少的、搭配多的優先）、壓不住的強化手少的、'
       + '共同弱點（對手常帶的攻擊屬性裡兩隻都怕的）少的、有沒有先發輔助（順風、戲法空間、擊掌奇襲、跟我來、幫助、威嚇、開天氣／場地等），最後比兩隻的速度種族值。'
       : '先發從第 1 名組合裡挑打手（隊伍角色是物攻或特攻輸出；輔助手排最後），再依序比「正面打得贏的對手數 − 會被先手一擊的對手數」'
       + '（同分時被一擊的少的優先）、壓不住的強化手少的，同數時速度種族值高的優先。')
@@ -57,7 +70,7 @@ function bringHTML(members, opps) {
     + `或常帶挑釁、再來一次、黑霧、清除之煙、吼叫、吹飛、龍尾、巴投，或特性是純樸，就算壓得住。${lead === 2 ? '輔助後面的 % 是 OP.GG 使用率。' : ''}</p>`
     + combos.slice(0, 3).map((c, r) => `<div class="combo${r ? '' : ' top'}"><span class="rank">${r + 1}</span><b>${c.idx.map(name).join('、')}</b>`
       + `<span class="meta">沒解 ${c.none}・半解 ${opps.length - c.none - c.solved}・有解 ${c.solved}</span>`
-      + (r ? '' : `<span class="who">先發：${leads.map(name).join('、')}${pairText}</span>${pairWarn}`) + evoText(c)
+      + (r ? '' : `<span class="who">先發：${leads.map(name).join('、')}${pairText}</span>${pairWarn}`) + synText(c) + evoText(c)
       + (c.none ? `<span class="who x-msg">沒解：${c.res.map((x, o) => x.level ? '' : opps[o][0].zh).filter(Boolean).join('、')}</span>` : '')
       + '</div>').join('')
     + `<h3>對位表</h3><div class="mwrap cover"><table class="matrix vs">${t}</tbody></table></div>`
@@ -74,7 +87,11 @@ function bringHTML(members, opps) {
     + '帶幾隻依攻略網站整理的排位規則（單打 6 選 3、雙打 6 選 4），'
     + '一場只能超級進化一隻也是同一來源：有其他帶法時不會帶 2 顆以上超級石；隊上超級進化多到非帶不可時，逐一試只進化其中一隻、'
     + '其他以原型計（帶著超級石，等於沒道具），取結果最好的並標出進化哪隻（對位表的每一列仍是進化後的樣子）。'
-    + '不含天氣、場地、能力變化、出場特性（如威嚇）與雙打的隊友配合；雙打的範圍招式以打到兩隻（×0.75）計。</p>'
+    + '對位表不含天氣、場地、能力變化、出場特性（如威嚇）與雙打的隊友配合（隊友配合另外看上方組合與先發的「搭配」）；雙打的範圍招式以打到兩隻（×0.75）計。'
+    + `「搭配」的招式看${FMT_ZH[team.fmt]}常用（使用率 ${ROLE_PCT}% 以上，登錄的照登錄），慢速打手＝隊伍角色不是輔助、又不比熱門前 ${THREAT_N} 的一半快；`
+    + `會打到隊友的範圍招式：${ALLY_HIT.filter(k => MOVES[k]).map(k => MOVES[k][0]).join('、')}，隊友是那個屬性免疫、或特性是`
+    + Object.entries(ALLY_SAFE).map(([ty, ks]) => `${ks.filter(k => ABILS[k]).map(k => ABILS[k][0]).join('／')}（${T[ty].zh}）`).filter(s => !s.startsWith('（')).join('、')
+    + `${ITEMS['air-balloon'] ? `，或帶${ITEMS['air-balloon'][0]}（${T.ground.zh}）` : ''}就不算。</p>`
     + moveTableHTML(members, opps, best, alt, oppMegas);
 }
 // 出招表：第 1 名組合 best 的每隻（一場只能超級進化一隻，不進化的用原型）對上每隻對手（常帶超級石的另列超級進化後），
