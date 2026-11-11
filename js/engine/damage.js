@@ -393,8 +393,9 @@ const winKO = (a, b, first) => a.n < 9 && (a.n < b.n || a.n === b.n && (a.pri !=
 //   first、spd（同 duel）、me／opp（fastestKO 的 n）給畫面說明用
 function matchup(x, y, f) {
   const d = duel(x, y, f), a = fastestKO(d.xy), b = fastestKO(d.yx), head = winKO(a, b, d.first);
+  // 換上來剩下的 HP 比全滿少，正面都打不贏的換上來也打不贏，不用再算
   const cur = hpOf(x) - Math.max(0, ...d.yx.ok.map(r => r.r.max || 0));
   let sw = false;
-  if (cur > 0) { const d2 = duel({ ...x, cur }, y, f); sw = winKO(fastestKO(d2.xy), fastestKO(d2.yx), d2.first); }
-  return { head: head || sw, sw, ohko: !head && !sw && b.n === 1 && (b.pri || d.first !== 0), first: d.first, spd: d.spd.map(s => s.v), me: a.n, opp: b.n };
+  if (head && cur > 0) { const d2 = duel({ ...x, cur }, y, f); sw = winKO(fastestKO(d2.xy), fastestKO(d2.yx), d2.first); }
+  return { head, sw, ohko: !head && b.n === 1 && (b.pri || d.first !== 0), first: d.first, spd: d.spd.map(s => s.v), me: a.n, opp: b.n };
 }

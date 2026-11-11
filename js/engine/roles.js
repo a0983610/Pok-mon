@@ -160,12 +160,13 @@ const lackNeeds = (roles, fmt) => roles.length ? NEEDS[fmt].filter(n => !roles.s
 //   1. 搭配：解決幾個搭配提醒（fix）－新增幾個（add），提醒同「隊伍特性與場地招式」的 traitScan；
 //      隊上有戲法空間時，慢的攻擊手（比熱門前 THREAT_N 的一半以上慢，看速度種族值）也算 fix 一項
 //   2. 補上幾個隊伍缺的角色（fills；onTeam 依 fmt 常用招式／特性判斷）＋讓幾隻熱門威脅從沒解變成有對策（threats；
-//      units 是其他隊員，格式同 answerOf，候選本身能擋或能剋就算，同熱門威脅檢查）
+//      units 是其他隊員，格式同 unitOf；候選要排名前 COUNTER_RANK、在屬性上擋得住或剋得到、又正面打得贏才算，打得贏同熱門威脅檢查的 teamVs）
 //   3. 常見隊友：候選和隊上成員出現在對方的 OP.GG 隊友名單裡（mates，隊上成員的 key）
 //   4. recommendMember 的屬性評分，最後看排名（沒排名的排最後）
 // 搭配、角色、隊友只在隊上已有挑了寶可夢的隊員、候選有排名時比（候選在 fmt 沒排名時，OP.GG 仍可能有零星統計，樣本太少不採用）。
 // 超級進化和原型屬性一樣、比較結果也一樣時只留原型。fix 每項是 { w 解決的提醒, by 候選撐起它的特性／招式（traitScan 的 has 項目）}
 // sets：隊上成員 key → 登錄的配招（見 useOf；候選不會在隊上，所以不受影響）
+const COUNTER_RANK = 60;
 function recommendMon(others, base, fmt, onTeam = [], units = [], sets = {}) {
   const rk = m => m.rank[fmt] || Infinity, fams = onTeam.map(k => family(MON[k]));
   const lack = lackNeeds(onTeam.map(k => roleOf(k, fmt, sets[k])).filter(Boolean), fmt);
@@ -181,8 +182,10 @@ function recommendMon(others, base, fmt, onTeam = [], units = [], sets = {}) {
         .map(w => ({ w, by: w.kind === 'need' ? after.set.filter(s => s.j === me && FIELD_SET[s.k] === w.f) : [] })) : [];
       if (after && top && role.main !== 'sup' && top.filter(t => t.spe < m.spe).length * 2 < top.length) fix.push({ w: { id: 'trslow', kind: 'trslow' }, by: [], spe: m.spe });
       const add = after ? after.warns.filter(a => !before.some(w => w.id === a.id)) : [];
-      const me1 = { defs: m.types, atk: attacksOf(m.key, m.types, fmt) };
-      const threats = none.filter(t => answerOf([me1], oppUnit(t, fmt)).level > 0);
+      // 對策只從排名前 COUNTER_RANK 的候選找（含牠們的超級進化；樣本夠多、配招統計可信，也免得上百隻候選都算傷害太慢），
+      // 要先在屬性上擋得住或剋得到（answerOf，便宜），再看速度與傷害正面打得贏（teamVs）
+      const me1 = { defs: m.types, atk: attacksOf(m.key, m.types, fmt), key: m.key };
+      const threats = rk(m) > COUNTER_RANK ? [] : none.filter(t => answerOf([me1], oppUnit(t, fmt)).level > 0 && teamVs([me1], t, fmt).level > 0);
       const mates = role ? onTeam.filter(k => useOf(k, fmt)?.mates.includes(family(m)) || role.use.mates.includes(family(MON[k]))) : [];
       return { mon: m, role, fills: role ? lack.filter(n => needBy(role, n)) : [], fix, add, threats, mates, ...memberScore(others, m.types) };
     });
@@ -212,8 +215,37 @@ function answerOf(members, opp) {
   });
   return { safe, hit, level: safe.some(i => hit.includes(i)) ? 2 : safe.length || hit.length ? 1 : 0 };
 }
-// 熱門寶可夢逐隻檢查隊員 members（連常帶超級石的超級進化型態一起看）
-const threatCheck = (members, fmt, n) => topMons(fmt, n).map(m => ({ mon: m, ...answerOf(members, oppUnit(m, fmt)) }));
+// 一對一結果的快取（matchup 要算兩次對位；出戰選角、隊伍分析每次重畫都會用到）：fmt、我方 key、base、配招、對手 key → duelVs 的結果
+const MATCH_MEMO = new Map();
+// 我方寶可夢 key（配招 set；base＝超級進化這場不進化、以原型 key 上場，帶著超級石等於沒道具）對上對手寶可夢 m：
+// 看速度與傷害（matchup，同出招表的算法），對手常帶超級石的進化前後每種型態都要成立（ohko 任一種成立就算），
+// 回傳 { sw 換上能扛, head 正面打得贏, ohko 會被牠先手一擊, forms 各型態的 matchup }；有一方沒有招式資料回傳 null（呼叫端改看屬性）
+function duelVs(key, set, fmt, m, base = false) {
+  if (!key || !useOf(key, fmt, set)?.moves.length || !useOf(m.key, fmt)?.moves.length) return null;
+  const memo = [fmt, key, base, JSON.stringify(set || null), m.key].join('|');
+  if (!MATCH_MEMO.has(memo)) {
+    const me = { ...battler(key, fmt, set), ...(base && { item: '' }) };
+    const rs = [m, ...megaInfo(m, fmt).filter(x => x.counted).map(x => x.mon)].map(f => matchup(me, battler(f.key, fmt), { fmt }));
+    MATCH_MEMO.set(memo, { sw: rs.every(r => r.sw), head: rs.every(r => r.head), ohko: rs.some(r => r.ohko), forms: rs });
+  }
+  return MATCH_MEMO.get(memo);
+}
+// 屬性版的一對一（只選屬性、或沒有招式資料時用）：unit 對 oppUnit ou 不怕又剋得到＝sw，剋得到＝head（answerOf）
+const typeVs = (unit, ou) => { const a = answerOf([unit], ou); return { sw: a.level === 2, head: a.hit.length > 0, ohko: false, type: true }; };
+// 隊員 members（unitOf：defs、atk、key、set）對上一隻對手寶可夢 m：safe＝換上能扛、hit＝正面打得贏、ohko＝會被牠先手一擊（都是 members 的索引）；
+// 有人換上能扛＝有解(2)、有人正面打得贏＝半解(1)、都沒有＝沒解(0)。同出戰選角的對位（duelVs，沒有招式資料的看屬性 typeVs）
+function teamVs(members, m, fmt) {
+  const ou = oppUnit(m, fmt), safe = [], hit = [], ohko = [];
+  members.forEach((u, i) => {
+    const r = duelVs(u.key, u.set, fmt, m) || typeVs(u, ou);
+    if (r.sw) safe.push(i);
+    if (r.head) hit.push(i);
+    if (r.ohko) ohko.push(i);
+  });
+  return { safe, hit, ohko, level: safe.length ? 2 : hit.length ? 1 : 0 };
+}
+// 熱門寶可夢逐隻檢查隊員 members（teamVs，連常帶超級石的超級進化型態一起看）
+const threatCheck = (members, fmt, n) => topMons(fmt, n).map(m => ({ mon: m, ...teamVs(members, m, fmt) }));
 // 從 n 隻隊員挑 k 隻對上 oppN 隻對手：列出所有組合（idx 是隊員索引），每隻對手看組合裡的對位（pairOf，見 bringPlan）：
 // 有人換上來吃一下還打得贏（sw）＝有解(2)、有人正面打得贏（head）＝半解(1)、都沒有＝沒解(0)。
 // res[o]＝{ safe 換上能扛的、hit 正面打得贏的、ohko 會被牠先手一擊的（都是組合裡的位置）, level }。
@@ -285,8 +317,6 @@ function leadPick(c, n, uOf, sOf, kOf, opps, setups, fmt, setOf = () => undefine
 }
 // 出戰選角：帶幾隻、先發幾隻依攻略網站整理的排位規則（單打 6 選 3、雙打 6 選 4）
 const BRING_N = { s: 3, d: 4 }, LEAD_N = { s: 1, d: 2 };
-// 一對一結果的快取（matchup 要算兩次對位，出戰選角每次重畫、逐隻加對手時不重算）：fmt、我方 key、配招、對手 key → pairOf 的結果
-const MATCH_MEMO = new Map();
 // 我方 mems（[{ defs 屬性, key 寶可夢 key（只選屬性的是空字串）, set 登錄的配招（見 useOf）}...]）對上對手 opps（寶可夢）在 fmt 該帶誰、誰先發。回傳
 //   k 帶幾隻、lead 先發幾隻、alt 超級進化不進化時的原型 unit（沒有超級進化是 null）、
 //   oppMegas 對手可能超級進化成的寶可夢、setupBy 每隻對手撐起「強化」標籤的招式、setups 強化手的對手索引、
@@ -299,22 +329,9 @@ function bringPlan(mems, opps, fmt) {
   const oppUnits = opps.map(m => oppUnit(m, fmt));
   // 我方超級進化不進化時的版本（原型；招式不因進化改變，登錄的配招照用），給 bringCombos 算「一場只能進化一隻」
   const alt = mems.map((x, j) => { const b = monOf(j)?.base && MON[monOf(j).base]; return b ? { defs: b.types, atk: attacksOf(b.key, b.types, fmt, x.set) } : null; });
-  // 隊員 j（base＝這場不進化、以原型上場，帶著超級石等於沒道具）對上對手 o：{ sw 換上能扛, head 正面打得贏, ohko 會被牠先手一擊, ... }。
-  // 雙方都挑了寶可夢、都有招式統計（或登錄了招式）的看速度與傷害（matchup，同出招表的算法）；對手常帶超級石的，進化前後每種型態都要成立
-  // （ohko 任一種成立就算）。只選屬性、或沒有招式資料的看屬性（answerOf：不怕又剋得到＝sw，剋得到＝head），type＝true
-  const pairOf = (j, o, base = false) => {
-    const x = mems[j], key = x.key && (base ? MON[x.key].base : x.key), memo = [fmt, key, base, JSON.stringify(x.set || null), opps[o].key].join('|');
-    if (!key || !useOf(key, fmt, x.set)?.moves.length || !useOf(opps[o].key, fmt)?.moves.length) {
-      const r = answerOf([base ? alt[j] : units[j]], oppUnits[o]);
-      return { sw: r.safe.length > 0 && r.hit.length > 0, head: r.hit.length > 0, ohko: false, type: true };
-    }
-    if (!MATCH_MEMO.has(memo)) {
-      const me = { ...battler(key, fmt, x.set), ...(base && { item: '' }) };
-      const rs = [opps[o], ...oppMegas[o]].map(m => matchup(me, battler(m.key, fmt), { fmt }));
-      MATCH_MEMO.set(memo, { sw: rs.every(r => r.sw), head: rs.every(r => r.head), ohko: rs.some(r => r.ohko), forms: rs });
-    }
-    return MATCH_MEMO.get(memo);
-  };
+  // 隊員 j（base＝這場不進化、以原型上場，帶著超級石等於沒道具）對上對手 o：duelVs（速度與傷害）；只選屬性、或沒有招式資料的看屬性（typeVs，type＝true）
+  const pairOf = (j, o, base = false) => duelVs(mems[j].key && (base ? MON[mems[j].key].base : mems[j].key), mems[j].set, fmt, opps[o], base)
+    || typeVs(base ? alt[j] : units[j], oppUnits[o]);
   const combos = bringCombos(mems.length, opps.length, k, alt.map(Boolean), pairOf), best = combos[0];
   const spe = j => monOf(j)?.spe || 0;
   // 先發（不進化的超級進化看原型的屬性和速度）：從第 1 名組合挑（leadPick；單打 1 隻，雙打 2 隻一起看搭配）
