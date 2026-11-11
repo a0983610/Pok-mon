@@ -159,13 +159,15 @@ function speedPair(x, y, f) {
 }
 // 攻擊方 a：{ key, inv 投資 [點數, 性格], st { atk, spa } 能力變化, item, ab 特性 }；防守方 d：{ key, hp／inv 投資 [點數, 性格], st { def, spd }, item, ab, cur 目前剩下的 HP（沒給＝全滿） }
 // （投資也可以改給 sp／nat，見 invAt；a 另外可帶 set 給 dmgRows 用登錄的招式）；
-// o：{ fmt 's'／'d', weather, crit, terrain, hh 幫助, walls 防守方的牆, burn 攻擊方灼傷 }（必定急所的招式不管 crit 都算急所）。不算的招式回傳 { skip 原因 }；
+// o：{ fmt 's'／'d', weather, crit, terrain, hh 幫助, walls 防守方的牆, burn 攻擊方灼傷, bp 威力（對戰模擬給噴火、噴水這種隨 HP 變的；沒給照資料）}
+// （必定急所的招式不管 crit 都算急所）。不算的招式回傳 { skip 原因 }；
 // 沒有效果的回傳 eff 0（沒有 hp 以後的欄位；immuneBy＝讓招式無效的防守方特性，blockedBy＝其他原因的說明，如精神場地擋先制）；
 // 其餘回傳 hp 防守方最大 HP、min／max 用一次的傷害（多段攻擊是各下加總）、ko[n] 連用 n＋1 次打掉剩下 HP 的機率（n＝0～3）、stab 本系倍率（4096 制）、
-// endured 撐住了會倒下的第一下的氣勢披帶或結實（道具／特性 key）、berry 抗性樹果有減半、notes 有作用的特性與招式效果。
+// endured 撐住了會倒下的第一下的氣勢披帶或結實（道具／特性 key）、berry 抗性樹果有減半、notes 有作用的特性與招式效果、
+// rolls／later 每一下的 16 個亂數傷害（rolls＝這次、later＝之後連用：樹果、多重鱗片、拍落第一下的加成沒了；對戰模擬抽亂數用）。
 // d.cur 比最大 HP 少時，氣勢披帶、結實、多重鱗片（都要 HP 全滿）沒有作用
 function damageCalc(a, d, mk, o) {
-  const [, mtype, cat, power0] = MOVES[mk];
+  const [, mtype, cat, bp0] = MOVES[mk], power0 = o.bp ?? bp0;
   if (NO_CALC[mk]) return { skip: NO_CALC[mk] };
   if (power0 == null) return { skip: '威力會變動或固定傷害' };
   const A = MON[a.key], D = MON[d.key], aab = a.ab || '', notes = new Set();
@@ -320,6 +322,7 @@ function damageCalc(a, d, mk, o) {
   const later = r.berry || (dab === 'multiscale' && full) || (knock && !keep) ? Array.from({ length: hits }, (_, h) => rollsOf(pw(h), false, pb && h === 1)) : first;
   r.min = first.reduce((s, x) => s + x[0], 0);
   r.max = first.reduce((s, x) => s + x[15], 0);
+  [r.rolls, r.later] = [first, later];
   // 氣勢披帶、結實：HP 全滿時整場第一下最多打到剩 1 HP
   const endure = !full ? '' : dit.sash ? d.item : dab === 'sturdy' ? dab : '';
   r.endured = endure && hits === 1 && r.max >= r.hp ? endure : '';

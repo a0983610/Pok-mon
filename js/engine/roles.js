@@ -398,11 +398,12 @@ function bringPlan(mems, opps, fmt) {
 }
 // 猜對手帶誰、誰先發：把對手當成也用 bringPlan 選角，對手 oppKeys（6 格寶可夢 key，空字串＝沒填）對上我方 myKeys（隊伍格子的 key，只選屬性的不算）。
 // 對手看不到我方的配招，雙方都照 OP.GG 最常見的配置算（不傳 set）；對手選一般型態、但某顆超級石使用率過半的，當成那個超級進化型態
-// （一場只能超級進化一隻照 bringPlan）。回傳 bringPlan 的結果加上 at（bringPlan 的隊員索引 → oppKeys 的格子索引）；有一方是空的回傳 null
+// （一場只能超級進化一隻照 bringPlan）。回傳 bringPlan 的結果加上 at（bringPlan 的隊員索引 → oppKeys 的格子索引）、
+// mems（傳給 bringPlan 的隊員，key 是當成的型態；對戰模擬用）；有一方是空的回傳 null
 function oppBringPlan(oppKeys, myKeys, fmt) {
   const at = oppKeys.map((k, i) => MON[k] ? i : -1).filter(i => i >= 0), mine = myKeys.filter(k => MON[k]).map(k => MON[k]);
   if (!at.length || !mine.length) return null;
   const formOf = m => megaInfo(m, fmt).filter(x => x.p >= 50).sort((x, y) => y.p - x.p)[0]?.mon || m;
   const mems = at.map(i => { const m = formOf(MON[oppKeys[i]]); return { defs: m.types, key: m.key }; });
-  return { ...bringPlan(mems, mine, fmt), at };
+  return { ...bringPlan(mems, mine, fmt), at, mems };
 }

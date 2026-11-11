@@ -404,7 +404,7 @@ footer a { color: inherit; }
     </svg>
     <div>
       <h1>寶可夢冠軍 屬性克制表</h1>
-      <div class="sub">Pokémon Champions · 18 種屬性相剋 · 配招分析 · 隊伍分析 · 出戰選角 · 對戰中 · 傷害計算</div>
+      <div class="sub">Pokémon Champions · 18 種屬性相剋 · 配招分析 · 隊伍分析 · 出戰選角 · 對戰中 · 傷害計算 · 模擬對戰</div>
     </div>
   </header>
 
@@ -415,6 +415,7 @@ footer a { color: inherit; }
     <button role="tab" data-tab="bring" aria-selected="false">出戰選角</button>
     <button role="tab" data-tab="battle" aria-selected="false">對戰中</button>
     <button role="tab" data-tab="calc" aria-selected="false">傷害計算</button>
+    <button role="tab" data-tab="sim" aria-selected="false">模擬對戰</button>
   </nav>
 
   <!-- 克制表 -->
@@ -583,6 +584,42 @@ footer a { color: inherit; }
     <div class="card b-card" id="cResult"></div>
   </section>
 
+  <!-- 模擬對戰 -->
+  <section id="p-sim" role="tabpanel" hidden>
+    <div class="card">
+      <div class="look-top">
+        <p class="muted small b-intro">用電腦讓我方隊伍和對手打很多場單打（6 選 3），雙方每回合都替自己挑最不吃虧的一步，統計勝率、我方每隻的表現和最難對付的對手。我方沿用「隊伍分析」（含登錄的配招）。</p>
+        <div class="top-actions"><button class="btn ghost" data-copy>複製連結</button></div>
+      </div>
+      <div class="t-row">
+        <div class="seg" id="sMode" aria-label="對手">
+          <button aria-pressed="true">隨機熱門隊</button>
+          <button aria-pressed="false">出戰選角的對手</button>
+        </div>
+      </div>
+      <div class="t-row" id="sRangeRow">
+        <div class="seg" id="sRange" aria-label="隨機隊從單打排名前幾名挑">
+          <button aria-pressed="true">排名前 30</button>
+          <button aria-pressed="false">前 60</button>
+          <button aria-pressed="false">前 100</button>
+        </div>
+      </div>
+      <div class="t-row">
+        <div class="seg" id="sN" aria-label="場數">
+          <button aria-pressed="true">100 場</button>
+          <button aria-pressed="false">300 場</button>
+          <button aria-pressed="false">1000 場</button>
+        </div>
+      </div>
+      <div class="t-row">
+        <button class="btn primary" id="sRun">開始模擬</button>
+        <button class="btn" id="sStop" hidden>停止</button>
+        <span class="muted small" id="sMsg" role="status"></span>
+      </div>
+    </div>
+    <div class="card b-card" id="sResult"></div>
+  </section>
+
 
   <footer>
     資料：Pokémon Champions 使用與主系列第六世代（《X／Y》）起相同的 18 屬性相剋倍率；
@@ -601,6 +638,7 @@ footer a { color: inherit; }
 <script src="js/engine/core.js"></script>
 <script src="js/engine/roles.js"></script>
 <script src="js/engine/damage.js"></script>
+<script src="js/engine/sim.js"></script>
 <script src="js/ui/common.js"></script>
 <script src="js/ui/table.js"></script>
 <script src="js/ui/build.js"></script>
@@ -608,6 +646,7 @@ footer a { color: inherit; }
 <script src="js/ui/bring.js"></script>
 <script src="js/ui/calc.js"></script>
 <script src="js/ui/battle.js"></script>
+<script src="js/ui/sim.js"></script>
 <script src="js/ui/state.js"></script>
 <script src="js/main.js"></script>
 </body>

@@ -22,16 +22,17 @@ const MCLS = { 4: 'm4', 2: 'm2', 1: 'm1', 0.5: 'mh', 0.25: 'mq', 0.125: 'mq', 0:
 const mtag = m => `<span class="mtag ${MCLS[m]}">${fmt(m)}</span>`;
 
 // ---------- 分頁 ----------
-const TABS = ['table', 'build', 'team', 'bring', 'battle', 'calc'];
+const TABS = ['table', 'build', 'team', 'bring', 'battle', 'calc', 'sim'];
 let curTab = 'table';
 function showTab(name) {
   curTab = name;
   document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === name));
   TABS.forEach(n => { $('#p-' + n).hidden = n !== name; });
-  // 出戰選角沿用隊伍分析的隊伍、對戰中與傷害計算的快選列出隊伍與對手，切過來時重畫
+  // 出戰選角沿用隊伍分析的隊伍、對戰中與傷害計算的快選列出隊伍與對手、模擬對戰要看有沒有隊伍與對手，切過來時重畫
   if (name === 'bring') renderBring();
   if (name === 'battle') renderBattle();
   if (name === 'calc') renderCalc();
+  if (name === 'sim') renderSim();
   saveState();
 }
 $('.tabs').addEventListener('click', e => {
