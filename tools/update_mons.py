@@ -4,9 +4,12 @@
 # 和每隻可學的招式與可能的特性（LEARN；沒人常用的招式／特性另存 LEARN_MOVES／LEARN_ABILS），
 # 整個檔重寫到 index.html 旁邊的 mons-data.js。超級進化沒有獨立統計，網頁端沿用原型的；
 # 超級進化的特性是固定的，名單頁就有，另外存在名單裡。
-# 種族值不太會變，另外寫到 index.html 旁邊的 base-stats.js（不帶日期，資料沒變就不會有 diff）。
+# 種族值不太會變，另外寫到 index.html 旁邊的 base-stats.js（不帶日期，資料沒變就不會有 diff）；
+# 體重（打草結、踢倒、重磅衝撞、高溫重壓用）OP.GG 沒有，從 Pokémon Showdown 的寶可夢資料（pokedex.json 的 weightkg）補，也寫在 base-stats.js
+# （Showdown 的冠軍版 mod 沒有自己的 pokedex，沿用主資料的體重）。
 # 寫完後列出這次新出現（舊的 mons-data.js 沒有）、網頁程式（js 資料夾）也還沒提到的招式與特性，提醒特殊效果要另外補程式。
-# 用法：python tools/update_mons.py [index.html 路徑，預設為 repo 根目錄的 index.html；只用來決定寫到哪個資料夾，不會改 index.html]
+# 用法：python tools/update_mons.py [--stats] [index.html 路徑，預設為 repo 根目錄的 index.html；只用來決定寫到哪個資料夾，不會改 index.html]
+#   --stats：只重寫 base-stats.js（OP.GG 名單頁的種族值＋Showdown 的體重，幾秒），不抓詳細頁、不動 mons-data.js
 # 有排名的寶可夢約 250 隻要逐頁抓，跑一次約 3～5 分鐘。
 import datetime
 import json
@@ -17,6 +20,7 @@ import time
 import urllib.request
 
 URL = 'https://op.gg/zh-tw/pokemon-champions/pokedex'
+DEX_URL = 'https://play.pokemonshowdown.com/data/pokedex.json'
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36',
     'Accept-Language': 'zh-TW,zh;q=0.9',
@@ -161,6 +165,59 @@ def ranked(det, sec, sub, known):
     return ' '.join([p['key'] for p in (det.get(sec) or {}).get(sub) or [] if p['key'] in known][:LIST_N])
 
 
+# OP.GG 的寶可夢 key → Showdown 的 id：地區型態的寫法不同（alolan→alola…）、超級進化在後面（mega-charizard-y→charizardmegay）、
+# 母的寫 f（indeedee-female→indeedeef）、公的就是原型、羽色不寫 plumage（squawkabilly-blue-plumage→squawkabillyblue）；寫法對不起來的直接對照（DEX_FIX）
+DEX_REGION = {'alolan': 'alola', 'galarian': 'galar', 'hisuian': 'hisui', 'paldean': 'paldea'}
+DEX_FIX = {'floette-eternal-flower': 'floetteeternal', 'mega-meowstic': 'meowsticmmega',
+           'maushold-family-of-four': 'mausholdfour', 'maushold-family-of-three': 'maushold'}
+
+
+def dex_id(key):
+    alnum = lambda s: re.sub(r'[^a-z0-9]', '', s.lower())
+    mega = key.startswith('mega-')
+    parts = [DEX_REGION.get(p, p) for p in (key[5:] if mega else key).split('-') if p != 'plumage']
+    if parts[-1] == 'male':
+        parts = parts[:-1]
+    elif parts[-1] == 'female':
+        parts[-1] = 'f'
+    if mega:
+        return alnum(''.join(parts[:-1])) + 'mega' + parts[-1] if parts[-1] in ('x', 'y', 'z') else alnum(''.join(parts)) + 'mega'
+    return alnum(''.join(parts))
+
+
+def weights(keys):
+    # 寶可夢 key → 體重 kg（Showdown pokedex.json 的 weightkg）。依序試：DEX_FIX、dex_id、
+    # Showdown 沒分開的（只差外觀的母的、Showdown 原型的 baseForme 就是這個型態，如 gourgeist-average、toxtricity-amped）用原型的；
+    # 都對不上的不收（網頁上看體重的招式就不算），並印出來
+    req = urllib.request.Request(DEX_URL, headers=HEADERS)
+    with urllib.request.urlopen(req, timeout=60) as r:
+        dex = json.loads(r.read().decode('utf-8'))
+    out, miss = {}, []
+    for key in keys:
+        parts, sid = [p for p in key.split('-') if p != 'plumage'], dex_id(key)
+        base = re.sub(r'[^a-z0-9]', '', parts[0])
+        cands = [DEX_FIX.get(key), sid, sid[:-1] if parts[-1] == 'female' else None,
+                 base if len(parts) > 1 and (dex.get(base, {}).get('baseForme') or '').lower() == parts[-1] else None]
+        s = next((c for c in cands if c and dex.get(c, {}).get('weightkg')), None)
+        if s:
+            out[key] = dex[s]['weightkg']
+        else:
+            miss.append(key)
+    if miss:
+        print('這些寶可夢在 Showdown 找不到體重（看體重的招式不算）：%r' % miss)
+    return out
+
+
+def stats_js(stats, wts):
+    dump = lambda o: json.dumps(o, ensure_ascii=False, separators=(',', ':'))
+    return ('// 種族值：擷取自 OP.GG 寶可夢冠軍圖鑑（含超級進化）；這個檔由 tools/update_mons.py 產生，勿手改\n'
+            '// 寶可夢 key → [HP, 攻擊, 防禦, 特攻, 特防, 速度]\n'
+            'const BASE_STATS = {\n%s\n};\n'
+            '// 體重 kg（打草結、踢倒、重磅衝撞、高溫重壓用）：OP.GG 沒有，取自 Pokémon Showdown 的 pokedex.json（weightkg）；找不到的不收\n'
+            'const WEIGHT_KG = {\n%s\n};\n') % ('\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in stats.items()),
+                                              '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in wts.items()))
+
+
 def section(txt, name):
     # mons-data.js 裡「const <name> = {」或「[」到「};」或「];」之間的各行
     m = re.search(r'^const %s = [\[{]\n(.*?)\n[\]}];' % name, txt, re.S | re.M)
@@ -213,7 +270,19 @@ def remind(old_txt, js_dir, mv_out, ab_out, mega_a):
         print('  特性 %s%s：%s' % (k, ' ' + zh if zh else '', eff))
 
 
-def main(path):
+def write_stats(out, stats):
+    # 重寫 base-stats.js（種族值＋體重）；換行沿用既有的檔（Windows 上 git 取出來是 CRLF），還不存在就用 LF
+    p, s = os.path.join(out, 'base-stats.js'), stats_js(stats, weights(list(stats)))
+    if os.path.exists(p):
+        with open(p, encoding='utf-8', newline='') as f:
+            if f.readline().endswith('\r\n'):
+                s = s.replace('\n', '\r\n')
+    with open(p, 'w', encoding='utf-8', newline='') as f:
+        f.write(s)
+    return s
+
+
+def main(path, only_stats=False):
     txt = payload(fetch())
     mons = grab(txt, 'pokemon', '[')
     ranks = grab(txt, 'rankings', '{')
@@ -238,6 +307,11 @@ def main(path):
     dup = sorted({n for n in names if names.count(n) > 1})
     if dup:
         raise SystemExit('中文名重複：%r' % dup)
+    out = os.path.dirname(os.path.abspath(path))
+    if only_stats:
+        s = write_stats(out, stats)
+        print('只重寫 base-stats.js：種族值 %d 隻、體重 %d 隻' % (len(stats), s.count('\n', s.index('const WEIGHT_KG')) - 2))
+        return
 
     # 常用招式／特性：只抓有排名的非超級進化寶可夢
     targets = [r[0] for r in rows if not r[5] and (r[3] or r[4])]
@@ -322,10 +396,6 @@ def main(path):
         '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in sorted(learn_out.items())),
         '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in sorted(lm_out.items())),
         '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in sorted(la_out.items())))
-    stats_js = ('// 種族值：擷取自 OP.GG 寶可夢冠軍圖鑑（含超級進化）；這個檔由 tools/update_mons.py 產生，勿手改\n'
-                '// 寶可夢 key → [HP, 攻擊, 防禦, 特攻, 特防, 速度]\n'
-                'const BASE_STATS = {\n%s\n};\n') % '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in stats.items())
-    out = os.path.dirname(os.path.abspath(path))
     mons_path = os.path.join(out, 'mons-data.js')
     # 換行沿用既有的 mons-data.js（Windows 上 git 取出來是 CRLF），檔案還不存在就用 LF；舊內容留著，寫完後比出新出現的招式／特性
     old_txt = None
@@ -334,10 +404,9 @@ def main(path):
             old_txt = f.read()
         if old_txt.split('\n', 1)[0].endswith('\r'):
             mons_js = mons_js.replace('\n', '\r\n')
-            stats_js = stats_js.replace('\n', '\r\n')
-    for p, s in ((mons_path, mons_js), (os.path.join(out, 'base-stats.js'), stats_js)):
-        with open(p, 'w', encoding='utf-8', newline='') as f:
-            f.write(s)
+    with open(mons_path, 'w', encoding='utf-8', newline='') as f:
+        f.write(mons_js)
+    write_stats(out, stats)
     print('寫入 %d 隻（超級進化 %d、單打有排名 %d、雙打有排名 %d）；常用招式 %d 隻、能力點數 %d 隻、性格 %d 隻、招式 %d 種、特性 %d 種、道具 %d 種，%d bytes' % (
         len(rows), sum(1 for r in rows if r[5]), sum(1 for r in rows if r[3]), sum(1 for r in rows if r[4]),
         sum(1 for u in use.values() if u[0] or u[1]), sum(1 for u in use.values() if u[12] or u[13]),
@@ -348,4 +417,5 @@ def main(path):
 
 
 if __name__ == '__main__':
-    main(sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'index.html'))
+    args = [a for a in sys.argv[1:] if a != '--stats']
+    main(args[0] if args else os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'index.html'), '--stats' in sys.argv[1:])

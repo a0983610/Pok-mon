@@ -109,7 +109,7 @@ const SIM_ST0 = () => ({ atk: 0, def: 0, spa: 0, spd: 0, spe: 0 });
 // lock 講究圍巾鎖住的招式、chg 蓄力中的招式、hide 蓄力時打不到、rech 下一回合要休息、in 第幾回合上場（擊掌奇襲用）、kos 打倒幾隻、
 // out 有沒有上過場、status 異常狀態（tox 劇毒累積、slp 還要睡幾次）、v 換下場就清掉的狀態（sub 替身 HP、taunt、enc／encK 再來一次、seed、
 // curse、yawn、focus、charge、trap、prot／endure／stall／protUsed 守住類）、last 上一次用的招式（再來一次用）、pp 各招剩下的 PP（OP.GG 冠軍版的 PP）
-// 能算的招式：damageCalc 算得了的攻擊招式、固定傷害、反擊類與一擊必殺（SIM_FIXED／SIM_REACT／SIM_OHKO）、SIM_SUP 的輔助招；其他（看體重的、變身…）不列
+// 能算的招式：damageCalc 算得了的攻擊招式（含看體重的）、固定傷害、反擊類與一擊必殺（SIM_FIXED／SIM_REACT／SIM_OHKO）、SIM_SUP 的輔助招；其他（變身…）不列
 const simCanUse = k => canCalc(k) || !!SIM_FIXED[k] || !!SIM_REACT[k] || SIM_OHKO.has(k) || !!SIM_SUP[k];
 function simMon(key, set, item, s, fmt) {
   const b = battler(key, fmt, set), use = set?.moves.some(Boolean) ? set : defaultSet(key, fmt), max = hpOf(b);

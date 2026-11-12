@@ -23,9 +23,26 @@ const HITS = { 'dragon-darts': [2], 'dual-wingbeat': [2], 'twin-beam': [2], 'tri
   'bullet-seed': [3, VAR_HITS], 'icicle-spear': [3, VAR_HITS], 'pin-missile': [3, VAR_HITS], 'rock-blast': [3, VAR_HITS], 'scale-shot': [3, VAR_HITS], 'water-shuriken': [3, VAR_HITS] };
 // 特殊招式但打對手防禦的（Smogon 的 overrideDefensiveStat）；撲擊用自己的防禦當攻擊
 const HIT_DEF = new Set(['psyshock', 'psystrike', 'secret-sword']);
-// 不算的攻擊招式與原因；威力是 null 的（看體重、HP、速度，或固定傷害、一擊必殺）也不算（欺詐改成算了：用防守方的攻擊，見 damageCalc）
+// 不算的攻擊招式與原因；威力是 null 的（看 HP、速度，或固定傷害、一擊必殺）也不算（欺詐改成算了：用防守方的攻擊；看體重的見 WEIGHT_BP）
 const NO_CALC = {};
-const canCalc = k => MOVES[k][2] !== 'status' && MOVES[k][3] != null && !NO_CALC[k];
+// 看體重的招式（威力是 null，damageCalc 照體重算）：d＝看防守方的體重（打草結、踢倒），r＝看攻擊方 ÷ 防守方（重磅衝撞、高溫重壓）
+const WEIGHT_BP = { 'grass-knot': 'd', 'low-kick': 'd', 'heavy-slam': 'r', 'heat-crash': 'r' };
+const canCalc = k => MOVES[k][2] !== 'status' && (MOVES[k][3] != null || !!WEIGHT_BP[k]) && !NO_CALC[k];
+// 寶可夢 key 的體重 kg（WEIGHT_KG，資料取自 Showdown）加特性與道具：重金屬 ×2、輕金屬 ×½、輕石 ×½（以 0.1 kg 為單位無條件捨去、至少 0.1；
+// Smogon damage-calc util.ts 的 getWeight）；沒有資料回傳 0
+function weightOf(key, ab, item) {
+  let hg = Math.round((WEIGHT_KG[key] || 0) * 10);
+  if (!hg) return 0;
+  const f = ab === 'heavy-metal' ? 2 : ab === 'light-metal' ? 0.5 : 1;
+  if (f !== 1) hg = Math.max(1, Math.trunc(hg * f));
+  if (item === 'float-stone') hg = Math.max(1, Math.trunc(hg * 0.5));
+  return hg / 10;
+}
+// 看體重的招式的威力（Smogon damage-calc 冠軍版 champions.ts，同 Showdown basePowerCallback）：
+// 打草結、踢倒：防守方 200 kg 以上 120、100 以上 100、50 以上 80、25 以上 60、10 以上 40，不然 20；
+// 重磅衝撞、高溫重壓：攻擊方是防守方的 5 倍以上 120、4 倍 100、3 倍 80、2 倍 60，不然 40
+const weightBp = (k, wa, wd) => WEIGHT_BP[k] === 'd' ? (wd >= 200 ? 120 : wd >= 100 ? 100 : wd >= 50 ? 80 : wd >= 25 ? 60 : wd >= 10 ? 40 : 20)
+  : (r => r >= 5 ? 120 : r >= 4 ? 100 : r >= 3 ? 80 : r >= 2 ? 60 : 40)(wa / wd);
 // 必定急所的招式（說明寫「必定／一定會擊中要害」，同 Smogon moves.ts 的 willCrit）
 const ALWAYS_CRIT = new Set(Object.keys(MOVES).filter(k => /(必定|一定)會?擊中要害/.test(MOVES[k][4])));
 // 出招前先提高 1 段特攻的招式（Smogon champions.ts）
@@ -91,11 +108,11 @@ const ATK_ABILS = new Set(['aerilate', 'pixilate', 'refrigerate', 'dragonize', '
   'mold-breaker', 'skill-link', 'parental-bond', 'huge-power', 'pure-power', 'hustle', 'water-bubble', 'fire-mane', 'solar-power', 'technician',
   'mega-launcher', 'strong-jaw', 'steely-spirit', 'sharpness', 'fairy-aura', 'sheer-force', 'sand-force', 'tough-claws', 'punk-rock', 'reckless',
   'iron-fist', 'sniper', 'mega-sol', 'unaware', 'long-reach', ...WEATHER_OFF, 'drought', 'drizzle', 'sand-stream', 'snow-warning',
-  'guts', 'infiltrator', 'levitate', 'electric-surge', 'grassy-surge', 'misty-surge', 'psychic-surge']);
+  'guts', 'infiltrator', 'levitate', 'electric-surge', 'grassy-surge', 'misty-surge', 'psychic-surge', 'heavy-metal', 'light-metal']);
 const DEF_ABILS = new Set([...Object.keys(ABIL_IMMUNE), 'bulletproof', 'soundproof', 'queenly-majesty', 'armor-tail', 'thick-fat', 'heatproof',
   'water-bubble', 'purifying-salt', 'fur-coat', 'multiscale', 'filter', 'solid-rock', 'fluffy', 'aura-guard', 'punk-rock', 'shell-armor',
   'battle-armor', 'sturdy', 'unaware', 'ripen', 'fairy-aura', ...WEATHER_OFF, 'drought', 'drizzle', 'sand-stream', 'snow-warning', 'intimidate',
-  'grass-pelt', 'electric-surge', 'grassy-surge', 'misty-surge', 'psychic-surge', 'sticky-hold']);
+  'grass-pelt', 'electric-surge', 'grassy-surge', 'misty-surge', 'psychic-surge', 'sticky-hold', 'heavy-metal', 'light-metal']);
 // 場地（算法在 damageCalc，照 Smogon 冠軍版）：在地面上（不是飛行屬性、沒有飄浮）的攻擊方用該屬性招式威力 ×1.3；
 // 打在地面上的防守方時，薄霧場地龍招式、青草場地地震／重踏威力 ×½，精神場地擋先制招式；大地波動有場地時變成對應屬性、威力 ×2
 const TERRAIN_TYPE = { electric: 'electric', grassy: 'grass', misty: 'fairy', psychic: 'psychic' };
@@ -171,14 +188,22 @@ function speedPair(x, y, f) {
 // rolls／later 每一下的 16 個亂數傷害（rolls＝這次、later＝之後連用：樹果、多重鱗片、拍落第一下的加成沒了；對戰模擬抽亂數用）。
 // d.cur 比最大 HP 少時，氣勢披帶、結實、多重鱗片（都要 HP 全滿）沒有作用
 function damageCalc(a, d, mk, o) {
-  const [, mtype, cat, bp0] = MOVES[mk], power0 = o.bp ?? bp0;
+  const [, mtype, cat, bp0] = MOVES[mk];
+  let power0 = o.bp ?? bp0;
   if (NO_CALC[mk]) return { skip: NO_CALC[mk] };
-  if (power0 == null) return { skip: '威力會變動或固定傷害' };
+  if (power0 == null && !WEIGHT_BP[mk]) return { skip: '威力會變動或固定傷害' };
   const A = MON[a.key], D = MON[d.key], aab = a.ab || '', notes = new Set();
   const use = k => { notes.add(abilZh(k)); return true; };
   // 破格無視防守方的特性（Smogon 列的可無視特性涵蓋這裡用到的，只有妖精氣場、熟成不在其中）
   const dab = aab === 'mold-breaker' && !['fairy-aura', 'ripen'].includes(d.ab) ? '' : d.ab || '';
   if (d.ab && !dab && DEF_ABILS.has(d.ab)) notes.add(`${abilZh(aab)}無視${abilZh(d.ab)}`);
+  // 看體重的招式：威力照雙方體重（破格無視防守方的重金屬、輕金屬）；沒有體重資料不算
+  if (power0 == null) {
+    const wa = weightOf(a.key, aab, a.item), wd = weightOf(d.key, dab, d.item);
+    if (!wd || (WEIGHT_BP[mk] === 'r' && !wa)) return { skip: '沒有體重資料' };
+    power0 = weightBp(mk, wa, wd);
+    notes.add(WEIGHT_BP[mk] === 'd' ? `${D.zh} ${wd} kg：威力 ${power0}` : `體重 ${wa}／${wd} kg：威力 ${power0}`);
+  }
   const offBy = [aab, d.ab].find(k => WEATHER_OFF.includes(k)), wthr = offBy ? '' : o.weather;
   if (offBy && o.weather) notes.add(`${abilZh(offBy)}讓天氣沒有作用`);
   // 在地面上：不是飛行屬性、沒有飄浮、沒帶氣球（Smogon isGrounded；重力、黑色鐵球不在可選的道具裡，不用看）

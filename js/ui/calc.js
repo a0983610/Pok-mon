@@ -34,8 +34,9 @@ const CALC_MOVES = Object.keys(MOVES).filter(canCalc);
   $('#' + id).insertAdjacentHTML('afterend', btn(1, '+1') + btn(0, '歸0'));
 });
 $('#cExtra').innerHTML = '<option value="">（不加）</option>' + TYPES.map(t => {
-  const ks = CALC_MOVES.filter(k => MOVES[k][1] === t.id).sort((x, y) => MOVES[y][3] - MOVES[x][3]);
-  return ks.length ? `<optgroup label="${t.zh}">${ks.map(k => `<option value="${k}">${MOVES[k][0]}（${CAT_ZH[MOVES[k][2]]} ${MOVES[k][3]}）</option>`).join('')}</optgroup>` : '';
+  // 看體重的招式（WEIGHT_BP）威力是 null，排在後面、寫「看體重」
+  const ks = CALC_MOVES.filter(k => MOVES[k][1] === t.id).sort((x, y) => (MOVES[y][3] ?? 0) - (MOVES[x][3] ?? 0));
+  return ks.length ? `<optgroup label="${t.zh}">${ks.map(k => `<option value="${k}">${MOVES[k][0]}（${CAT_ZH[MOVES[k][2]]} ${MOVES[k][3] ?? '看體重'}）</option>`).join('')}</optgroup>` : '';
 }).join('');
 const segHTML = (list, [sp, nat]) => list.map((x, i) => `<button data-v="${i}" aria-pressed="${x[0] === sp && x[1] === nat}">${x[2]}</button>`).join('');
 // 道具選單上的效果說明；排序：通用的在前，屬性道具和樹果依屬性順序
