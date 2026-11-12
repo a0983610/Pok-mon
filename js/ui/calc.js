@@ -118,35 +118,44 @@ function dmgSumHTML(A, D, { ok, kos, top }, pre = '') {
 }
 function calcHTML() {
   // sa／sd：兩方套用的我方登錄配招（calcSet）：有填的特性、道具、招式用登錄的，沒填的照這頁的設定；能力點數與性格見 calcSpread
-  const A = MON[calc.atk], D = MON[calc.def], sa = calcSet('a'), sd = calcSet('d');
+  const sa = calcSet('a'), sd = calcSet('d');
   const aab = sa?.ab || abOf(calc.atk, calc.aAb), dab = sd?.ab || abOf(calc.def, calc.dAb);
   const aItem = itemFor('a', sa, calc.atk, calc.aItem), dItem = itemFor('d', sd, calc.def, calc.dItem);
-  const spA = calcSpread('a'), spD = calcSpread('d');
-  const a = { key: calc.atk, inv: calc.ai, ...spA, st: { atk: calc.st[0], spa: calc.st[1] }, item: aItem, ab: aab, set: sa };
-  const d = { key: calc.def, hp: calc.hi, inv: calc.di, ...spD, st: { def: calc.st[2], spd: calc.st[3] }, item: dItem, ab: dab };
+  // 特性變身者（百變怪）：變成對面那隻（imposterVs，同出戰選角）：寶可夢、能力點數與性格（沒有的照對面那一方的投資檔位）、特性、招式照對面的，
+  // HP（照自己的 HP 投資）、道具照自己的；兩邊都是變身者時後變的失敗。X／Y＝實際算的攻擊方／防守方，A／D 是畫面上的名字與種族值
+  const full = (key, sp, ab, item, set, speInv) => ({ key, ...sp, atkInv: calc.ai, hp: calc.hi, defInv: calc.di, speInv, ab, item, set });
+  const X = imposterVs(full(calc.atk, calcSpread('a'), aab, aItem, sa, calc.sa), full(calc.def, calcSpread('d'), dab, dItem, sd, calc.sd));
+  const Y = imposterVs(full(calc.def, calcSpread('d'), dab, dItem, sd, calc.sd), X);
+  const nm = Z => Z.tfFrom ? { zh: `${MON[Z.tfFrom].zh}（變身成${MON[Z.key].zh}）` } : MON[Z.key];
+  const A = nm(X), D = nm(Y), Ab = MON[X.key], Db = MON[Y.key];
+  const spA = X.sp ? { sp: X.sp, nat: X.nat } : {}, spD = Y.sp ? { sp: Y.sp, nat: Y.nat } : {};
+  const a = { key: X.key, inv: calc.ai, ...spA, st: { atk: calc.st[0], spa: calc.st[1] }, item: aItem, ab: X.ab, set: X.set };
+  const d = { key: Y.key, hp: calc.hi, inv: calc.di, ...spD, st: { def: calc.st[2], spd: calc.st[3] }, item: dItem, ab: Y.ab, maxHp: Y.maxHp };
   const hh = calc.hh && team.fmt === 'd';
   const o = { fmt: team.fmt, weather: calc.weather, crit: calc.crit, terrain: calc.terrain, hh, walls: calc.walls, burn: calc.burn };
   const fw = dmgRows(a, d, o, calc.extra), { use, ok, why } = fw;
   // 反擊＝防守方打攻擊方，和按「⇄ 對調」看到的一樣：特性跟著寶可夢、投資檔位不動（攻擊投資套在防守方、HP／防禦投資套在攻擊方），
   // 道具照對調後的（swapItem：原本的道具換邊後還有作用就留著，不然用那一邊的預設），能力變化、加算招式、灼傷、幫助、牆不算；天氣、場地、急所照舊。
   // 套用登錄配招的一方道具照登錄的；能力點數與性格是登錄的或 OP.GG 最常見的（calcSpread）時跟著寶可夢走（那隻自己的，反過來打也一樣）
-  const bk = dmgRows({ key: calc.def, inv: calc.ai, ...spD, st: { atk: 0, spa: 0 }, item: itemFor('a', sd, calc.def, swapItem('a', calc.def, calc.dItem)), ab: dab, set: sd },
-    { key: calc.atk, hp: calc.hi, inv: calc.di, ...spA, st: { def: 0, spd: 0 }, item: itemFor('d', sa, calc.atk, swapItem('d', calc.atk, calc.aItem)), ab: aab },
+  const bk = dmgRows({ key: Y.key, inv: calc.ai, ...spD, st: { atk: 0, spa: 0 }, item: itemFor('a', sd, calc.def, swapItem('a', calc.def, calc.dItem)), ab: Y.ab, set: Y.set },
+    { key: X.key, hp: calc.hi, inv: calc.di, ...spA, st: { def: 0, spd: 0 }, item: itemFor('d', sa, calc.atk, swapItem('d', calc.atk, calc.aItem)), ab: X.ab, maxHp: X.maxHp },
     { ...o, hh: false, walls: [], burn: false }, '');
-  const sps = [spA, spD];
-  const { spd, first } = speedPair(...SIDES.map((s, i) => ({ key: [calc.atk, calc.def][i], inv: [calc.sa, calc.sd][i], ...sps[i], st: calc.st[4 + i], item: [aItem, dItem][i],
-    ab: [aab, dab][i], tw: calc.tw.includes(s), par: calc.par.includes(s), status: calc.par.includes(s) || (!i && calc.burn) })), { weather: calc.weather, terrain: calc.terrain, tr: calc.tr });
-  const spdText = (m, i) => `${m.zh} <b>${spd[i].v}</b><span class="meta">（${[sps[i].sp ? `${spName(SIDES[i])} 點數 ${sps[i].sp[5]}${NAT_ZH[natOf(sps[i].nat, 5)]}`
-    : `投資 ${invName(SPE_INV, [calc.sa, calc.sd][i])}`, calc.st[4 + i] && `速度 ${stgText(calc.st[4 + i])}`, ...spd[i].notes].filter(Boolean).join('・')}）</span>`;
-  // 上方的能力值（套用登錄配招時照登錄的點數與性格）
-  const statAt = (m, x, i, inv) => { const [p, n] = invAt(x, i, inv); return statOf(m.bs[i], p, i, n); };
-  const aname = spA.sp ? spName('a') : invName(ATK_INV, calc.ai), dname = spD.sp ? spName('d') : `HP ${invName(HP_INV, calc.hi)}・防禦／特防 ${invName(DEF_INV, calc.di)}`;
+  const sps = [spA, spD], XY = [X, Y];
+  // 速度：變身的照對面那隻的速度投資（X／Y 的 speInv），道具照自己的
+  const { spd, first } = speedPair(...SIDES.map((s, i) => ({ key: XY[i].key, inv: XY[i].speInv, ...sps[i], st: calc.st[4 + i], item: [aItem, dItem][i],
+    ab: XY[i].ab, tw: calc.tw.includes(s), par: calc.par.includes(s), status: calc.par.includes(s) || (!i && calc.burn) })), { weather: calc.weather, terrain: calc.terrain, tr: calc.tr });
+  const spdText = (m, i) => `${m.zh} <b>${spd[i].v}</b><span class="meta">（${[sps[i].sp ? `${XY[i].tfFrom ? '對面的' : spName(SIDES[i])} 點數 ${sps[i].sp[5]}${NAT_ZH[natOf(sps[i].nat, 5)]}`
+    : `投資 ${invName(SPE_INV, XY[i].speInv)}`, calc.st[4 + i] && `速度 ${stgText(calc.st[4 + i])}`, ...spd[i].notes].filter(Boolean).join('・')}）</span>`;
+  // 上方的能力值（套用登錄配招時照登錄的點數與性格；變身的照對面那隻的種族值，HP 照自己的）
+  const statAt = (m, x, i, inv) => i === 0 && x.maxHp ? x.maxHp : (([p, n]) => statOf(m.bs[i], p, i, n))(invAt(x, i, inv));
+  const aname = X.tfFrom ? '變身：能力照對面的' : spA.sp ? spName('a') : invName(ATK_INV, calc.ai);
+  const dname = Y.tfFrom ? '變身：HP 照自己的、其他能力照對面的' : spD.sp ? spName('d') : `HP ${invName(HP_INV, calc.hi)}・防禦／特防 ${invName(DEF_INV, calc.di)}`;
   const aItemZh = sa?.item || calc.aItem, dItemZh = sd?.item || calc.dItem;
   const stg = (v, zh) => v ? `<span>${zh} ${stgText(v)}</span>` : '';
   const row = ({ k, p, r }) => {
     const head = `<b>${MOVES[k][0]}</b>${chip(r.type)}${mtag(r.eff)}<span class="meta">${CAT_ZH[r.cat]} ${r.power}`
       + `${r.hits > 1 ? ` ×${r.hits} 下${r.hitNote ? `（${r.hitNote}）` : ''}` : ''}${r.stab > 4096 ? `・本系${r.stab > 6144 ? ' ×2' : ''}` : ''}`
-      + `${r.spread ? '・範圍 ×0.75' : ''}${ALWAYS_CRIT.has(k) ? '・必定急所' : ''}${FLAG.priority.has(k) ? '・先制' : ''}・${p ? (sa?.moves.some(Boolean) ? '登錄' : `使用率 ${p}%`) : '加算'}</span>`;
+      + `${r.spread ? '・範圍 ×0.75' : ''}${ALWAYS_CRIT.has(k) ? '・必定急所' : ''}${FLAG.priority.has(k) ? '・先制' : ''}・${p ? (X.set?.moves.some(Boolean) ? '登錄' : `使用率 ${p}%`) : '加算'}</span>`;
     if (!r.eff) return `<div class="dmg"><div class="dmg-h">${head}<span class="ko">沒有效果${r.immuneBy ? `（${abilZh(r.immuneBy)}）` : r.blockedBy ? `（${r.blockedBy}）` : ''}</span></div></div>`;
     const lo = hpPct(r.min, r.hp), hi = hpPct(r.max, r.hp), kt = koText(r.ko);
     const extra = [...r.notes, r.berry && `${ITEMS[dItem][0]}減半第一下`, r.endured && `${ITEMS[r.endured]?.[0] || abilZh(r.endured)}撐住第一下`].filter(Boolean);
@@ -161,7 +170,8 @@ function calcHTML() {
     return `<div class="x-line"><span class="x-msg">${m.zh}的${abilZh(k)}出場會變${FIELD_ZH[f]}，目前是${FIELD_ZH[cur] || (wx ? '無天氣' : '無場地')}</span>`
       + `<button class="mini" data-set${wx ? 'w' : 't'}="${f}">改成${FIELD_ZH[f]}</button></div>`;
   });
-  const im = dab === 'intimidate' && intimidateOn(aab);
+  // 攻擊方是變身的：先吃威嚇再變身，能力變化會被抄成對面的，不提示
+  const im = dab === 'intimidate' && !X.tfFrom && intimidateOn(aab);
   if (im && !calc.st[0] && !calc.st[1]) {
     const txt = [im[0] && `攻擊 ${im[0] > 0 ? '+' : '−'}${Math.abs(im[0])}`, im[1] && `特攻 +${im[1]}`].filter(Boolean).join('、');
     hints.push(`<div class="x-line"><span class="x-msg">${D.zh}的${abilZh(dab)}出場會讓${A.zh}${txt}</span><button class="mini" data-im="${im.join('.')}">套用${txt}</button></div>`);
@@ -173,14 +183,14 @@ function calcHTML() {
     const sum = parts.reduce((s, [, v]) => s + v[0], 0);
     if (sum > 66) hints.push(`<div class="x-line"><span class="x-msg">⚠ ${side}${m.zh}的能力點數 ${parts.map(([zh, v]) => `${zh} ${v[0]}`).join('＋')}＝${sum}，超過上限 66</span></div>`);
   });
-  return `<div class="res-head">${A.zh}${chips(A.types)} → ${D.zh}${chips(D.types)}`
+  return `<div class="res-head">${A.zh}${chips(Ab.types)} → ${D.zh}${chips(Db.types)}`
     + `<span class="muted small">（${[FMT_ZH[team.fmt], FIELD_ZH[calc.weather], FIELD_ZH[calc.terrain], calc.tr && '戲法空間', hh && '幫助', calc.burn && '灼傷',
       ...calc.walls.map(w => MOVES[w][0]), calc.crit && '急所'].filter(Boolean).join('・')}）</span></div>`
-    + `<div class="bst">攻擊方（${aname}）<span>攻擊 <b>${statAt(A, a, 1, calc.ai)}</b></span><span>特攻 <b>${statAt(A, a, 3, calc.ai)}</b></span>`
-    + `${stg(calc.st[0], '攻擊')}${stg(calc.st[1], '特攻')}${aab ? `<span>${abilZh(aab) || '固定特性'}</span>` : ''}${aItemZh ? `<span>${ITEMS[aItemZh][0]}</span>` : ''}</div>`
-    + `<div class="bst">防守方（${dname}）<span>HP <b>${statAt(D, d, 0, calc.hi)}</b></span>`
-    + `<span>防禦 <b>${statAt(D, d, 2, calc.di)}</b></span><span>特防 <b>${statAt(D, d, 4, calc.di)}</b></span>`
-    + `${stg(calc.st[2], '防禦')}${stg(calc.st[3], '特防')}${dab ? `<span>${abilZh(dab) || '固定特性'}</span>` : ''}${dItemZh ? `<span>${ITEMS[dItemZh][0]}</span>` : ''}</div>`
+    + `<div class="bst">攻擊方（${aname}）<span>攻擊 <b>${statAt(Ab, a, 1, calc.ai)}</b></span><span>特攻 <b>${statAt(Ab, a, 3, calc.ai)}</b></span>`
+    + `${stg(calc.st[0], '攻擊')}${stg(calc.st[1], '特攻')}${X.ab ? `<span>${abilZh(X.ab) || '固定特性'}</span>` : ''}${aItemZh ? `<span>${ITEMS[aItemZh][0]}</span>` : ''}</div>`
+    + `<div class="bst">防守方（${dname}）<span>HP <b>${statAt(Db, d, 0, calc.hi)}</b></span>`
+    + `<span>防禦 <b>${statAt(Db, d, 2, calc.di)}</b></span><span>特防 <b>${statAt(Db, d, 4, calc.di)}</b></span>`
+    + `${stg(calc.st[2], '防禦')}${stg(calc.st[3], '特防')}${Y.ab ? `<span>${abilZh(Y.ab) || '固定特性'}</span>` : ''}${dItemZh ? `<span>${ITEMS[dItemZh][0]}</span>` : ''}</div>`
     + hints.join('')
     + `<div class="c-sum info">速度：${spdText(A, 0)} ／ ${spdText(D, 1)} → `
     + `${first < 0 ? '同速，誰先動各 50%' : `<b>${first ? D.zh : A.zh}</b>先動${calc.tr ? '（戲法空間：速度慢的先動）' : ''}`}`
@@ -199,6 +209,8 @@ function calcHTML() {
     + '道具預設這隻 OP.GG 最常帶的（帶在這一方沒作用、不影響傷害或速度的算不帶），可在選單改。'
     + '特性：超級進化用固定特性，其他預設用 OP.GG 使用率最高的，可在選單改；要看場上狀況的不算（如猛火、引火的強化、正電／負電、分析、大將、鬥爭心、畫皮），'
     + '毅力在勾「灼傷」時算（攻擊 ×1.5、不減半）。開天氣、開場地的特性和威嚇不會自動套用，結果上方會提示。破格會無視防守方的特性。電光束出招前特攻 +1 已算進去。'
+    + '特性是變身者的（百變怪）照變成對面那隻算：寶可夢、能力點數與性格（對面沒有的照這頁的投資檔位）、特性、招式照對面的，HP 與道具照自己的'
+    + '（兩邊都是變身者時後變的失敗，同「出戰選角」）；能力變化照這頁設定的。'
     + '幫助（雙打才有）威力 ×1.5；灼傷時物理招式傷害 ×½。反射壁擋物理、光牆擋特殊、極光幕兩種都擋（不和前兩者疊加），單打 ×½、雙打 ×⅔；'
     + '急所、穿透無視牆，劈瓦、精神之牙、怒牛會先打破牆。場地：在地面上（不是飛行屬性、沒有飄浮）的攻擊方用電氣／青草／精神場地對應屬性的招式威力 ×1.3；'
     + '打在地面上的防守方時，薄霧場地讓龍招式、青草場地讓地震／重踏威力 ×½，精神場地擋下先制招式；大地波動、電力上升、廣域戰力、薄霧炸裂照場地改變威力或屬性，'
