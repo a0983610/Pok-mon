@@ -22,7 +22,8 @@ const simMine = () => team.mons.map((k, i) => k ? { key: k, set: simSetOf(k, tea
 // 這隻在模擬裡不算的招式（simCanUse 以外，見規則的「不算」）與有沒有攻擊招式
 function simSkipped(x) {
   const ks = (x.set?.moves.some(Boolean) ? x.set : defaultSet(x.key, 's'))?.moves.filter(Boolean) || [];
-  return { skip: ks.filter(k => MOVES[k] && !simCanUse(k)), atk: ks.some(k => MOVES[k] && simCanUse(k) && !SIM_SUP[k]) };
+  // 變身（百變怪）會拿到對手的招式，算有攻擊招式
+  return { skip: ks.filter(k => MOVES[k] && !simCanUse(k)), atk: ks.some(k => MOVES[k] && simCanUse(k) && !SIM_SUP[k]) || ks.includes('transform') };
 }
 const simNeedN = () => Math.min(BRING_N.s, simMine().length);
 const simPctText = (x, n) => n ? `${Math.round(x / n * 1000) / 10}%` : '—';
@@ -197,8 +198,9 @@ function simRulesText() {
     + '道具與特性：吃剩的東西、文柚果、木子果、零餘果、凸凸頭盔、光之黏土、大根莖、貝殼之鈴、白色香草、心靈香草、氣球；'
     + '再生力、自然回復、毒療、蛻皮、魔法防守、惡作劇之心、黃金之軀、魔法鏡、毅力、同步、唱反調、恆淨之軀、鏡甲、不服輸、好勝、粗糙皮膚、各種異常免疫特性；'
     + '威嚇：出場時（開局雙方先發、換上場、倒下補位）對手場上那隻攻擊 −1，算法同「出戰選角」的對位（精神力、恆淨之軀等不吃威嚇的不降，不服輸、好勝等反而上升）。'
-    + '不算：攻擊招式的追加效果（畏縮、灼傷、降能力…，連擊掌奇襲必定畏縮、冰凍之風必定降速度這種一定會發生的也不算）、天氣場地（極光幕只有特性降雪的能用）、威嚇以外的出場特性（如降雨、日照）、命中率（當全中，一擊必殺除外）、'
-    + '變身，'
+    + '變身（招式變身、百變怪的特性變身者出場時）：變成對手場上那隻的樣子，屬性、HP 以外的能力（含能力點數與性格）、能力變化、特性、招式（每招 PP 5）都照對手的，'
+    + 'HP、異常狀態、道具照自己的；對手有替身、或有一方已經變身過的不能變；換下場就變回來。'
+    + '不算：攻擊招式的追加效果（畏縮、灼傷、降能力…，連擊掌奇襲必定畏縮、冰凍之風必定降速度這種一定會發生的也不算）、天氣場地（極光幕只有特性降雪的能用）、威嚇與變身者以外的出場特性（如降雨、日照）、命中率（當全中，一擊必殺除外）、'
     + '戲法空間、順風、同命、接棒、戲法、滅亡之歌等其他輔助招，逆鱗的連續攻擊與混亂、羽棲當回合失去飛行屬性（不算的招式不會出，我方帶的隻上面會標）；'
     + '連續攻擊招式照「傷害計算」以 3 下計，雜技、掃墓等威力會變的招式照資料的威力（噴火、噴水會隨 HP 變小；'
     + '打草結、踢倒、重磅衝撞、高溫重壓照雙方體重，體重取自 Pokémon Showdown 的資料）。'
@@ -237,7 +239,7 @@ function simSetGuess(t, slot) {
   const mons = t.path[t.path.length - 1].st.sd[1].mons, free = mons.map((m, q) => m.out ? -1 : q).filter(q => q >= 0);
   if (!t.roster.mems[slot] || mons.some(m => m.slot === slot) || !free.length) return;
   const q0 = free.reduce((a, q) => (mons[q].gs || 0) < (mons[a].gs || 0) ? q : a), slots = mons.map((m, q) => q === q0 ? slot : m.slot);
-  const mega = i => !!MON[t.roster.mems[i].key].base, shown = mons.find(m => m.out && MON[m.key].base);
+  const mega = i => !!MON[t.roster.mems[i].key].base, shown = mons.find(m => m.out && MON[simBaseKey(m)].base);
   const up = shown ? shown.slot : slots.find((i, q) => !mons[q].out && mega(i));
   t.gs++;
   t.path.forEach(p => {
@@ -260,7 +262,7 @@ function simReform(M, key, item) {
 // 對手還沒上場（猜的）的幾隻跟著上過場的修正：一場只能超級進化一隻（有上過場的超級進化了，猜的超級進化改原型、沒道具）；
 // 同一隊不帶重複的道具（撞到上過場的道具，改拿牠下一個常帶的，同 simItems）
 function simFixGuessed(st) {
-  const mons = st.sd[1].mons, up = mons.find(m => m.out && MON[m.key].base), taken = new Set(mons.filter(m => m.out && m.item).map(m => m.item));
+  const mons = st.sd[1].mons, up = mons.find(m => m.out && MON[simBaseKey(m)].base), taken = new Set(mons.filter(m => m.out && m.item).map(m => m.item));
   mons.forEach((m, q) => {
     if (m.out) return;
     if (up && MON[m.key].base) m = mons[q] = simReform(m, MON[m.key].base, '');
@@ -323,16 +325,17 @@ function simOptZh(o, side) {
 function simSideHTML(side, s, guess) {
   const pctOf = m => m.hp <= 0 ? '倒下' : `${Math.round(m.hp / m.max * 100)}%`;
   const M = side.mons[side.act], st = Object.entries(M.st).filter(([, v]) => v).map(([k, v]) => `${SIM_STAT_ZH[k]}${v > 0 ? '+' : ''}${v}`);
+  const name = M.tf ? `${MON[M.tf.key].zh}（變身成${MON[M.key].zh}）` : MON[M.key].zh;
   const bench = side.mons.filter((m, i) => i !== side.act).map(m => `${MON[m.key].zh}${guess && !m.out ? '（猜的）' : ''} ${pctOf(m)}${m.status && m.hp > 0 ? ' ' + SIM_STATUS_ZH[m.status] : ''}`);
   const haz = Object.entries(side.haz).filter(([, v]) => v).map(([h, v]) => SIM_HAZ_ZH[h] + (h === 'spikes' || h === 'tspikes' ? ` ${v} 層` : ''));
   const scr = Object.entries(side.scr).map(([w, n]) => `${MOVES[w][0]} ${n} 回合`);
-  return `<div class="x-line"><b>${s ? '對手' : '我方'}</b><span><b>${MON[M.key].zh}</b> ${pctOf(M)}${M.status && M.hp > 0 ? ' ' + SIM_STATUS_ZH[M.status] : ''}`
+  return `<div class="x-line"><b>${s ? '對手' : '我方'}</b><span><b>${name}</b> ${pctOf(M)}${M.status && M.hp > 0 ? ' ' + SIM_STATUS_ZH[M.status] : ''}`
     + `${st.length ? '（' + st.join('、') + '）' : ''}</span>${bench.length ? `<span class="meta">後排 ${bench.join('、')}</span>` : ''}`
     + `${haz.length || scr.length ? `<span class="meta">${[...haz.map(x => '場上' + x), ...scr].join('、')}</span>` : ''}</div>`;
 }
 // 對手後排（推演時）：對手 6 格，帶出場的按下去；還沒上場的是猜的，點別隻換掉較早猜的那隻
 function simGuessHTML(t) {
-  const mons = t.path[t.path.length - 1].st.sd[1].mons, nm = m => MON[m.key].zh, seen = mons.filter(m => m.out), guess = mons.filter(m => !m.out);
+  const mons = t.path[t.path.length - 1].st.sd[1].mons, nm = m => MON[simBaseKey(m)].zh, seen = mons.filter(m => m.out), guess = mons.filter(m => !m.out);
   return `<div class="b-label">對手帶出場<span class="muted small">上過場的：${seen.map(nm).join('、')}`
     + (guess.length ? `；猜的：${guess.map(nm).join('、')}（不對就點實際的，會換掉較早猜的那隻）` : '') + '</span></div>'
     + `<div class="t-row">${t.oppKeys.map((k, i) => MON[k] && t.roster.mems[i] ? `<button class="mini" data-guess="${i}" aria-pressed="${mons.some(m => m.slot === i)}"${guess.length ? '' : ' disabled'}>`
@@ -353,7 +356,7 @@ function simEditHTML(st) {
   const opts = m => [['', '沒有異常'], ...Object.entries(SIM_STATUS_ZH)].map(([k, zh]) => `<option value="${k}"${m.status === k ? ' selected' : ''}>${zh}</option>`).join('');
   const opt = (v, zh, cur) => `<option value="${v}"${v === cur ? ' selected' : ''}>${zh}</option>`;
   const byZh = list => list.sort((x, y) => x[1].localeCompare(y[1], 'zh-Hant'));
-  const opp = st.sd[1].mons, megaOut = opp.find(m => m.out && MON[m.key].base);
+  const opp = st.sd[1].mons, megaOut = opp.find(m => m.out && MON[simBaseKey(m)].base);
   // 對手 m（第 q 隻）的型態、道具、4 招：型態列原型和超級進化（別隻已經超級進化過就不列超級進化）；道具先列這隻常帶的，
   // 其他上過場的對手拿著的不列（同一隊不重複）、不列超級石；招式只列模擬算得了的（simCanUse），這隻常用的排前面
   const more = (m, q) => {
@@ -374,9 +377,11 @@ function simEditHTML(st) {
       + `<optgroup label="其他">${rest.map(([k, zh]) => opt(k, zh, m.moves[n])).join('')}</optgroup></select>`;
     return `<div class="c-f">${form}${item}</div><div class="c-f"><span class="c-l">招式</span>${[0, 1, 2, 3].map(mvSel).join('')}</div>`;
   };
-  const rows = [0, 1].map(s => st.sd[s].mons.map((m, q) => s && !m.out ? '' : `<div class="c-f"><span class="c-l">${s ? '對手' : '我方'}${MON[m.key].zh}</span>`
-    + `HP<input type="number" class="sel c-num" inputmode="numeric" min="0" max="100" value="${simPct(m.hp, m.max)}" data-ehp="${s}.${q}" aria-label="${MON[m.key].zh}剩下的 HP %">%`
-    + `<select class="sel" data-est="${s}.${q}" aria-label="${MON[m.key].zh}的異常狀態">${opts(m)}</select></div>` + (s ? more(m, q) : '')).join('')).join('');
+  // 變身中的只改 HP 與異常狀態（型態、道具、招式是變身來的）
+  const zh = m => MON[simBaseKey(m)].zh;
+  const rows = [0, 1].map(s => st.sd[s].mons.map((m, q) => s && !m.out ? '' : `<div class="c-f"><span class="c-l">${s ? '對手' : '我方'}${zh(m)}</span>`
+    + `HP<input type="number" class="sel c-num" inputmode="numeric" min="0" max="100" value="${simPct(m.hp, m.max)}" data-ehp="${s}.${q}" aria-label="${zh(m)}剩下的 HP %">%`
+    + `<select class="sel" data-est="${s}.${q}" aria-label="${zh(m)}的異常狀態">${opts(m)}</select></div>` + (s && !m.tf ? more(m, q) : '')).join('')).join('');
   return `<div class="b-label">改成實戰的結果<span class="muted small">HP 填剩下幾 %（0＝倒下）；上過場的對手看到的型態（超級進化了沒）、道具、招式和猜的不一樣就改，`
     + `招式只列模擬算得了的；改好按「用這個局面重算」，從這一步往後照新的算</span></div>${rows}`
     + '<div class="c-f"><button class="btn primary" data-eapply>用這個局面重算</button><button class="btn" data-ecancel>取消</button></div>';

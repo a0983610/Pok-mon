@@ -65,6 +65,7 @@ const SIM_HPBP = new Set(['eruption', 'water-spout']);
 //   encore 再來一次 3 回合（冠軍版：對手這回合還沒出招就立刻改成那招，已經出過就多 1 回合）｜taunt 挑釁 3 回合（對手已出招多 1 回合）
 //   subst 替身：扣 1/4、替身 HP 1/4｜screen 牆 5 回合（光之黏土 8；極光幕要下雪，見 simFutile）｜phaze 吼叫、吹飛：強制對手換人（隨機）
 //   haze 黑霧：雙方能力變化歸零｜debuff 降對手能力 d｜shot 拋下狠話：降對手能力後換人｜memento 臨別禮物：降對手能力後自己倒下
+//   transform 變身：變成對手的樣子（見 simTransform）
 //   drum 腹鼓：扣一半、攻擊 +6｜soul 魂舞烈音爆：扣 33%、全能力 +1｜retreat 背水一戰：全能力 +1、不能換人｜curse 詛咒（非幽靈：攻防 +1 速度 −1；
 //   幽靈：扣一半、對手每回合扣 1/4）｜focus 聚氣：急所 +2｜charge 充電：特防 +1、下一招電屬性威力 ×2
 const SIM_ALL1 = { atk: 1, def: 1, spa: 1, spd: 1, spe: 1 };
@@ -97,6 +98,7 @@ const SIM_SUP = {
   'eerie-impulse': { kind: 'debuff', d: { spa: -2 }, ...SIM_FOE }, 'fake-tears': { kind: 'debuff', d: { spd: -2 }, ...SIM_FOE },
   'baby-doll-eyes': { kind: 'debuff', d: { atk: -1 }, p: 1, ...SIM_FOE }, 'string-shot': { kind: 'debuff', d: { spe: -2 }, ...SIM_FOE },
   'parting-shot': { kind: 'shot', d: { atk: -1, spa: -1 }, sub: 1, ...SIM_FOE }, memento: { kind: 'memento', d: { atk: -2, spa: -2 }, tgt: 1, f: 1 },
+  transform: { kind: 'transform', tgt: 1 },
 };
 const SIM_STATUS_ZH = { brn: '灼傷', par: '麻痺', psn: '中毒', tox: '劇毒', slp: '睡眠' };
 const SIM_HAZ_ZH = { sr: '隱形岩', spikes: '撒菱', tspikes: '毒菱', web: '黏黏網' };
@@ -211,7 +213,8 @@ function simWinner(st) {
   return d1 ? 0 : d0 ? 1 : -1;
 }
 const simNeed = (st, s) => simAct(st, s).hp <= 0 && simBench(st, s).length > 0;
-const simName = (st, s, M = simAct(st, s)) => `${s ? '對手' : '我方'}${MON[M.key].zh}`;
+// 紀錄裡的名字：變身中的寫原本的寶可夢（simBaseKey）
+const simName = (st, s, M = simAct(st, s)) => `${s ? '對手' : '我方'}${MON[simBaseKey(M)].zh}`;
 const simPct = (v, max) => Math.round(Math.max(0, v) / max * 100);
 const simLog = (st, t) => { if (st.log) st.log.push('　' + t); };
 const simSide0 = mons => ({ act: 0, mons, haz: { sr: 0, spikes: 0, tspikes: 0, web: 0 }, scr: {}, wish: null, hwish: false });
@@ -367,6 +370,7 @@ function simSwitch(st, s, i, rnd, late = false) {
   const side = st.sd[s], O = side.mons[side.act];
   if (O.hp > 0 && O.b.ab === 'regenerator') simHeal(st, s, O, O.max / 3, '換下場時再生力');
   if (O.hp > 0 && O.b.ab === 'natural-cure') O.status = '';
+  simUntransform(O);
   Object.assign(O, { st: SIM_ST0(), lock: '', chg: '', hide: false, rech: false, v: {}, last: '' });
   side.act = i;
   const M = side.mons[i];
@@ -386,7 +390,27 @@ function simSwitch(st, s, i, rnd, late = false) {
     else if (!ty.includes('steel')) simStatus(st, s, M, h.tspikes > 1 ? 'tox' : 'psn', rnd, null);
   }
   if (h.web && ground && M.hp > 0) simBoost(st, s, M, { spe: -1 }, 1 - s);
-  if (!late) simIntimidate(st, s, M);
+  if (!late) { simIntimidate(st, s, M); simImposter(st, s, M); }
+}
+// 變身（招式變身、特性變身者）：M 變成對手 T 的樣子（Showdown pokemon.ts transformInto，冠軍版 mod 沒改）：寶可夢（屬性、種族值、體重）、
+// HP 以外的能力（能力點數、性格也照 T 的）、能力變化、特性、招式（每招 PP＝min(5, 原本的 PP)）、暫時狀態只抄集氣；HP、異常狀態、道具照自己的。
+// 對手倒下了、有替身、自己或對手已經變身過的失敗（守住擋不住）。原本的樣子存在 M.tf，換下場就變回來（simUntransform，Showdown clearVolatile）；
+// id 改成「原本的 id>對手 key」，計算快取不會和本來那隻或對手混在一起
+function simTransform(st, s, M, T) {
+  if (T.hp <= 0 || T.v.sub || M.tf || T.tf) return false;
+  simLog(st, `${simName(st, s, M)}變身成${MON[T.key].zh}`);
+  M.tf = { key: M.key, id: M.id, b: M.b, moves: M.moves, pp: M.pp };
+  Object.assign(M, { key: T.key, id: `${M.id}>${T.key}`, b: { ...T.b, hp: M.b.hp }, moves: T.moves.slice(),
+    pp: Object.fromEntries(T.moves.map(k => [k, Math.min(5, MOVES[k]?.[5] ?? 5)])), st: { ...T.st }, lock: '' });
+  if (T.v.focus) M.v.focus = true;
+  return true;
+}
+const simUntransform = M => { if (M.tf) { Object.assign(M, { key: M.tf.key, id: M.tf.id, b: M.tf.b, moves: M.tf.moves, pp: M.tf.pp }); delete M.tf; } };
+// 寶可夢原本的 key（變身中的是變身前的；統計、畫面用）
+const simBaseKey = M => M.tf?.key || M.key;
+// 特性變身者：出場時變身成對手場上那隻（Showdown abilities.ts imposter）；變身來的特性不會再發動出場效果（威嚇先算完才變身）
+function simImposter(st, s, M) {
+  if (M.hp > 0 && M.b.ab === 'imposter' && !M.tf) simTransform(st, s, M, simAct(st, 1 - s));
 }
 // 威嚇（出場特性）：s 這方的 M 出場時，對手場上那隻照 intimidateOn 改攻擊／特攻（同出戰選角的對位：不吃威嚇的特性不降，
 // 不服輸、好勝等反而上升）；對手場上那隻倒下了就沒有作用。降了能力的帶白色香草就恢復（用掉）
@@ -446,6 +470,7 @@ function simFutile(st, s, k) {
     case 'haze': return [M, T].every(P => Object.values(P.st).every(v => !v));
     case 'debuff': return capped(T, x.d) || tb === 'clear-body';
     case 'shot': return capped(T, x.d) && !simBench(st, s).length;
+    case 'transform': return !!M.tf || !!T.tf;
     default: return false;
   }
 }
@@ -459,7 +484,7 @@ function simOpts(ctx, st, s) {
   const M = simAct(st, s), T = simAct(st, 1 - s);
   if (M.rech) return [{ t: 'rech' }];
   if (M.chg) return [{ t: 'mv', k: M.chg }];
-  const ks = M.v.enc && M.moves.includes(M.v.encK) && M.pp[M.v.encK] > 0 ? [M.v.encK] : M.lock && M.item === 'choice-scarf' ? [M.lock] : M.moves;
+  const ks = M.v.enc && M.moves.includes(M.v.encK) && M.pp[M.v.encK] > 0 ? [M.v.encK] : M.lock && M.item === 'choice-scarf' && M.moves.includes(M.lock) ? [M.lock] : M.moves;
   const can = ks.filter(k => M.pp[k] > 0 && !(M.v.taunt && SIM_SUP[k]));
   let mv = !can.length ? [{ t: 'mv', k: SIM_STRUGGLE }]
     : can.filter(k => (!SIM_FIRST.has(k) || M.in === st.turn) && !simFutile(st, s, k)).map(k => ({ t: 'mv', k }));
@@ -628,6 +653,11 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
       simBoost(st, 1 - s, T, x.d, s);
       M.hp = 0;
       simFaint(st, M);
+      return;
+    case 'transform':
+      if (M.tf || T.tf) return fail(M.tf ? '已經變身了' : `${tn}是變身來的`);
+      say('');
+      simTransform(st, s, M, T);
       return;
   }
 }
@@ -915,6 +945,7 @@ function simGreedySup(st, s, M, T, k, dt, dm) {
     case 'hazard': return simBench(st, 1 - s).length && safe ? 0.45 : 0;
     case 'screen': return dt > M.max * 0.2 ? 0.4 : 0;
     case 'phaze': case 'haze': return T.st.atk + T.st.spa + T.st.spe >= 2 ? 0.8 : 0;
+    case 'transform': return 0.9;
     default: return 0;
   }
 }
@@ -926,8 +957,11 @@ function simGreedyPick(ctx, st, s) {
   const score = i => {
     const M = st.sd[s].mons[i];
     if (T.hp <= 0) return M.hp / M.max;
-    const dm = Math.max(0, ...M.moves.map(k => simExp(ctx, st, M, T, k))), dt = Math.max(0, ...T.moves.map(k => simExp(ctx, st, T, M, k)));
-    const n1 = dm ? Math.ceil(T.hp / dm) : Infinity, n2 = dt ? Math.ceil(M.hp / dt) : Infinity, fast = simSpeed(ctx, M) > simSpeed(ctx, T);
+    // 特性變身者的換上來就變成對手那隻：招式、能力照對手的算（HP 是自己的、道具照自己的算速度）
+    const imp = M.b.ab === 'imposter' && !T.tf && !T.v.sub, src = imp ? T : M;
+    const dm = Math.max(0, ...src.moves.map(k => simExp(ctx, st, src, T, k))), dt = Math.max(0, ...T.moves.map(k => simExp(ctx, st, T, src, k)));
+    const n1 = dm ? Math.ceil(T.hp / dm) : Infinity, n2 = dt ? Math.ceil(M.hp / dt) : Infinity;
+    const fast = simSpeed(ctx, imp ? { ...T, item: M.item, status: M.status } : M) > simSpeed(ctx, T);
     if (n1 < n2 || (n1 === n2 && fast && n1 < Infinity)) return 2 + Math.max(0, M.hp - dt * (fast ? n1 - 1 : n1)) / M.max;
     return Math.min(1, dm * (n2 === Infinity ? 9 : n2) / T.hp);
   };
@@ -938,6 +972,7 @@ function simReplace(st, picks, rnd) {
   const sw = [0, 1].filter(s => picks[s].t === 'sw');
   sw.forEach(s => simSwitch(st, s, picks[s].i, rnd, true));
   sw.forEach(s => simIntimidate(st, s, simAct(st, s)));
+  sw.forEach(s => simImposter(st, s, simAct(st, s)));
 }
 // 從局面 st 用簡單規則雙方打下去（最多再 SIM_LOOK 回合），回傳 simValue；rnd＝照亂數打（樹搜尋用），沒給用期望值。
 // 補位換上來又被撒菱類打倒的再補（補到有人站著才開打）；期望值打時同速輪流誰先：每次打下去換一邊起頭（ctx.flip）、之後每回合再輪流
@@ -1018,8 +1053,9 @@ function simSearch(ctx, st, phase, iters, rnd, stats, uniform) {
 function simStart(sides, log) {
   const st = { sd: sides.map(x => simSide0(x.mons.map(simCloneMon))), turn: 0, fut: [], idle: 0, log: log ? [] : null };
   st.sd.forEach(x => Object.assign(x.mons[0], { in: 0, out: true }));
-  // 先發雙方同時出場：各自的威嚇都打對方（同出戰選角的正面對打）
+  // 先發雙方同時出場：各自的威嚇都打對方（同出戰選角的正面對打），變身者再變身
   [0, 1].forEach(s => simIntimidate(st, s, simAct(st, s)));
+  [0, 1].forEach(s => simImposter(st, s, simAct(st, s)));
   return st;
 }
 // 這個局面接下來是哪個階段：'over' 分出勝負（或打滿回合）、'replace' 有人倒下要補位、'turn' 選這回合的招式
@@ -1101,7 +1137,7 @@ function simDecide(ctx, st, phase, rnd) {
 // 回傳 { res 1 我方贏／-1 輸（同時全倒看 simWinner）／0 平手（打滿 SIM_MAX_TURN 回合）, turns, mons [我方, 對手] 帶出場的（kos、hp、max、out）, log }
 function simPlay(ctx, sides, rnd, log, opt = {}) {
   const st = simStart(sides, log);
-  if (st.log) st.log.unshift(`先發：我方${MON[simAct(st, 0).key].zh}、對手${MON[simAct(st, 1).key].zh}`);
+  if (st.log) st.log.unshift(`先發：我方${MON[simBaseKey(simAct(st, 0))].zh}、對手${MON[simBaseKey(simAct(st, 1))].zh}`);
   const pick = (c, s) => simGreedyPick(ctx, c, s), algo = [].concat(opt.algo || 'ply1');
   const by = (a, phase) => a === 'tree' ? simSearch(ctx, st, phase, opt.iters || 200, rnd) : simDecide(ctx, st, phase, rnd);
   const decide = phase => algo.length < 2 || algo[0] === algo[1] ? by(algo[0], phase) : [by(algo[0], phase)[0], by(algo[1], phase)[1]];
@@ -1110,6 +1146,8 @@ function simPlay(ctx, sides, rnd, log, opt = {}) {
     // 補位換上來又被撒菱類打倒的再補（補到有人站著才打下一回合）
     while (!simOver(st) && (simNeed(st, 0) || simNeed(st, 1))) simReplace(st, decide('replace'), rnd);
   }
+  // 打完時還在變身的變回來（統計照原本的寶可夢）
+  st.sd.forEach(x => x.mons.forEach(simUntransform));
   const w = simWinner(st), res = w === 0 ? 1 : w === 1 ? -1 : 0, both = simDead(st, 0) && simDead(st, 1);
   if (st.log) st.log.push((both ? `雙方同時全倒，最後倒下的是${w ? '對手' : '我方'}，` : '') + (res > 0 ? '我方贏' : res < 0 ? '我方輸' : `打滿 ${SIM_MAX_TURN} 回合，平手`));
   return { res, turns: st.turn, mons: st.sd.map(x => x.mons), log: st.log };
