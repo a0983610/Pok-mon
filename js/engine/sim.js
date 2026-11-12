@@ -2,7 +2,7 @@
 // ---------- 對戰模擬（單打：6 選 3，雙方每回合同時出招） ----------
 // 算攻擊招式的傷害與招式本身附帶的效果（使用限制、自己的能力變化、反作用力與吸血、打完換人），
 // 加上輔助招（強化、守住、回復、異常狀態、撒菱、擾亂，見 SIM_SUP）與相關的道具、特性、回合結束效果，以及 PP（照 OP.GG 冠軍版的 PP，用完只能掙扎）。
-// 不算：攻擊招式的機率性追加效果（畏縮、灼傷、降能力…）、天氣場地、出場特性（威嚇等）、命中率（當全中）。
+// 不算：攻擊招式的機率性追加效果（畏縮、灼傷、降能力…）、天氣場地、威嚇以外的出場特性、命中率（當全中）。
 // 各表的資料來源寫在表的上方；Showdown＝Pokémon Showdown 的 data/moves.ts、conditions.ts、items.ts、abilities.ts、
 // sim/battle-actions.ts、sim/battle.ts，冠軍版改過的照 data/mods/champions/（conditions.ts、moves.ts、abilities.ts）。
 
@@ -353,7 +353,8 @@ function simStatus(st, s, M, x, rnd, src) {
 // 換上第 i 隻：換下來的（還站著的）特性再生力回 1/3、自然回復治好異常（冠軍版），能力變化與換下場就清掉的狀態都清掉，
 // 上一次用的招式也清掉（Showdown switchIn 對換下場的呼叫 clearVolatile，裡面 lastMove = null；所以換回來還沒出招時再來一次會失敗）；
 // 換上來的：劇毒累積重算、治癒之願回滿，再踩撒菱類
-function simSwitch(st, s, i, rnd) {
+// late＝出場特性（威嚇）先不發動，等雙方都換上來再一起發動（倒下後同時補位，見 simReplace）
+function simSwitch(st, s, i, rnd, late = false) {
   const side = st.sd[s], O = side.mons[side.act];
   if (O.hp > 0 && O.b.ab === 'regenerator') simHeal(st, s, O, O.max / 3, '換下場時再生力');
   if (O.hp > 0 && O.b.ab === 'natural-cure') O.status = '';
@@ -376,6 +377,23 @@ function simSwitch(st, s, i, rnd) {
     else if (!ty.includes('steel')) simStatus(st, s, M, h.tspikes > 1 ? 'tox' : 'psn', rnd, null);
   }
   if (h.web && ground && M.hp > 0) simBoost(st, s, M, { spe: -1 }, 1 - s);
+  if (!late) simIntimidate(st, s, M);
+}
+// 威嚇（出場特性）：s 這方的 M 出場時，對手場上那隻照 intimidateOn 改攻擊／特攻（同出戰選角的對位：不吃威嚇的特性不降，
+// 不服輸、好勝等反而上升）；對手場上那隻倒下了就沒有作用。降了能力的帶白色香草就恢復（用掉）
+function simIntimidate(st, s, M) {
+  const T = simAct(st, 1 - s);
+  if (M.hp <= 0 || M.b.ab !== 'intimidate' || T.hp <= 0) return;
+  const e = intimidateOn(T.b.ab), who = `${simName(st, s, M)}的威嚇：${simName(st, 1 - s)}`;
+  if (!e) return simLog(st, `${who}不受影響`);
+  const done = [['atk', e[0]], ['spa', e[1]]].filter(([, v]) => v)
+    .map(([k, v]) => { const was = T.st[k]; T.st[k] = Math.max(-6, Math.min(6, was + v)); return [k, T.st[k] - was]; }).filter(([, v]) => v);
+  simLog(st, `${who}${done.map(([k, v]) => `${SIM_STAT_ZH[k]} ${v > 0 ? '+' : '−'}${Math.abs(v)}`).join('、') || '能力已經到底'}`);
+  if (T.item === 'white-herb' && Object.values(T.st).some(v => v < 0)) {
+    Object.keys(T.st).forEach(k => { if (T.st[k] < 0) T.st[k] = 0; });
+    T.item = '';
+    simLog(st, `${simName(st, 1 - s)}用白色香草把降低的能力恢復`);
+  }
 }
 // 第 t 方被吹走（吼叫、吹飛、龍尾、巴投）換上誰：照亂數從後排抽一隻；期望值模式取後排第一隻，推演畫面指定了實際換上的（st.pin，見 simStep）就用那隻
 const simPhazeTo = (st, t, rnd) => { const bench = simBench(st, t); return rnd ? bench[Math.floor(rnd() * bench.length)] : bench.includes(st.pin?.[t]) ? st.pin[t] : bench[0]; };
@@ -904,9 +922,11 @@ function simGreedyPick(ctx, st, s) {
   };
   return bench.map(i => [i, score(i)]).sort((x, y) => y[1] - x[1])[0][0];
 }
-// 倒下的補位（兩方都倒時都換）：picks[s] 是 { t: 'sw', i } 或 { t: 'pass' }
+// 倒下的補位（兩方都倒時都換）：picks[s] 是 { t: 'sw', i } 或 { t: 'pass' }；雙方都換上來後才發動威嚇（兩邊同時補位時互相都吃得到）
 function simReplace(st, picks, rnd) {
-  [0, 1].forEach(s => { if (picks[s].t === 'sw') simSwitch(st, s, picks[s].i, rnd); });
+  const sw = [0, 1].filter(s => picks[s].t === 'sw');
+  sw.forEach(s => simSwitch(st, s, picks[s].i, rnd, true));
+  sw.forEach(s => simIntimidate(st, s, simAct(st, s)));
 }
 // 從局面 st 用簡單規則雙方打下去（最多再 SIM_LOOK 回合），回傳 simValue；rnd＝照亂數打（樹搜尋用），沒給用期望值。
 // 補位換上來又被撒菱類打倒的再補（補到有人站著才開打）；期望值打時同速輪流誰先：每次打下去換一邊起頭（ctx.flip）、之後每回合再輪流
@@ -987,6 +1007,8 @@ function simSearch(ctx, st, phase, iters, rnd, stats, uniform) {
 function simStart(sides, log) {
   const st = { sd: sides.map(x => simSide0(x.mons.map(simCloneMon))), turn: 0, fut: [], idle: 0, log: log ? [] : null };
   st.sd.forEach(x => Object.assign(x.mons[0], { in: 0, out: true }));
+  // 先發雙方同時出場：各自的威嚇都打對方（同出戰選角的正面對打）
+  [0, 1].forEach(s => simIntimidate(st, s, simAct(st, s)));
   return st;
 }
 // 這個局面接下來是哪個階段：'over' 分出勝負（或打滿回合）、'replace' 有人倒下要補位、'turn' 選這回合的招式
@@ -1068,7 +1090,7 @@ function simDecide(ctx, st, phase, rnd) {
 // 回傳 { res 1 我方贏／-1 輸（同時全倒看 simWinner）／0 平手（打滿 SIM_MAX_TURN 回合）, turns, mons [我方, 對手] 帶出場的（kos、hp、max、out）, log }
 function simPlay(ctx, sides, rnd, log, opt = {}) {
   const st = simStart(sides, log);
-  if (st.log) st.log.push(`先發：我方${MON[simAct(st, 0).key].zh}、對手${MON[simAct(st, 1).key].zh}`);
+  if (st.log) st.log.unshift(`先發：我方${MON[simAct(st, 0).key].zh}、對手${MON[simAct(st, 1).key].zh}`);
   const pick = (c, s) => simGreedyPick(ctx, c, s), algo = [].concat(opt.algo || 'ply1');
   const by = (a, phase) => a === 'tree' ? simSearch(ctx, st, phase, opt.iters || 200, rnd) : simDecide(ctx, st, phase, rnd);
   const decide = phase => algo.length < 2 || algo[0] === algo[1] ? by(algo[0], phase) : [by(algo[0], phase)[0], by(algo[1], phase)[1]];
