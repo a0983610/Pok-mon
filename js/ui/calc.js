@@ -86,12 +86,7 @@ function abilOptions(rel, key, cur) {
 const ENTRY_WEATHER = ['drought', 'drizzle', 'sand-stream', 'snow-warning'];
 // 出場就開場地的特性（FIELD_SET 對應場地）
 const ENTRY_TERRAIN = ['electric-surge', 'grassy-surge', 'misty-surge', 'psychic-surge'];
-// 威嚇對攻擊方特性 ab 的效果 [攻擊變化, 特攻變化]，照 Smogon util.ts 的 checkIntimidate；不吃威嚇回傳 null
-function intimidateOn(ab) {
-  if (['clear-body', 'white-smoke', 'hyper-cutter', 'full-metal-body', 'inner-focus', 'own-tempo', 'oblivious', 'scrappy'].includes(ab)) return null;
-  if (['contrary', 'defiant', 'guard-dog'].includes(ab)) return [1, 0];
-  return ab === 'simple' ? [-2, 0] : ab === 'competitive' ? [-1, 2] : [-1, 0];
-}
+// 威嚇的效果見 intimidateOn（js/engine/damage.js，出戰選角的對位也用）
 // 快選：我方隊伍（隊伍分析）挑了的寶可夢和對手（出戰選角）
 // 對手後面接著列出牠常帶超級石的超級進化型態（megaInfo 算進去的，同出戰選角的對位判斷）
 function quickHTML(side) {

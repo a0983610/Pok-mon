@@ -350,13 +350,14 @@ function simStatus(st, s, M, x, rnd, src) {
   } else if (M.b.ab === 'synchronize' && src && src.hp > 0 && x !== 'slp') simStatus(st, 1 - s, src, x, rnd, M);
   return true;
 }
-// 換上第 i 隻：換下來的（還站著的）特性再生力回 1/3、自然回復治好異常（冠軍版），能力變化與換下場就清掉的狀態都清掉；
+// 換上第 i 隻：換下來的（還站著的）特性再生力回 1/3、自然回復治好異常（冠軍版），能力變化與換下場就清掉的狀態都清掉，
+// 上一次用的招式也清掉（Showdown switchIn 對換下場的呼叫 clearVolatile，裡面 lastMove = null；所以換回來還沒出招時再來一次會失敗）；
 // 換上來的：劇毒累積重算、治癒之願回滿，再踩撒菱類
 function simSwitch(st, s, i, rnd) {
   const side = st.sd[s], O = side.mons[side.act];
   if (O.hp > 0 && O.b.ab === 'regenerator') simHeal(st, s, O, O.max / 3, '換下場時再生力');
   if (O.hp > 0 && O.b.ab === 'natural-cure') O.status = '';
-  Object.assign(O, { st: SIM_ST0(), lock: '', chg: '', hide: false, rech: false, v: {} });
+  Object.assign(O, { st: SIM_ST0(), lock: '', chg: '', hide: false, rech: false, v: {}, last: '' });
   side.act = i;
   const M = side.mons[i];
   Object.assign(M, { in: st.turn, out: true, tox: 0 });

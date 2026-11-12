@@ -408,16 +408,32 @@ function fastestKO(rows) {
 // 一對一誰先打倒誰：a 我方、b 對手（fastestKO），first 同 duel。幾下少的贏；一樣多時有先制招式的一方先出手，
 // 都有或都沒有看速度（同速算我方沒贏）；雙方四擊都打不倒算沒贏
 const winKO = (a, b, first) => a.n < 9 && (a.n < b.n || a.n === b.n && (a.pri !== b.pri ? a.pri : first === 0));
+// 威嚇對攻擊方特性 ab 的效果 [攻擊變化, 特攻變化]，照 Smogon util.ts 的 checkIntimidate；不吃威嚇回傳 null（傷害計算、對戰中、出戰選角的對位共用）
+function intimidateOn(ab) {
+  if (['clear-body', 'white-smoke', 'hyper-cutter', 'full-metal-body', 'inner-focus', 'own-tempo', 'oblivious', 'scrappy'].includes(ab)) return null;
+  if (['contrary', 'defiant', 'guard-dog'].includes(ab)) return [1, 0];
+  return ab === 'simple' ? [-2, 0] : ab === 'competitive' ? [-1, 2] : [-1, 0];
+}
+// battler b 吃了特性是威嚇的 by 出場：照 intimidateOn 改 b 的攻擊／特攻能力變化（by 不是威嚇、或 b 不吃威嚇就原樣回傳）
+function intimidated(b, by) {
+  const e = by.ab === 'intimidate' && intimidateOn(b.ab);
+  if (!e) return b;
+  const c = (k, d) => Math.max(-6, Math.min(6, (b.st?.[k] || 0) + d));
+  return { ...b, st: { ...b.st, atk: c('atk', e[0]), spa: c('spa', e[1]) } };
+}
 // 出戰選角的一對一：x 我方、y 對手（battler；對戰中的換人另外帶 cur 等，同 duel），f 同 duel。回傳
 //   head：正面對打（雙方全滿，有 cur 的照 cur）先打倒牠；sw：換上來先吃牠最痛的一招（最高傷害），剩下的 HP 對打還先打倒牠（換上來吃過一下，
 //   氣勢披帶、多重鱗片就沒用了）；ohko：沒贏、而且牠一下就打得倒我又比我先出手（速度或先制招式）；
 //   first、spd（同 duel）、me／opp（fastestKO 的 n）、left 換上來吃過最痛的一招後剩下的 HP（0 以下＝會倒）、big 那一招（沒有會痛的招式是 ''）給畫面說明用
+// f.intim：算出場特性威嚇（intimidated）。'both'＝正面對打時雙方都剛出場，各自的威嚇打對方（出戰選角、隊伍分析）；
+// 'me'＝只有我方剛出場（對戰中的換人：對手早就在場上，牠的威嚇不會再觸發）；換上來吃一下那段也只有我方剛出場。沒給就不算
 function matchup(x, y, f) {
-  const d = duel(x, y, f), a = fastestKO(d.xy), b = fastestKO(d.yx), head = winKO(a, b, d.first);
-  // 換上來剩下的 HP 比全滿少，正面都打不贏的換上來也打不贏，不用再算
-  const cur = (x.cur ?? hpOf(x)) - Math.max(0, ...d.yx.ok.map(r => r.r.max || 0));
+  const yi = f.intim ? intimidated(y, x) : y, xi = f.intim === 'both' ? intimidated(x, y) : x;
+  const d = duel(xi, yi, f), a = fastestKO(d.xy), b = fastestKO(d.yx), head = winKO(a, b, d.first);
+  // 換上來：吃牠最痛的一招（這時只有我方的威嚇有作用）；剩下的 HP 比全滿少，正面都打不贏的換上來也當打不贏，不用再算
+  const ds = xi === x ? d : duel(x, yi, f), cur = (x.cur ?? hpOf(x)) - Math.max(0, ...ds.yx.ok.map(r => r.r.max || 0));
   let sw = false;
-  if (head && cur > 0) { const d2 = duel({ ...x, cur }, y, f); sw = winKO(fastestKO(d2.xy), fastestKO(d2.yx), d2.first); }
+  if (head && cur > 0) { const d2 = duel({ ...x, cur }, yi, f); sw = winKO(fastestKO(d2.xy), fastestKO(d2.yx), d2.first); }
   return { head, sw, ohko: !head && b.n === 1 && (b.pri || d.first !== 0), first: d.first, spd: d.spd.map(s => s.v), me: a.n, opp: b.n,
-    left: cur, big: d.yx.ok[0]?.r.max ? d.yx.ok[0].k : '' };
+    left: cur, big: ds.yx.ok[0]?.r.max ? ds.yx.ok[0].k : '' };
 }

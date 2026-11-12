@@ -222,14 +222,14 @@ function answerOf(members, opp) {
 // 一對一結果的快取（matchup 要算兩次對位；出戰選角、隊伍分析每次重畫都會用到）：fmt、我方 key、base、配招、對手 key → duelVs 的結果
 const MATCH_MEMO = new Map();
 // 我方寶可夢 key（配招 set；base＝超級進化這場不進化、以原型 key 上場，帶著超級石等於沒道具）對上對手寶可夢 m：
-// 看速度與傷害（matchup，同出招表的算法），對手常帶超級石的進化前後每種型態都要成立（ohko 任一種成立就算），
+// 看速度與傷害（matchup，同出招表的算法；雙方出場的威嚇都算，見 matchup 的 intim），對手常帶超級石的進化前後每種型態都要成立（ohko 任一種成立就算），
 // 回傳 { sw 換上能扛, head 正面打得贏, ohko 會被牠先手一擊, forms 各型態的 matchup }；有一方沒有招式資料回傳 null（呼叫端改看屬性）
 function duelVs(key, set, fmt, m, base = false) {
   if (!key || !useOf(key, fmt, set)?.moves.length || !useOf(m.key, fmt)?.moves.length) return null;
   const memo = [fmt, key, base, JSON.stringify(set || null), m.key].join('|');
   if (!MATCH_MEMO.has(memo)) {
     const me = { ...battler(key, fmt, set), ...(base && { item: '' }) };
-    const rs = [m, ...megaInfo(m, fmt).filter(x => x.counted).map(x => x.mon)].map(f => matchup(me, battler(f.key, fmt), { fmt }));
+    const rs = [m, ...megaInfo(m, fmt).filter(x => x.counted).map(x => x.mon)].map(f => matchup(me, battler(f.key, fmt), { fmt, intim: 'both' }));
     MATCH_MEMO.set(memo, { sw: rs.every(r => r.sw), head: rs.every(r => r.head), ohko: rs.some(r => r.ohko), forms: rs });
   }
   return MATCH_MEMO.get(memo);
