@@ -17,6 +17,10 @@ const SIM_FIXED = { 'seismic-toss': () => 50, 'night-shade': () => 50, 'super-fa
 // 反擊類：這回合被對手打的傷害 × 倍數還回去（雙倍奉還只還物理、鏡面反射只還特殊，先制 −5；金屬爆炸都還、×1.5，要比對手晚出招）；
 // 這回合沒被打到就失敗（Showdown counter／mirrorcoat／metalburst）
 const SIM_REACT = { counter: { cat: 'physical', x: 2 }, 'mirror-coat': { cat: 'special', x: 2 }, 'metal-burst': { cat: '', x: 1.5 } };
+// 一擊必殺（Showdown data/moves.ts 的 ohko、sim/battle-actions.ts 的命中判定；冠軍版 mod 沒改）：其他招式當全中，只有這幾招照命中率（固定 30，
+// 不吃命中閃避變化）；絕對零度不是冰屬性的用時命中率 20、打冰屬性沒有效果；特性結實不受影響（破格無視結實）；打中就倒下（氣勢披帶、挺住撐得住）。
+// 照亂數打時抽中不中，期望值時算打掉剩下的 HP × 命中率
+const SIM_OHKO = new Set(['fissure', 'horn-drill', 'sheer-cold', 'guillotine']);
 // 容易擊中要害（急所等級 +1）的招式（Showdown critRatio 2）；必定急所的看 damageCalc（ALWAYS_CRIT）
 const SIM_HICRIT = new Set(['air-cutter', 'aqua-cutter', 'blaze-kick', 'crabhammer', 'cross-chop', 'cross-poison', 'drill-run', 'leaf-blade',
   'night-slash', 'psycho-cut', 'shadow-claw', 'slash', 'snipe-shot', 'stone-edge', 'triple-arrows']);
@@ -105,8 +109,8 @@ const SIM_ST0 = () => ({ atk: 0, def: 0, spa: 0, spd: 0, spe: 0 });
 // lock 講究圍巾鎖住的招式、chg 蓄力中的招式、hide 蓄力時打不到、rech 下一回合要休息、in 第幾回合上場（擊掌奇襲用）、kos 打倒幾隻、
 // out 有沒有上過場、status 異常狀態（tox 劇毒累積、slp 還要睡幾次）、v 換下場就清掉的狀態（sub 替身 HP、taunt、enc／encK 再來一次、seed、
 // curse、yawn、focus、charge、trap、prot／endure／stall／protUsed 守住類）、last 上一次用的招式（再來一次用）、pp 各招剩下的 PP（OP.GG 冠軍版的 PP）
-// 能算的招式：damageCalc 算得了的攻擊招式、固定傷害與反擊類（SIM_FIXED／SIM_REACT）、SIM_SUP 的輔助招；其他（一擊必殺、看體重的、變身…）不列
-const simCanUse = k => canCalc(k) || !!SIM_FIXED[k] || !!SIM_REACT[k] || !!SIM_SUP[k];
+// 能算的招式：damageCalc 算得了的攻擊招式、固定傷害、反擊類與一擊必殺（SIM_FIXED／SIM_REACT／SIM_OHKO）、SIM_SUP 的輔助招；其他（看體重的、變身…）不列
+const simCanUse = k => canCalc(k) || !!SIM_FIXED[k] || !!SIM_REACT[k] || SIM_OHKO.has(k) || !!SIM_SUP[k];
 function simMon(key, set, item, s, fmt) {
   const b = battler(key, fmt, set), use = set?.moves.some(Boolean) ? set : defaultSet(key, fmt), max = hpOf(b);
   const moves = [...new Set((use?.moves || []).filter(k => k && MOVES[k] && simCanUse(k)))];
@@ -246,12 +250,17 @@ function simCalc(ctx, st, A, D, k, crit) {
 const simRolls = (r, D, k) => k === 'knock-off' && !D.item ? r.later : r.rolls;
 // 固定傷害、反擊類這一下的結果（同 simCalc 的格式：eff 有沒有效果、rolls／later 16 個一樣的傷害、endured 氣勢披帶或結實撐住；fixed 標記）。
 // 反擊類用 D 這回合打 A 的傷害（A.v.got，見 simMove）；exp＝估期望值（往前算用）：還沒被打，就用 D 對 A 同類招式裡最痛一招的期望傷害、A 撐得住才算；
-// 失敗（反擊類沒被打到、蠻幹對手 HP 沒比較多）的 eff 是 0，fail 寫原因
+// 失敗（反擊類沒被打到、蠻幹對手 HP 沒比較多）的 eff 是 0，fail 寫原因。一擊必殺（SIM_OHKO）多回傳 acc 命中率：exp 時傷害是剩下的 HP × 命中率，
+// 不然是剩下的 HP（中不中由 simMove 照亂數抽）
 function simFixed(ctx, st, A, D, k, exp) {
   const ty = MOVES[k][1], rc = SIM_REACT[k];
   if (!eff(ty, simTypes(D))) return { eff: 0 };
-  let d;
-  if (rc) {
+  let d, acc = 0;
+  if (SIM_OHKO.has(k)) {
+    if ((D.b.ab === 'sturdy' && A.b.ab !== 'mold-breaker') || (k === 'sheer-cold' && simTypes(D).includes('ice'))) return { eff: 0 };
+    acc = k === 'sheer-cold' && !simTypes(A).includes('ice') ? 20 : MOVES[k][6] ?? 30;
+    d = exp ? Math.max(1, Math.floor(D.hp * acc / 100)) : D.hp;
+  } else if (rc) {
     const g = A.v.got, ok = x => !rc.cat || x === rc.cat;
     const base = g?.turn === st.turn && ok(g.cat) ? g.dmg
       : exp ? Math.max(0, ...D.moves.filter(k2 => !SIM_SUP[k2] && !SIM_REACT[k2] && ok(simCat(k2))).map(k2 => simExp(ctx, st, D, A, k2)).filter(x => x < A.hp)) : 0;
@@ -259,12 +268,12 @@ function simFixed(ctx, st, A, D, k, exp) {
     d = Math.floor(base * rc.x);
   } else d = SIM_FIXED[k](A, D);
   if (d <= 0) return { eff: 0, fail: '對手的 HP 沒有比較多' };
-  const endured = D.hp >= D.max && d >= D.hp ? (D.item === 'focus-sash' ? D.item : D.b.ab === 'sturdy' ? 'sturdy' : '') : '';
+  const endured = D.hp >= D.max && d >= D.hp ? (D.item === 'focus-sash' ? D.item : D.b.ab === 'sturdy' && A.b.ab !== 'mold-breaker' ? 'sturdy' : '') : '';
   const rolls = [Array(16).fill(d)];
-  return { eff: 1, crit: false, rolls, later: rolls, endured, berry: false, fixed: true };
+  return { eff: 1, crit: false, rolls, later: rolls, endured, berry: false, fixed: true, acc };
 }
-// 這一招打 D 的計算：固定傷害、反擊類用 simFixed，其他用 simCalc
-const simHit = (ctx, st, A, D, k, crit, exp) => SIM_FIXED[k] || SIM_REACT[k] ? simFixed(ctx, st, A, D, k, exp) : simCalc(ctx, st, A, D, k, crit);
+// 這一招打 D 的計算：固定傷害、反擊類、一擊必殺用 simFixed，其他用 simCalc
+const simHit = (ctx, st, A, D, k, crit, exp) => SIM_FIXED[k] || SIM_REACT[k] || SIM_OHKO.has(k) ? simFixed(ctx, st, A, D, k, exp) : simCalc(ctx, st, A, D, k, crit);
 // 期望傷害（各下的 16 個亂數取平均加總；氣勢披帶、結實撐住時最多打到剩 1）；輔助招是 0
 function simExp(ctx, st, A, D, k) {
   if (SIM_SUP[k]) return 0;
@@ -707,8 +716,10 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
     if (contact) simProtHit(st, s, M, T, rnd);
   } else {
     if (T.v.prot) { delete T.v.prot; simLog(st, `${me}的${mz}打破了守住`); }
-    let r = simHit(ctx, st, M, T, k, false, false);
+    // 一擊必殺：期望值模式（沒有 rnd）直接算期望傷害；照亂數打時先抽中不中
+    let r = simHit(ctx, st, M, T, k, false, !rnd && SIM_OHKO.has(k));
     if (!r.eff) r.fail ? fail(r.fail) : simLog(st, `${me}用${mz}，對${tn}沒有效果`);
+    else if (r.acc && rnd && rnd() * 100 >= r.acc) simLog(st, `${me}用${mz}，沒有命中（命中率 ${r.acc}%）`);
     else {
       const rank = SIM_HICRIT.has(k) + (M.b.ab === 'super-luck') + (M.item === 'scope-lens') + (M.v.focus ? 2 : 0);
       if (!r.fixed && !r.crit && rnd && rnd() < SIM_CRIT_P[Math.min(3, rank)]) r = simCalc(ctx, st, M, T, k, true);
