@@ -239,12 +239,34 @@ function simSetGuess(t, slot) {
   t.path.forEach(p => {
     p.st.sd[1].mons = p.st.sd[1].mons.map((m, q) => m.out ? m
       : Object.assign(simOppMon(t.roster, slots[q], mega(slots[q]) && slots[q] !== up, 's'), { gs: q === q0 ? t.gs : m.gs }));
+    simFixGuessed(p.st);
     p.view = null;
   });
   t.edit = false;
   simCalcTree();
 }
-// 改成實戰的結果：照輸入框改最後一步的 HP（填的 % 和原本顯示的一樣就不動）與異常狀態（新睡著的照期望值睡 3 次），再重算
+// 對手的一隻 M 換成型態 key（超級進化了、或其實沒進化）：配招照那個型態的預設、招式沿用 M 的；HP 照原本的比例，
+// 能力變化、異常狀態、場上狀態、用過的 PP 都沿用；超級進化帶的是超級石（item 空白），變回原型的道具是 item
+function simReform(M, key, item) {
+  const N = simMon(key, { ...(defaultSet(key, 's') || emptySet()), moves: [...M.moves, '', '', '', ''].slice(0, 4) }, MON[key].base ? '' : item, 1, 's');
+  return Object.assign(N, { hp: M.hp <= 0 ? 0 : Math.max(1, Math.round(N.max * M.hp / M.max)), status: M.status, tox: M.tox, slp: M.slp, st: { ...M.st }, v: { ...M.v },
+    chg: M.chg, hide: M.hide, rech: M.rech, in: M.in, kos: M.kos, out: M.out, last: M.last, ft: M.ft, slot: M.slot, gs: M.gs,
+    pp: Object.fromEntries(N.moves.map(k => [k, M.pp[k] ?? N.pp[k]])) });
+}
+// 對手還沒上場（猜的）的幾隻跟著上過場的修正：一場只能超級進化一隻（有上過場的超級進化了，猜的超級進化改原型、沒道具）；
+// 同一隊不帶重複的道具（撞到上過場的道具，改拿牠下一個常帶的，同 simItems）
+function simFixGuessed(st) {
+  const mons = st.sd[1].mons, up = mons.find(m => m.out && MON[m.key].base), taken = new Set(mons.filter(m => m.out && m.item).map(m => m.item));
+  mons.forEach((m, q) => {
+    if (m.out) return;
+    if (up && MON[m.key].base) m = mons[q] = simReform(m, MON[m.key].base, '');
+    if (!m.item || !taken.has(m.item)) { if (m.item) taken.add(m.item); return; }
+    m.item = byUse(useOf(m.key, 's')?.items || []).map(([k]) => k).find(k => !isStone(k) && !taken.has(k)) || '';
+    if (m.item) taken.add(m.item);
+  });
+}
+// 改成實戰的結果：照輸入框改最後一步的 HP（填的 % 和原本顯示的一樣就不動）與異常狀態（新睡著的照期望值睡 3 次），
+// 上過場的對手的型態、道具、招式（招式不填的那格就是少一招；一場只能超級進化一隻、道具不重複見 simFixGuessed），再重算
 function simApplyEdit(t) {
   const cur = t.path[t.path.length - 1], st = simClone(cur.st);
   document.querySelectorAll('#sTree [data-ehp]').forEach(inp => {
@@ -257,6 +279,21 @@ function simApplyEdit(t) {
     const [s, q] = sel.dataset.est.split('.').map(Number), M = st.sd[s].mons[q];
     if (sel.value !== M.status) Object.assign(M, { status: sel.value, tox: 0, slp: sel.value === 'slp' ? 3 : 0 });
   });
+  // 對手：型態（換了就照新型態重建）→ 道具（'-'＝沒有道具；超級進化固定超級石）→ 招式（講究圍巾鎖的那招沒了就解鎖）
+  const opp = st.sd[1].mons, el = (a, v) => document.querySelector(`#sTree [${a}="${v}"]`);
+  opp.forEach((M, q) => {
+    if (!M.out) return;
+    const f = el('data-eform', q)?.value, it = el('data-eitem', q);
+    if (f && f !== M.key && MON[f]) M = opp[q] = simReform(M, f, '');
+    if (it && !MON[M.key].base) M.item = it.value === '-' ? '' : it.value;
+    const ms = [0, 1, 2, 3].map(n => el('data-emv', `${q}.${n}`)).filter(Boolean).map(s => s.value).filter((k, n, a) => k && MOVES[k] && a.indexOf(k) === n);
+    if (ms.length && ms.join() !== M.moves.join()) {
+      M.pp = Object.fromEntries(ms.map(k => [k, M.pp[k] ?? MOVES[k][5] ?? Infinity]));
+      M.moves = ms;
+    }
+    if (M.lock && (!M.moves.includes(M.lock) || M.item !== 'choice-scarf')) M.lock = '';
+  });
+  simFixGuessed(st);
   Object.assign(cur, { st, view: null });
   t.edit = false;
   simCalcTree();
@@ -306,13 +343,38 @@ function simForcedHTML(cur) {
   }).join('');
   return rows && `<p class="muted small b-intro">這一步有人被迫換人，換上誰是電腦照簡單規則挑的；實戰換上的不一樣就點實際的（這一步會重算，改過的實戰結果要重填）。</p>${rows}`;
 }
-// 改成實戰的結果：雙方每隻（對手只列上過場的）剩下幾 % HP 與異常狀態
+// 改成實戰的結果：雙方每隻（對手只列上過場的）剩下幾 % HP 與異常狀態；上過場的對手另外可以改型態、道具、招式（看到的跟猜的不一樣時）。
+// 都用選單，按「用這個局面重算」才一起套用（選單改了不重畫，免得其他欄位填到一半被洗掉）
 function simEditHTML(st) {
   const opts = m => [['', '沒有異常'], ...Object.entries(SIM_STATUS_ZH)].map(([k, zh]) => `<option value="${k}"${m.status === k ? ' selected' : ''}>${zh}</option>`).join('');
+  const opt = (v, zh, cur) => `<option value="${v}"${v === cur ? ' selected' : ''}>${zh}</option>`;
+  const byZh = list => list.sort((x, y) => x[1].localeCompare(y[1], 'zh-Hant'));
+  const opp = st.sd[1].mons, megaOut = opp.find(m => m.out && MON[m.key].base);
+  // 對手 m（第 q 隻）的型態、道具、4 招：型態列原型和超級進化（別隻已經超級進化過就不列超級進化）；道具先列這隻常帶的，
+  // 其他上過場的對手拿著的不列（同一隊不重複）、不列超級石；招式只列模擬算得了的（simCanUse），這隻常用的排前面
+  const more = (m, q) => {
+    const fam = MON[family(MON[m.key])], forms = [fam, ...megasOf(fam)].filter(f => !f.base || !megaOut || megaOut === m), use = useOf(m.key, 's');
+    const form = forms.length > 1 ? `<span class="c-l">型態</span><select class="sel" data-eform="${q}" aria-label="${MON[m.key].zh}的型態">`
+      + forms.map(f => opt(f.key, f.base ? f.zh : '沒進化', m.key)).join('') + '</select>' : '';
+    const taken = new Set(opp.filter(o => o !== m && o.out && o.item).map(o => o.item)), common = (useOf(fam.key, 's')?.items || []).map(([k]) => k);
+    const ok = k => ITEMS[k] && !isStone(k) && (!taken.has(k) || k === m.item);
+    // 超級進化型態的道具固定是超級石（選單第一項）；同時把型態改回原型時，照這裡選的道具
+    const item = `<span class="c-l">道具</span><select class="sel" data-eitem="${q}" aria-label="${MON[m.key].zh}的道具">`
+        + (MON[m.key].base ? opt('', '超級石（超級進化固定；改回原型時照下面選的）', '') : '') + opt('-', '沒有道具', MON[m.key].base ? '' : m.item || '-')
+        + `<optgroup label="這隻常帶">${common.filter(ok).map(k => opt(k, ITEMS[k][0], m.item)).join('')}</optgroup>`
+        + `<optgroup label="其他">${byZh(Object.keys(ITEMS).filter(k => ok(k) && !common.includes(k)).map(k => [k, ITEMS[k][0]])).map(([k, zh]) => opt(k, zh, m.item)).join('')}</optgroup></select>`;
+    const top = byUse(use?.moves || []).map(([k]) => k).filter(k => MOVES[k] && simCanUse(k));
+    const rest = byZh(Object.keys(MOVES).filter(k => simCanUse(k) && !top.includes(k)).map(k => [k, MOVES[k][0]]));
+    const mvSel = n => `<select class="sel" data-emv="${q}.${n}" aria-label="${MON[m.key].zh}的招式 ${n + 1}">${opt('', '（不填）', m.moves[n] || '')}`
+      + `<optgroup label="這隻常用">${top.map(k => opt(k, MOVES[k][0], m.moves[n])).join('')}</optgroup>`
+      + `<optgroup label="其他">${rest.map(([k, zh]) => opt(k, zh, m.moves[n])).join('')}</optgroup></select>`;
+    return `<div class="c-f">${form}${item}</div><div class="c-f"><span class="c-l">招式</span>${[0, 1, 2, 3].map(mvSel).join('')}</div>`;
+  };
   const rows = [0, 1].map(s => st.sd[s].mons.map((m, q) => s && !m.out ? '' : `<div class="c-f"><span class="c-l">${s ? '對手' : '我方'}${MON[m.key].zh}</span>`
     + `HP<input type="number" class="sel c-num" inputmode="numeric" min="0" max="100" value="${simPct(m.hp, m.max)}" data-ehp="${s}.${q}" aria-label="${MON[m.key].zh}剩下的 HP %">%`
-    + `<select class="sel" data-est="${s}.${q}" aria-label="${MON[m.key].zh}的異常狀態">${opts(m)}</select></div>`).join('')).join('');
-  return `<div class="b-label">改成實戰的結果<span class="muted small">HP 填剩下幾 %（0＝倒下），改好按「用這個局面重算」</span></div>${rows}`
+    + `<select class="sel" data-est="${s}.${q}" aria-label="${MON[m.key].zh}的異常狀態">${opts(m)}</select></div>` + (s ? more(m, q) : '')).join('')).join('');
+  return `<div class="b-label">改成實戰的結果<span class="muted small">HP 填剩下幾 %（0＝倒下）；上過場的對手看到的型態（超級進化了沒）、道具、招式和猜的不一樣就改，`
+    + `招式只列模擬算得了的；改好按「用這個局面重算」，從這一步往後照新的算</span></div>${rows}`
     + '<div class="c-f"><button class="btn primary" data-eapply>用這個局面重算</button><button class="btn" data-ecancel>取消</button></div>';
 }
 function renderSimTree() {
@@ -342,11 +404,11 @@ function renderSimTree() {
     + (cur.log.length ? `<div class="small">${cur.log.map(l => `<div>${l.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</div>`).join('')}</div>` : '')
     + simForcedHTML(cur)
     + simSideHTML(st.sd[0], 0) + simSideHTML(st.sd[1], 1, t.live)
-    + (t.edit ? simEditHTML(st) : v ? '<div class="c-f"><button class="mini" data-edit>改成實戰的結果</button><span class="muted small">傷害、急所、異常狀態有沒有中跟上面不一樣時</span></div>' : '')
+    + (t.edit ? simEditHTML(st) : v ? '<div class="c-f"><button class="mini" data-edit>改成實戰的結果</button><span class="muted small">傷害、急所、異常狀態有沒有中跟上面不一樣，或看到對手的型態、道具、招式和猜的不一樣時</span></div>' : '')
     + body
     + '<p class="note">※ 每一層總共往下打約 3000 次、平均分給每一格（格子上停著看次數），樹搜尋與規則見最下面的「規則細節」。'
     + '往下一步是照期望值打（傷害取平均、不會急所、麻痺不會不能動、同速我方先、打完換人照簡單規則挑），實戰會有運氣差，可以改成實戰的結果再往下算。'
-    + (t.live ? '對手還沒上場的後排是猜的（「出戰選角」的「對手可能帶的」帶法裡會派這隻先發、排名最高的那種；沒有一種會派牠先發就取有帶牠的），對手每一隻的配招、道具照 OP.GG 常見。' : '') + '</p>'
+    + (t.live ? '對手還沒上場的後排是猜的（「出戰選角」的「對手可能帶的」帶法裡會派這隻先發、排名最高的那種；沒有一種會派牠先發就取有帶牠的），對手每一隻的配招、道具照 OP.GG 常見（上過場的看到不一樣，在「改成實戰的結果」改型態、道具、招式）。' : '') + '</p>'
     + `<details class="b-more note"><summary>規則細節</summary>${simRulesText()}</details>`;
 }
 $('#sMine').addEventListener('click', e => {
