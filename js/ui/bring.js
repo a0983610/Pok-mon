@@ -90,7 +90,8 @@ function bringHTML(members, opps) {
     + '帶幾隻依攻略網站整理的排位規則（單打 6 選 3、雙打 6 選 4），'
     + '一場只能超級進化一隻也是同一來源：有其他帶法時不會帶 2 顆以上超級石；隊上超級進化多到非帶不可時，逐一試只進化其中一隻、'
     + '其他以原型計（帶著超級石，等於沒道具），取結果最好的並標出進化哪隻（對位表的每一列仍是進化後的樣子）。'
-    + '出場特性只算威嚇：正面對打時雙方都剛出場，各自的威嚇都打對方；換上來吃一下時只有我方剛出場，只算我方的（不吃威嚇的特性如精神力、恆淨之軀不降，不服輸、好勝反而上升）。'
+    + '出場特性只算威嚇和變身者：正面對打時雙方都剛出場，各自的威嚇都打對方；換上來吃一下時只有我方剛出場，只算我方的（不吃威嚇的特性如精神力、恆淨之軀不降，不服輸、好勝反而上升）。'
+    + '特性是變身者的（百變怪）出場就變成對面那隻：屬性、HP 以外的能力、特性、招式照對面的，HP、道具照自己的（兩隻百變怪互相變身時，後變的失敗，兩邊都只有變身這招）。'
     + '對位表不含天氣、場地、其他出場特性與雙打的隊友配合（隊友配合另外看上方組合與先發的「搭配」）；雙打的範圍招式以打到兩隻（×0.75）計。'
     + `「搭配」的招式看${FMT_ZH[team.fmt]}常用（使用率 ${ROLE_PCT}% 以上，登錄的照登錄），慢速打手＝隊伍角色不是輔助、又不比熱門前 ${THREAT_N} 的一半快；`
     + `會打到隊友的範圍招式：${ALLY_HIT.filter(k => MOVES[k]).map(k => MOVES[k][0]).join('、')}，隊友是那個屬性免疫、或特性是`
@@ -124,12 +125,15 @@ function moveTableHTML(members, opps, best, alt, oppMegas) {
         + best.idx.map(j => {
           const k = keyIn(j), slot = members[j][1];
           if (!k) return `<div class="x-line"><b>${slot + 1} ${slotName(slot)}</b><span class="meta">只選屬性，沒有能力值可以算</span></div>`;
-          // 不進化而以原型上場的，帶的是自己的超級石（不影響計算），不套最常帶的道具；雙方都剛出場，各自的威嚇打對方（同對位表）
-          const me = { ...battler(k, fmt, team.sets[slot]), ...(k !== team.mons[slot] && { item: '' }) };
-          const d = duel(intimidated(me, opp), intimidated(opp, me), { fmt });
+          // 不進化而以原型上場的，帶的是自己的超級石（不影響計算），不套最常帶的道具；雙方都剛出場，各自的威嚇打對方（同對位表）；
+          // 特性變身者（百變怪）照變成對面那隻算（imposterVs，同對位表）
+          const me0 = { ...battler(k, fmt, team.sets[slot]), ...(k !== team.mons[slot] && { item: '' }) };
+          const me = imposterVs(me0, opp), op = imposterVs(opp, me);
+          const d = duel(intimidated(me, op), intimidated(op, me), { fmt });
           const order = d.first < 0 ? '同速' : d.first ? '後動' : '先動';
+          const tf = [me, op].filter(x => x.tfFrom).map(x => `${MON[x.tfFrom].zh}變身成${MON[x.key].zh}`).join('、');
           // 帶到傷害計算（不進化而以原型上場的不帶：傷害計算只會對隊上的型態套用登錄配招）
-          return `<div class="x-line"><b>${slot + 1} ${MON[k].zh}</b><span class="meta">${order}（${d.spd[0].v}／${d.spd[1].v}）</span>`
+          return `<div class="x-line"><b>${slot + 1} ${MON[k].zh}</b><span class="meta">${order}（${d.spd[0].v}／${d.spd[1].v}）${tf ? `・${tf}` : ''}</span>`
             + `<span>我打：${hit(d.xy)}</span><span>牠打：${hit(d.yx)}</span>`
             + (k === team.mons[slot] ? `<button class="mini" data-ca="${k}" data-cd="${m.key}">傷害計算</button>` : '') + '</div>';
         }).join('') + '</div>';

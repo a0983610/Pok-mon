@@ -87,6 +87,14 @@ function btMon(side, p) {
   const i = battle[side][p];
   return i < 0 ? null : btUnit(side, i, battle.st[side][p]);
 }
+// 對位上顯示的名字（{ zh }）：變身中的寫「百變怪（變身成 X）」
+const btTfName = X => X.tfFrom ? { zh: `${MON[X.tfFrom].zh}（變身成${MON[X.key].zh}）` } : MON[X.key];
+// 算對位用的場上位置 p 的寶可夢：特性變身者（百變怪）當成已經變身成正對面那隻（Showdown imposter：對面位置 n−1−p，單打就是對手場上那隻；
+// 對面空著就沒變），能力變化照位置卡調的（imposterVs 的 keepSt）。位置卡、HP 等照原本的 btMon
+function btFieldMon(side, p) {
+  const X = btMon(side, p);
+  return X && imposterVs(X, btMon(side === 'me' ? 'opp' : 'me', btN() - 1 - p), true);
+}
 // 格子 i 的寶可夢：duel 用的 battler（我方照登錄的配招；對手套選的特性與 btOppItems 的道具、btOppSet），加上能力變化 st
 // （s＝[攻擊, 防禦, 特攻, 特防, 速度]；後排換上場是 0）、目前 HP cur、順風 tw、異常狀態 status、這一方的牆 walls、
 // 確定沒有道具 noItem（我方標了道具沒了、對手標了「沒有道具」）、場上還站著幾隻 field（雙打範圍招式只打到 1 隻時不減傷；至少算 1），
@@ -254,7 +262,7 @@ function btSideHTML(side) {
 // 暫存（不存網址）：btEdit＝正在填「實際」的那一列（列的 id，見 btMoveRow）；btObs＝某組對位的比對結果 { pair, html }
 let btEdit = null, btObs = null;
 // 場上格子 i（side）現在的 btMon；不在場上回傳 null
-const btAt = (side, i) => { const p = battle[side].slice(0, btN()).indexOf(i); return p < 0 ? null : btMon(side, p); };
+const btAt = (side, i) => { const p = battle[side].slice(0, btN()).indexOf(i); return p < 0 ? null : btFieldMon(side, p); };
 // duel 用的速度資料（同 duel 的 spe）
 const btSpe = b => ({ key: b.key, inv: b.speInv, sp: b.sp, nat: b.nat, st: b.st?.spe || 0, item: b.item, ab: b.ab, tw: !!b.tw, par: b.status === 'par', status: !!b.status });
 // 對手 O（btMon）換一種配置 c { item（'-'＝沒有道具）, sp, nat }：最大 HP 跟著點數變，剩下的 HP 照原本的 % 換算
@@ -265,10 +273,11 @@ function btVariant(O, c) {
 }
 // 對手 O 可能的其他配置裡，對得上觀察的（ok(對手配置) 為真）：先試只改一項（道具 items、或 OP.GG 常見的點數＋性格，
 // 性格不降有投點數的那項），都對不上才試道具和點數性格一起改。依 OP.GG 使用率由高到低取前 3 個，每個 { item?, sp?, nat?, w, label }
+// 變身中的對手（百變怪）：道具照百變怪自己的使用率，能力點數性格是抄來的、不試
 function btFix(O, items, ok) {
-  const use = useOf(O.key, team.fmt), top = topSpread(O.key, team.fmt), itemUse = Object.fromEntries(use?.items || []);
+  const k0 = O.tfFrom || O.key, use = useOf(k0, team.fmt), top = O.tfFrom ? null : topSpread(O.key, team.fmt), itemUse = Object.fromEntries(use?.items || []);
   const taken = new Set(battle.item.filter((k, j) => k && k !== '-' && j !== O.i));
-  const its = [...new Set(items)].filter(k => k === '-' ? !!O.item : ITEMS[k] && !taken.has(k) && k !== O.item && !MON[O.key].base)
+  const its = [...new Set(items)].filter(k => k === '-' ? !!O.item : ITEMS[k] && !taken.has(k) && k !== O.item && !MON[k0].base)
     .map(k => ({ item: k, w: itemUse[k] || 0.5, label: k === '-' ? '沒有道具' : `${ITEMS[k][0]}${itemUse[k] ? `（這隻 ${itemUse[k]}% 帶）` : ''}` }));
   const sps = top ? use.spreads.flatMap(([sp, p]) => [...use.natures, [[0, 0], 0]].filter(([n]) => !n[1] || !sp[n[1]])
     .filter(([n]) => sp.join() !== (O.sp || []).join() || n.join() !== (O.nat || []).join())
@@ -287,10 +296,10 @@ const btFixHTML = (i, fixes, why) => fixes.length
 function btSpeedObs(M, O, f, oppFirst) {
   const fld = { weather: f.weather, terrain: f.terrain, tr: !!f.tr }, sp = v => speedPair(btSpe(M), btSpe(v), fld);
   const fits = v => { const s = sp(v).first; return s < 0 || (s === 1) === oppFirst; };
-  const now = sp(O), tag = `（速度：${MON[M.key].zh} ${now.spd[0].v}／${MON[O.key].zh} ${now.spd[1].v}${f.tr ? '，戲法空間：慢的先動' : ''}）`;
+  const now = sp(O), tag = `（速度：${btTfName(M).zh} ${now.spd[0].v}／${btTfName(O).zh} ${now.spd[1].v}${f.tr ? '，戲法空間：慢的先動' : ''}）`;
   if (fits(O)) return `<div class="c-sum good">✔ ${oppFirst ? '牠先動' : '我先動'}，和預測一樣${tag}</div>`;
   const faster = oppFirst !== !!f.tr;
-  const items = faster ? ['choice-scarf'] : (useOf(O.key, team.fmt)?.items || []).map(([k]) => k).filter(k => k !== 'choice-scarf' && !isStone(k)).slice(0, 2).concat('-');
+  const items = faster ? ['choice-scarf'] : (useOf(O.tfFrom || O.key, team.fmt)?.items || []).map(([k]) => k).filter(k => k !== 'choice-scarf' && !isStone(k)).slice(0, 2).concat('-');
   const fixes = btFix(O, items, v => fits(v) && sp(v).spd[1].v !== now.spd[1].v);
   return `<div class="c-sum bad">⚠ 實際${oppFirst ? '牠先動' : '我先動'}，牠比預測${faster ? '快' : '慢'}${tag}；${btFixHTML(O.i, fixes, '能力變化、特性、場地、順風或麻痺')}</div>`;
 }
@@ -307,7 +316,7 @@ function btDmgObs(M, O, f, dir, k, after) {
   const fits = x => x && x.max * 100 / x.hp >= lo && x.min * 100 / x.hp <= hi;
   const mzh = MOVES[k][0], pred = `${hpPct(r.min, r.hp)}～${hpPct(r.max, r.hp)}%`, gotText = `${after <= 0 ? '至少 ' : ''}${Math.round(got * 10) / 10}%`;
   if (fits(r)) return `<div class="c-sum good">✔ ${mzh}實際扣了 ${gotText}，在預測 ${pred} 內</div>`;
-  const more = r.max * 100 / r.hp < lo, ty = r.type, use = useOf(O.key, team.fmt);
+  const more = r.max * 100 / r.hp < lo, ty = r.type, use = useOf(O.tfFrom || O.key, team.fmt);
   const items = dir === 'yx'
     ? [...Object.entries(DMG_ITEMS).filter(([, v]) => v.side.includes('a') && !v.mon && (v.type === ty || v.cat === r.cat || v.final || v.se && r.eff > 1)).map(([key]) => key),
       ...(use?.items || []).map(([key]) => key).filter(key => !isStone(key)).slice(0, 3), '-']
@@ -343,7 +352,8 @@ const btHit = x => `${mvName(x.k)} ${hpPct(x.r.min, x.r.hp)}～${hpPct(x.r.max, 
 const btHits = xs => xs.slice(0, 2).map(btHit).join('、');
 const btPri = xs => xs.filter(x => FLAG.priority.has(x.k));
 function btPairHTML(M, O, f) {
-  const mm = MON[M.key], om = MON[O.key];
+  // 變身中的（百變怪，見 btFieldMon）寫「百變怪（變身成 X）」
+  const mm = btTfName(M), om = btTfName(O);
   const head = tail => `<div class="bt-ph"><b>${mm.zh}</b><span class="meta">剩 ${M.pct}%</span><span>⇄</span><b>${om.zh}</b><span class="meta">剩 ${O.pct}%</span>${tail}</div>`;
   const pair = `${M.i}.${O.i}`, obsHTML = btObs?.pair === pair ? btObs.html : '';
   // 倒下了：「實際」打倒時的比對結果照樣顯示
@@ -385,12 +395,14 @@ function btSwapHTML(opps, f) {
   const n = x => x < 9 ? `${x} 下` : '四下打不倒', fmt = team.fmt;
   return `<div class="res-head">換人<span class="muted small">（後排換上來對上場上的對手）</span></div>`
     + alive.map(O => {
-      const om = MON[O.key];
+      const om = btTfName(O);
       const rows = bench.map(i => {
-        const M = btUnit('me', i, [0, 0, 0, 0, 0]), mm = MON[M.key], who = `<b>${mm.zh}</b><span class="meta">剩 ${M.pct}%</span>`;
+        // 特性變身者（百變怪）換上來就變成這隻對手（連牠目前的能力變化；imposterVs）
+        const M = btUnit('me', i, [0, 0, 0, 0, 0]), mm = MON[M.key], Mt = imposterVs(M, O);
+        const who = `<b>${mm.zh}</b><span class="meta">剩 ${M.pct}%${Mt.tfFrom ? `・換上來變身成${MON[Mt.key].zh}` : ''}</span>`;
         if (!useOf(M.key, fmt, M.set)?.moves.length || !useOf(O.key, fmt, O.set)?.moves.length) return [4, `<div class="x-line">${who}<span class="x-msg">沒有招式資料，不能算</span></div>`];
         // 換上來的這隻有威嚇就打場上的對手（對手早就在場上，牠的威嚇不會再觸發）
-        const r = matchup(M, O, { ...f, intim: 'me' }), big = r.big && MOVES[r.big][0], left = r.left > 0 ? `剩 ${hpPct(r.left, M.H)}%` : '會倒';
+        const r = matchup(Mt, O, { ...f, intim: 'me' }), big = r.big && MOVES[r.big][0], left = r.left > 0 ? `剩 ${hpPct(r.left, M.H)}%` : '會倒';
         const [rank, v, c, why] = r.sw ? [0, '✔', 'm2', big ? `換上來吃${big}${left}，還打得贏` : '換上來也打得贏（牠沒有打得痛的招式）']
           : r.head ? [1, '贏', 'm1', `正面打得贏，但換上來吃${big}${left}${r.left > 0 ? '就打不贏' : ''}：等場上的倒下再補上`]
           : r.ohko ? [3, '⚠', 'mh', `牠先動一下就打倒${mm.zh}`] : [2, '✘', 'mh', '打不贏'];
@@ -403,7 +415,7 @@ function btSwapHTML(opps, f) {
 }
 function btResultHTML() {
   const f = { fmt: team.fmt, weather: battle.weather, terrain: battle.terrain, tr: battle.tr };
-  const on = side => Array.from({ length: btN() }, (_, p) => btMon(side, p)).filter(Boolean), mine = on('me'), opps = on('opp');
+  const on = side => Array.from({ length: btN() }, (_, p) => btFieldMon(side, p)).filter(Boolean), mine = on('me'), opps = on('opp');
   // 我方場上空著（倒下後換下場）也列換人
   const swap = opps.length ? btSwapHTML(opps, f) : '';
   if (!opps.length || !mine.length && !swap) return '<p class="empty">雙方都有寶可夢上場後，這裡會列出我方每一招打過去的傷害、能不能打倒、誰先動，對手先動又打得倒我方時會警告，後排換上來打不打得贏也會列出來。</p>';
@@ -431,6 +443,8 @@ function btResultHTML() {
     + '換人：後排（這場帶的、不在場上、還沒倒下）換上來對上場上每隻對手，算法同「出戰選角」的對位表：✔＝換上來先吃牠最痛的一招還打得贏、'
     + '贏＝正面打得贏（場上的倒下後再補上，不用先吃一下）、⚠＝打不贏又會被牠先動一下打倒、✘＝其他打不贏的；'
     + '我方用目前剩下的 HP（換上場能力變化歸 0），對手用目前的 HP、能力變化和修正過的招式、道具、點數；換上來的這隻有威嚇就算進對手的攻擊（對手早就在場上，牠的威嚇不再算）。'
+    + '特性是變身者的百變怪：在場上的當成已經變身成正對面那隻（雙打是對面另一側的位置；招式、能力照牠的，HP、道具、位置卡的能力變化照百變怪自己的），'
+    + '換上來的照變成那隻對手算（連牠目前的能力變化）。'
     + '上方場上對位的「⚠ 先動就打得倒」只要有機率一擊就警告（後面寫機率），換人的 ⚠ 和幾下打倒照出戰選角取機率一半以上的，所以亂數一擊不到一半時只有上方會警告。'
     + '對手按「打中」「實際」的招式會標成用過，也可以在上方「用過的招式」自己點；標滿 4 招就只算這 4 招，沒滿的用使用率高的補滿 4 招。'
     + '下方只列這場會出場的：我方列「這場帶的」（預設照出戰選角第 1 名組合，可以點開改），對手出場過的到了帶出場的隻數（單打 3、雙打 4）就不列其他的。'

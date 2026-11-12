@@ -242,7 +242,7 @@ function damageCalc(a, d, mk, o) {
   if (foul) notes.add(`用${D.zh}的攻擊計算`);
   const [asp, anat] = foul ? invAt(d, 1, d.atkInv || [0, 10]) : invAt(a, ai, a.inv), [dsp, dnat] = invAt(d, di, d.inv);
   const ait = DMG_ITEMS[a.item] || {}, dit = DMG_ITEMS[d.item] || {};
-  r.hp = statOf(D.bs[0], invAt(d, 0, d.hp)[0], 0);
+  r.hp = d.maxHp ?? statOf(D.bs[0], invAt(d, 0, d.hp)[0], 0);
   // 剩下的 HP need：沒給 cur 或不少於最大 HP 都算全滿
   const full = !(d.cur < r.hp), need = full ? r.hp : Math.max(1, d.cur);
   // 能力變化：急所時不計攻擊方的下降、防守方的上升；對方是天然就不計（撲擊看自己防禦的能力變化）
@@ -403,8 +403,17 @@ function battler(key, fmt, set) {
   const sp = set && hasSpread(set) ? { sp: set.sp, nat: set.nat } : topSpread(key, fmt) || {};
   return { key, set, ab: set?.ab || defAbOf(key, fmt), item: set?.item || topItem(key, fmt), ...sp, atkInv: [32, 11], hp: [0, 10], defInv: [0, 10], speInv: [32, 11] };
 }
-// battler b 的最大 HP
-const hpOf = b => statOf(MON[b.key].bs[0], invAt(b, 0, b.hp)[0], 0);
+// battler b 的最大 HP（變身來的有 maxHp：HP 照自己的，見 imposterVs）
+const hpOf = b => b.maxHp ?? statOf(MON[b.key].bs[0], invAt(b, 0, b.hp)[0], 0);
+// 特性變身者（百變怪）出場就變成對面那隻 y（Showdown abilities.ts imposter → pokemon.ts transformInto，冠軍版 mod 沒改；同對戰模擬的 simTransform）：
+// 寶可夢、HP 以外的能力（含能力點數與性格）、特性、招式、能力變化照 y 的；HP（最大與剩下的）、道具、異常狀態、場上狀態、對戰中的格子資訊照自己的。
+// 自己已經變身過、或 y 是變身來的不能變（兩隻百變怪：先變的變成另一隻百變怪，後變的失敗，兩邊都只有變身這招）；沒有 y 也不變。
+// keepSt＝能力變化照自己的（對戰中已經在場上的：變身後的能力變化由使用者在位置卡調）；tfFrom＝變身前的寶可夢 key
+function imposterVs(x, y, keepSt = false) {
+  if (x.ab !== 'imposter' || x.tfFrom || !y || y.tfFrom) return x;
+  return { ...y, tfFrom: x.key, maxHp: hpOf(x), cur: x.cur, item: x.item, noItem: x.noItem, status: x.status, walls: x.walls, field: x.field, tw: x.tw,
+    i: x.i, H: x.H, pct: x.pct, st: keepSt ? x.st : y.st };
+}
 // 一對一對位：x、y 是 battler，對戰中另外帶 st { atk, def, spa, spd, spe } 能力變化、cur 目前剩下的 HP、tw 順風（沒給的當沒有、全滿）、
 // noItem 確定沒有道具、field 這一方場上還站著幾隻（見 damageCalc）、status 異常狀態（'brn' 灼傷：物理招式減半，毅力不減反而攻擊 ×1.5；
 // 'par' 麻痺：速度 ×½，飛毛腿不減反而 ×1.5）、walls 這一方的牆（反射壁、光牆、極光幕）；沒登錄招式的一方只算 OP.GG 使用率前 4 招（dmgRows 的 o.top，同預填的配招）；
@@ -416,7 +425,7 @@ function duel(x, y, f) {
   const st = (b, k) => b.st?.[k] || 0;
   const atk = b => ({ key: b.key, inv: b.atkInv, sp: b.sp, nat: b.nat, st: { atk: st(b, 'atk'), spa: st(b, 'spa'), def: st(b, 'def') }, item: b.item, ab: b.ab, set: b.set, field: b.field });
   const def = b => ({ key: b.key, hp: b.hp, inv: b.defInv, sp: b.sp, nat: b.nat, st: { def: st(b, 'def'), spd: st(b, 'spd'), atk: st(b, 'atk') }, item: b.item, ab: b.ab, cur: b.cur,
-    noItem: b.noItem, field: b.field, atkInv: b.atkInv });
+    noItem: b.noItem, field: b.field, atkInv: b.atkInv, maxHp: b.maxHp });
   const spe = b => ({ key: b.key, inv: b.speInv, sp: b.sp, nat: b.nat, st: st(b, 'spe'), item: b.item, ab: b.ab, tw: !!b.tw, par: b.status === 'par', status: !!b.status });
   // a 打 d 這個方向：d 那一方的牆、a 灼傷（毅力有異常狀態就照灼傷的算法：攻擊 ×1.5、不減半，同對戰模擬）
   const dir = (a, d) => ({ ...o, walls: d.walls || [], burn: a.status === 'brn' || (a.ab === 'guts' && !!a.status) });
@@ -439,9 +448,10 @@ function intimidateOn(ab) {
   if (['contrary', 'defiant', 'guard-dog'].includes(ab)) return [1, 0];
   return ab === 'simple' ? [-2, 0] : ab === 'competitive' ? [-1, 2] : [-1, 0];
 }
-// battler b 吃了特性是威嚇的 by 出場：照 intimidateOn 改 b 的攻擊／特攻能力變化（by 不是威嚇、或 b 不吃威嚇就原樣回傳）
+// battler b 吃了特性是威嚇的 by 出場：照 intimidateOn 改 b 的攻擊／特攻能力變化（by 不是威嚇、或 b 不吃威嚇就原樣回傳；
+// by 是變身來的威嚇不會發動，同對戰模擬）
 function intimidated(b, by) {
-  const e = by.ab === 'intimidate' && intimidateOn(b.ab);
+  const e = by.ab === 'intimidate' && !by.tfFrom && intimidateOn(b.ab);
   if (!e) return b;
   const c = (k, d) => Math.max(-6, Math.min(6, (b.st?.[k] || 0) + d));
   return { ...b, st: { ...b.st, atk: c('atk', e[0]), spa: c('spa', e[1]) } };

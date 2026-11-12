@@ -228,8 +228,12 @@ function duelVs(key, set, fmt, m, base = false) {
   if (!key || !useOf(key, fmt, set)?.moves.length || !useOf(m.key, fmt)?.moves.length) return null;
   const memo = [fmt, key, base, JSON.stringify(set || null), m.key].join('|');
   if (!MATCH_MEMO.has(memo)) {
+    // 特性變身者（百變怪）照變成對面那隻算（imposterVs；我方先變，對手再變的話對面已經是變身來的就失敗）
     const me = { ...battler(key, fmt, set), ...(base && { item: '' }) };
-    const rs = [m, ...megaInfo(m, fmt).filter(x => x.counted).map(x => x.mon)].map(f => matchup(me, battler(f.key, fmt), { fmt, intim: 'both' }));
+    const rs = [m, ...megaInfo(m, fmt).filter(x => x.counted).map(x => x.mon)].map(f => {
+      const op = battler(f.key, fmt), a = imposterVs(me, op);
+      return matchup(a, imposterVs(op, a), { fmt, intim: 'both' });
+    });
     MATCH_MEMO.set(memo, { sw: rs.every(r => r.sw), head: rs.every(r => r.head), ohko: rs.some(r => r.ohko), forms: rs });
   }
   return MATCH_MEMO.get(memo);
