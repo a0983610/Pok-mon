@@ -52,8 +52,9 @@ function renderSim() {
   $('#sReset').hidden = !pk.custom;
   seg('sK', SIM_KS, sim.k);
   seg('sAlgo', SIM_ALGOS.map(a => a.id), sim.algo);
-  const al = simAlgo(sim.algo), combos = nOpp ? simChoose(nOpp, Math.min(BRING_N.s, nOpp)) : 0, total = combos * sim.k;
-  $('#sAlgoHint').textContent = al.hint + (combos ? `；對手 ${combos} 種帶法各 ${sim.k} 場共 ${total} 場，約 ${simEta(al.ms * total)}` : '');
+  const al = simAlgo(sim.algo), combos = nOpp ? simChoose(nOpp, Math.min(BRING_N.s, nOpp)) : 0, total = combos * sim.k, wk = simWkN();
+  $('#sAlgoHint').textContent = al.hint + (combos ? `；對手 ${combos} 種帶法各 ${sim.k} 場共 ${total} 場，約 ${simEta(al.ms * total / Math.max(1, wk * SIM_WK_EFF))}`
+    + (wk ? `（${wk} 個背景計算一起打）` : '') : '');
   const ready = mine.length && pk.slots.length === need && nOpp, live = sim.tree?.live ? sim.tree : null;
   $('#sOpp').innerHTML = !nOpp ? '<span class="muted small">先到「出戰選角」選好對手的寶可夢。</span>'
     : bring.opp.map((k, i) => MON[k] ? `<button class="mini" data-opp="${i}" aria-pressed="${!!live && live.lead === i && live.oppKeys[i] === k}"${ready ? '' : ' disabled'}>`
@@ -70,7 +71,14 @@ function renderSim() {
   renderSimTree();
   saveState();
 }
-// 跑模擬：對手每種帶法輪流打（中途停止時各帶法的場數也平均），每跑超過 50 毫秒就讓畫面喘口氣、更新進度；按「停止」就以已跑完的場數出結果
+// 背景計算（js/engine/sim-worker.js）開幾個：電腦的執行緒數減 1（留一個給畫面），最多 SIM_WK_MAX；
+// 直接開檔案（file://）時瀏覽器不准開背景計算，是 0（在畫面這邊一場一場打）。
+// 實測（2026-11-11，i7-14700 28 執行緒、Chromium，標準每場）：1 個 308 毫秒、4 個平均 105、6 個 67、8 個 67、12 個 61、16 個 60，
+// 8 個以上幾乎不會再快，所以最多開 8 個；估時間時當成每個背景計算抵 SIM_WK_EFF 個（8 個約快 4.6 倍）
+const SIM_WK_MAX = 8, SIM_WK_EFF = 0.6;
+const simWkN = () => location.protocol === 'file:' || typeof Worker === 'undefined' ? 0 : Math.max(1, Math.min(SIM_WK_MAX, (navigator.hardwareConcurrency || 2) - 1));
+// 跑模擬：場次照對手每種帶法輪流排（中途停止時各帶法的場數也平均）。能開背景計算就分給 simWkN() 個一起打，
+// 開不了、或載入失敗退回來的在畫面這邊打（每跑超過 50 毫秒讓畫面喘口氣）；按「停止」就不再派新的場次，以已打完的出結果
 async function runSim() {
   const mine = simMine(), fmt = 's', pk = simMyPick();
   if (sim.run || pk.slots.length !== simNeedN() || !bring.opp.some(Boolean)) return;
@@ -78,19 +86,33 @@ async function runSim() {
   const al = simAlgo(sim.algo), k = sim.k, ctx = simCtx(fmt), run = sim.run = { stop: false };
   const res = { algo: al.id, k, total: k * scs.length, n: 0, my, sc: scs.map(sc => ({ ...sc, n: 0, win: 0, lose: 0, draw: 0, turns: 0 })), mine: {}, opp: {}, logs: {} };
   renderSim();
-  const start = performance.now();
-  let t0 = start;
-  for (let g = 0; g < k && !run.stop; g++) {
-    for (let i = 0; i < res.sc.length && !run.stop; i++) {
-      const out = simPlay(ctx, [my, res.sc[i]], Math.random, !res.logs.win || !res.logs.lose, al.opt);
-      simTally(res, i, out);
-      if (performance.now() - t0 > 50) {
-        // 剩下的時間照目前每場平均估
-        $('#sMsg').textContent = `模擬中… ${res.n}／${res.total} 場，預估還要 ${simEta((performance.now() - start) / res.n * (res.total - res.n))}`;
-        await new Promise(r => setTimeout(r));
-        t0 = performance.now();
-      }
-    }
+  const start = performance.now(), back = [];
+  let next = 0, tMsg = start;
+  // 下一場打對手第幾種帶法（-1＝沒有了或已停止）；背景計算失敗退回來的先打
+  const take = () => run.stop ? -1 : back.length ? back.pop() : next < res.total ? next++ % scs.length : -1;
+  const wantLog = () => !res.logs.win || !res.logs.lose;
+  // 記一場的結果，每隔 200 毫秒更新進度（剩下的時間照目前每場平均估）
+  const tally = (i, out) => {
+    simTally(res, i, out);
+    if (performance.now() - tMsg < 200) return;
+    $('#sMsg').textContent = `模擬中… ${res.n}／${res.total} 場，預估還要 ${simEta((performance.now() - start) / res.n * (res.total - res.n))}`;
+    tMsg = performance.now();
+  };
+  await Promise.all(Array.from({ length: simWkN() }, () => new Promise(done => {
+    let w, cur = -1;
+    const send = () => {
+      cur = take();
+      if (cur < 0) { w.terminate(); done(); } else w.postMessage({ i: cur, sides: [my, { mons: res.sc[cur].mons }], opt: al.opt, log: wantLog() });
+    };
+    try { w = new Worker('js/engine/sim-worker.js'); } catch { done(); return; }
+    w.onmessage = e => { tally(e.data.i, e.data); send(); };
+    w.onerror = e => { e.preventDefault(); if (cur >= 0) back.push(cur); cur = -1; w.terminate(); done(); };
+    send();
+  })));
+  let t0 = performance.now();
+  for (let i = take(); i >= 0; i = take()) {
+    tally(i, simPlay(ctx, [my, res.sc[i]], Math.random, wantLog(), al.opt));
+    if (performance.now() - t0 > 50) { await new Promise(r => setTimeout(r)); t0 = performance.now(); }
   }
   sim.run = null;
   sim.res = res;
