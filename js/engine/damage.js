@@ -430,12 +430,12 @@ function imposterVs(x, y, keepSt = false) {
 // 一對一對位：x、y 是 battler，對戰中另外帶 st { atk, def, spa, spd, spe } 能力變化、cur 目前剩下的 HP、tw 順風（沒給的當沒有、全滿）、
 // noItem 確定沒有道具、field 這一方場上還站著幾隻（見 damageCalc）、status 異常狀態（'brn' 灼傷：物理招式減半，毅力不減反而攻擊 ×1.5；
 // 'par' 麻痺：速度 ×½，飛毛腿不減反而 ×1.5）、walls 這一方的牆（反射壁、光牆、極光幕）；沒登錄招式的一方只算 OP.GG 使用率前 4 招（dmgRows 的 o.top，同預填的配招）；
-// f：{ fmt, weather, terrain, tr, crit 雙方都急所（對戰中反推傷害用）}（沒給的當沒有）；幫助、開場特性不算。
+// f：{ fmt, weather, terrain, tr, crit 雙方都急所（對戰中反推傷害用）, hh 幫助（兩個方向都 ×1.5，對戰中的對手組合用）}（沒給的當沒有）；開場特性不算。
 // live＝對戰中：算看場上狀況的特性（LIVE_ABILS：猛火類看 cur、大將看 fallen 這一方倒下幾隻、畫皮看 bust 被揭穿了沒；變身來的畫皮不算），
 // 沒給的（出戰選角、隊伍分析）不算。道具兩個方向都帶著（damageCalc 只讀這個方向用得到的效果，如攻擊方不看樹果）。
 // 回傳 xy＝x 打 y、yx＝y 打 x（dmgRows 的結果）、spd／first（speedPair：first 0＝x 先動、1＝y 先動、-1＝同速）
 function duel(x, y, f) {
-  const o = { fmt: f.fmt, weather: f.weather || '', crit: !!f.crit, terrain: f.terrain || '', hh: false, top: 4 };
+  const o = { fmt: f.fmt, weather: f.weather || '', crit: !!f.crit, terrain: f.terrain || '', hh: !!f.hh, top: 4 };
   const st = (b, k) => b.st?.[k] || 0;
   const atk = b => ({ key: b.key, inv: b.atkInv, sp: b.sp, nat: b.nat, st: { atk: st(b, 'atk'), spa: st(b, 'spa'), def: st(b, 'def') }, item: b.item, ab: b.ab, set: b.set, field: b.field,
     pinch: !!b.live && (b.cur ?? hpOf(b)) <= hpOf(b) / 3, fallen: b.live ? b.fallen || 0 : 0 });

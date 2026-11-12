@@ -381,6 +381,9 @@ function btPairHTML(M, O, f) {
   else if (btPri(kill).length) lines.push(['bad', `⚠ ${om.zh}的先制招式打得倒${mm.zh}：${btHits(btPri(kill))}`]);
   if (d.first !== 1 && mine.length) lines.push(['good', `✔ ${tie}${mm.zh}先動就打得倒${om.zh}：${btHits(mine)}`]);
   else if (btPri(mine).length) lines.push(['good', `✔ 先制招式打得倒${om.zh}：${btHits(btPri(mine))}`]);
+  // 牠有一擊打得倒我方的招：後排換上來吃同一招（btTakeHTML）。我方先動又確定一擊打倒牠、牠也沒有先制招式打得倒時不用換，不列
+  const safe = d.first === 0 && !btPri(kill).length && mine.some(x => x.r.ko[0] > 1 - 1e-9);
+  const take = kill.length && !safe ? btTakeHTML(M, O, f, kill.slice(0, 2), d.first === 0 && !btPri(kill).length) : '';
   const used = battle.used[O.i];
   // 牠打我那一區列最痛的 n 招，再加上用過的（才按得到「打中」「實際」）
   const rows = (x, n, ctx) => x.ok.length ? x.ok.filter((m, k) => n == null || k < n || ctx.dir === 'yx' && used.includes(m.k))
@@ -393,17 +396,41 @@ function btPairHTML(M, O, f) {
     + `<div class="meta">速度：${mm.zh} ${spd(0, M)}／${om.zh} ${spd(1, O)}${f.tr ? '（戲法空間：慢的先動）' : ''}${obs}</div>`
     + obsHTML
     + lines.map(([c, t]) => c ? `<div class="c-sum ${c}">${t}</div>` : `<div class="x-line"><span class="x-msg">${t}</span></div>`).join('')
+    + take
     + `<div class="bt-sub">${mm.zh}打${om.zh}</div>${rows(d.xy, undefined, { side: 'opp', i: O.i, pair, dir: 'xy', tgt: O })}`
     + Object.entries(d.xy.why).map(([w, ns]) => `<div class="x-line"><span class="x-msg">不算（${w}）：</span>${ns.join('、')}</div>`).join('')
     + `<div class="bt-sub">${om.zh}打${mm.zh}<span class="meta">（最痛的 3 招＋用過的${used.length >= 4 ? '，只算用過的 4 招' : used.length ? `，用過 ${used.length} 招、其他照使用率補滿 4 招` : '，照使用率前 4 招'}）</span></div>`
     + `${rows(d.yx, 3, { side: 'me', i: M.i, pair, dir: 'yx', tgt: M })}</div>`;
 }
 // ----- 換人：後排對上場上的對手 -----
-// 後排＝這場帶的（btBrought）不在場上、還沒倒下的。每隻對上場上每隻對手看 matchup（同出戰選角的對位）：我方用目前剩下的 HP
+// 後排＝這場帶的（btBrought）不在場上、還沒倒下的格子
+const btBench = () => { const on = battle.me.slice(0, btN()); return btBrought().filter(i => !on.includes(i) && battle.hp[i] !== 0); };
+// 場上的 M 會被 O 一擊打倒時：後排換上來吃同一招（threat：打得倒 M 的招，最痛的 2 招）各剩多少。換上來的算法同 btSwapHTML
+// （能力變化歸 0、用目前剩下的 HP、有威嚇先打 O、特性變身者變成 O）。沒有效果＝無傷、吃得到一擊打倒的＝會倒、其他＝扛得住，
+// 依這個順序、再依最痛那招的最高 % 由低到高排。meFirst＝我方先動（只是打不倒牠）、上面沒有警告，標題說明牠打回來就會倒
+function btTakeHTML(M, O, f, threat, meFirst) {
+  const mm = btTfName(M), names = threat.map(x => MOVES[x.k][0]).join('、');
+  const rows = btBench().map(i => {
+    const B = btUnit('me', i, [0, 0, 0, 0, 0]), Bt = imposterVs(B, O), d = duel(Bt, intimidated(O, Bt), f);
+    const rs = threat.map(x => [x.k, d.yx.ok.find(y => y.k === x.k)?.r]).filter(([, r]) => r);
+    if (!rs.length) return null;
+    const worst = Math.max(...rs.map(([, r]) => r.eff ? r.max / r.hp : 0)), ko = rs.some(([, r]) => r.eff && r.ko[0] > 1e-9);
+    const [rank, c, tag] = !worst ? [0, 'm2', '無傷'] : ko ? [2, 'mh', '會倒'] : [1, 'm1', '扛得住'];
+    const txt = rs.map(([k, r]) => !r.eff ? `${mvName(k)} 沒有效果${r.immuneBy ? `（${abilZh(r.immuneBy)}）` : r.blockedBy ? `（${r.blockedBy}）` : ''}`
+      : `${mvName(k)} ${hpPct(r.min, r.hp)}～${hpPct(r.max, r.hp)}%${r.ko[0] > 1e-9 ? ` ${koText(r.ko).text}`
+        : `，吃完剩 ${hpPct(Math.max(1, B.cur - r.max), r.hp)}～${hpPct(B.cur - r.min, r.hp)}%`}`).join('・');
+    return [rank, worst, `<div class="x-line"><span class="mtag ${c}">${tag}</span><b>${MON[B.key].zh}</b>`
+      + `<span class="meta">剩 ${B.pct}%${Bt.tfFrom ? `・換上來變身成${MON[Bt.key].zh}` : ''}</span><span>${txt}</span></div>`];
+  }).filter(Boolean).sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+  if (!rows.length) return '';
+  return `<div class="bt-sub">換下${mm.zh}，後排吃${names}${meFirst ? `<span class="meta">（${mm.zh}先動也不一定打得倒牠，牠打回來就會倒）</span>` : ''}</div>`
+    + rows.map(x => x[2]).join('');
+}
+// 每隻後排對上場上每隻對手看 matchup（同出戰選角的對位）：我方用目前剩下的 HP
 // （換上場能力變化歸 0、我方順風照舊），對手用目前的 HP、能力變化和修正過的招式／道具／點數。
 // ✔ 換上來先吃牠最痛的一招還打得贏、贏＝正面打得贏（場上的倒下後再補上，不用先吃一下）、⚠ 牠先動一下就打倒我、✘ 打不贏；依這個順序排
 function btSwapHTML(opps, f) {
-  const on = battle.me.slice(0, btN()), bench = btBrought().filter(i => !on.includes(i) && battle.hp[i] !== 0), alive = opps.filter(O => O.cur);
+  const bench = btBench(), alive = opps.filter(O => O.cur);
   if (!bench.length || !alive.length) return '';
   const n = x => x < 9 ? `${x} 下` : '四下打不倒', fmt = team.fmt;
   return `<div class="res-head">換人<span class="muted small">（後排換上來對上場上的對手）</span></div>`
@@ -426,6 +453,75 @@ function btSwapHTML(opps, f) {
         + rows.map((x, k) => [...x, k]).sort((x, y) => x[0] - y[0] || x[2] - y[2]).map(x => x[1]).join('') + '</div>';
     }).join('');
 }
+// ----- 雙打集火：對手場上兩隻一起打我方同一隻 -----
+// 每隻對手用打這隻最痛（最高傷害）的招，兩招所有下數的亂數（各 16 種等機率）相加，算打掉剩下 HP 的機率。
+// 只擋第一下的（氣勢披帶、結實撐住，多重鱗片、畫皮）只算在先打到的那一下：後打的那下照「不是全滿、畫皮已揭穿」算；
+// 兩種先後都算，取比較容易倒的（不看速度）。依倒的機率、再依合計最高傷害由高到低排
+const btKoSum = (hits, need) => {
+  let dist = new Map([[0, 1]]);
+  hits.forEach(rs => { const nd = new Map(); dist.forEach((p, v) => rs.forEach(x => { const s = Math.min(need, v + x); nd.set(s, (nd.get(s) || 0) + p / rs.length); })); dist = nd; });
+  return dist.get(need) || 0;
+};
+function btFocusHTML(mine, opps, f) {
+  const alive = opps.filter(O => O.cur), on = mine.filter(M => M.cur);
+  if (btN() < 2 || alive.length < 2 || !on.length) return '';
+  const best = (M, O) => duel(M, O, f).yx.ok.find(x => x.r.eff);
+  const rows = on.map(M => {
+    const M2 = { ...M, cur: Math.min(M.cur, M.H - 1), bust: true };
+    const cases = [[alive[0], alive[1]], [alive[1], alive[0]]].map(([A, B]) => {
+      const a = best(M, A), b = best(M2, B);
+      if (!a || !b) return null;
+      // 先打到的那下被氣勢披帶／結實撐住：最多打到剩 1
+      const ra = a.r.endured ? a.r.rolls.map((rs, h) => h ? rs : rs.map(x => Math.min(x, M.cur - 1))) : a.r.rolls, hits = [...ra, ...b.r.rolls];
+      const sum = k => hits.reduce((s, rs) => s + rs[k], 0);
+      return { A, B, a, b, p: btKoSum(hits, M.cur), lo: sum(0), hi: sum(15) };
+    }).filter(Boolean).sort((x, y) => y.p - x.p || y.hi - x.hi);
+    if (!cases.length) return null;
+    const w = cases[0], mm = btTfName(M), [c, tag] = w.p > 1 - 1e-9 ? ['mh', '確定倒'] : w.p > 1e-9 ? ['mh', `亂數倒（${Math.min(99.9, Math.max(0.1, Math.round(w.p * 1000) / 10))}%）`] : ['m2', '扛得住'];
+    const one = (O, x) => `${btTfName(O).zh}的${mvName(x.k)}`;
+    return [w.p, w.hi / M.H, `<div class="x-line"><span class="mtag ${c}">${tag}</span><b>${mm.zh}</b><span class="meta">剩 ${M.pct}%</span>`
+      + `<span>${one(w.A, w.a)}＋${one(w.B, w.b)}：合計 ${hpPct(w.lo, M.H)}～${hpPct(w.hi, M.H)}%</span></div>`];
+  }).filter(Boolean).sort((x, y) => y[0] - x[0] || y[1] - x[1]);
+  return rows.length ? `<div class="bt-pair"><div class="bt-ph"><b>集火</b><span class="meta">對手兩隻一起打同一隻</span></div>${rows.map(x => x[2]).join('')}</div>` : '';
+}
+// ----- 雙打對手組合：對手場上兩隻（P 發動、Q 是隊友）搭配的威脅 -----
+// 對手的招式照對位算的那幾招：用過的＋使用率補滿 4 招（同 dmgRows 的 o.top），含變化招式
+const btOppMoves = O => { const use = useOf(O.key, team.fmt, O.set)?.moves || []; return (O.set?.moves?.some(Boolean) ? use : byUse(use).slice(0, 4)).map(([k]) => k); };
+// 招式名＋不是 0 的先制（MOVES[k][7]）
+const btMvPri = k => `${MOVES[k][0]}${MOVES[k][7] ? `（${MOVES[k][7] > 0 ? '+' : ''}${MOVES[k][7]} 先制）` : ''}`;
+// 重算數字的：順風（對手還沒有順風）、戲法空間（開或收）、天氣／場地招式（和現在不同）＝對手哪隻變成比我方哪隻先動（只列對手變快的，沒變就不列）；
+// 幫助＝Q 的招式 ×1.5 後一擊打倒我方的機率變高的（每隻我方取機率最高的一招）。
+// 文字提醒的：擊掌奇襲（只有上場後第一回合）、看我嘛／憤怒粉（把我方單一目標的招引走）。
+// 每個 P 最後列「先處理」：我方場上這回合一下打得倒牠的（每隻取一擊機率最高的一招，附誰先動）
+function btComboHTML(mine, opps, f) {
+  const alive = opps.filter(O => O.cur), on = mine.filter(M => M.cur);
+  if (btN() < 2 || alive.length < 2 || !on.length) return '';
+  const name = X => btTfName(X).zh, fld0 = { weather: f.weather, terrain: f.terrain, tr: !!f.tr }, best = xs => xs.slice().sort((a, b) => b.r.ko[0] - a.r.ko[0])[0];
+  const flips = (fld, tw) => on.flatMap(M => alive.filter(X => speedPair(btSpe(M), btSpe(X), fld0).first !== 1
+    && speedPair(btSpe(M), btSpe(tw ? { ...X, tw: true } : X), fld).first === 1).map(X => `${name(X)}比${name(M)}先動`));
+  const blocks = [[alive[0], alive[1]], [alive[1], alive[0]]].map(([P, Q]) => {
+    const mv = btOppMoves(P), has = k => mv.includes(k), lines = [];
+    const speed = (k, fld, tw, verb = '開了') => { const x = flips(fld, tw); if (x.length) lines.push(`${btMvPri(k)}：${verb}之後${x.join('、')}`); };
+    if (has('tailwind') && !battle.tw.includes('opp')) speed('tailwind', fld0, true);
+    if (has('trick-room')) speed('trick-room', { ...fld0, tr: !fld0.tr }, false, fld0.tr ? '收掉' : '開了');
+    mv.filter(k => FIELD_SET[k]).forEach(k => {
+      const fd = FIELD_SET[k], kind = WEATHERS.includes(fd) ? 'weather' : 'terrain';
+      if (fld0[kind] !== fd) speed(k, { ...fld0, [kind]: fd }, false);
+    });
+    if (has('helping-hand')) on.forEach(M => {
+      const ko0 = Math.max(0, ...duel(M, Q, f).yx.ok.map(x => x.r.ko?.[0] || 0)), x = best(duel(M, Q, { ...f, hh: true }).yx.kos);
+      if (x && x.r.ko[0] > ko0 + 1e-9) lines.push(`${btMvPri('helping-hand')}：${name(Q)}的${mvName(x.k)}打${name(M)}變成 ${hpPct(x.r.min, x.r.hp)}～${hpPct(x.r.max, x.r.hp)}%，${koText(x.r.ko).text}`);
+    });
+    if (has('fake-out')) lines.push(`${btMvPri('fake-out')}：上場後第一回合讓我方一隻不能動，${name(Q)}可以放心出招`);
+    ['follow-me', 'rage-powder'].filter(has).forEach(k => lines.push(`${btMvPri(k)}：我方打單一目標的招會被引到${name(P)}身上，打不到${name(Q)}${k === 'rage-powder' ? '（草屬性不受影響）' : ''}`));
+    if (!lines.length) return '';
+    const kos = on.map(M => { const d = duel(M, P, f), x = best(d.xy.kos);
+      return x && `${name(M)}的${mvName(x.k)} ${koText(x.r.ko).text}・${d.first < 0 ? '同速' : d.first ? `${name(P)}先動` : `${name(M)}先動`}`; }).filter(Boolean);
+    return `<div class="bt-sub">${name(P)}配${name(Q)}</div>` + lines.map(t => `<div class="c-sum bad">⚠ ${t}</div>`).join('')
+      + `<div class="x-line"><span class="x-msg">先處理${name(P)}：</span><span>${kos.length ? `${kos.join('、')}一下打得倒` : '我方場上這回合一下打不倒牠'}</span></div>`;
+  }).join('');
+  return blocks ? `<div class="bt-pair"><div class="bt-ph"><b>對手組合</b><span class="meta">${name(alive[0])}＋${name(alive[1])}</span></div>${blocks}</div>` : '';
+}
 function btResultHTML() {
   const f = { fmt: team.fmt, weather: battle.weather, terrain: battle.terrain, tr: battle.tr };
   const on = side => Array.from({ length: btN() }, (_, p) => btFieldMon(side, p)).filter(Boolean), mine = on('me'), opps = on('opp');
@@ -434,6 +530,7 @@ function btResultHTML() {
   if (!opps.length || !mine.length && !swap) return '<p class="empty">雙方都有寶可夢上場後，這裡會列出我方每一招打過去的傷害、能不能打倒、誰先動，對手先動又打得倒我方時會警告，後排換上來打不打得贏也會列出來。</p>';
   return `<div class="res-head">場上對位<span class="muted small">（${[FMT_ZH[team.fmt], FIELD_ZH[battle.weather], FIELD_ZH[battle.terrain], battle.tr && '戲法空間',
     ...battle.tw.map(s => s === 'me' ? '我方順風' : '對手順風')].filter(Boolean).join('・')}）</span></div>`
+    + btFocusHTML(mine, opps, f) + btComboHTML(mine, opps, f)
     + mine.map(M => opps.map(O => btPairHTML(M, O, f)).join('')).join('') + swap
     + '<p class="note">※ 我方照「隊伍分析」登錄的招式、特性、道具、能力點數與性格算，沒登錄的欄位和對手都照「傷害計算」的預設：'
     + '能力點數與性格用 OP.GG 最常見的（沒有統計的攻擊／特攻 32＋性格、速度 32＋性格、HP／防禦／特防 0）、'
@@ -459,6 +556,15 @@ function btResultHTML() {
     + '換人：後排（這場帶的、不在場上、還沒倒下）換上來對上場上每隻對手，算法同「出戰選角」的對位表：✔＝換上來先吃牠最痛的一招還打得贏、'
     + '贏＝正面打得贏（場上的倒下後再補上，不用先吃一下）、⚠＝打不贏又會被牠先動一下打倒、✘＝其他打不贏的；'
     + '我方用目前剩下的 HP（換上場能力變化歸 0），對手用目前的 HP、能力變化和修正過的招式、道具、點數；換上來的這隻有威嚇就算進對手的攻擊（對手早就在場上，牠的威嚇不再算）。'
+    + '「換下…，後排吃…」：場上這隻吃得到牠一擊打倒的招（最痛的 2 招）時，在那組對位下面列後排換上來吃同一招的傷害（換人比出招早，牠按的還是原本那招），'
+    + '無傷＝沒有效果、扛得住＝一下打不倒（後面是吃完剩下的 %）、會倒＝有機率一下打倒，依這個順序再依吃得少的排；我方先動又確定一擊打倒牠、牠也沒有先制招式打得倒時不列。'
+    + '集火（雙打、對手場上兩隻都還在）：兩隻對手各用打這隻最痛的一招一起打我方同一隻，兩招的亂數相加算倒的機率，最危險的排最上面；'
+    + '氣勢披帶、結實、多重鱗片、畫皮只擋先打到的那一下，兩種先後都算、取比較容易倒的（不看速度）。守住、看我嘛、我方先打倒其中一隻這些讓牠打不到的情況不算。'
+    + '對手組合（雙打、對手場上兩隻都還在）：看對手對位算的那幾招（用過的＋使用率補滿 4 招）裡有沒有搭配隊友的招式。'
+    + '順風、戲法空間、天氣／場地招式重算速度，列出用了之後對手哪隻變成比我方哪隻先動（沒有變的不列；天氣場地對傷害的影響按上方天氣、場地按鈕看）；'
+    + '幫助重算傷害（×1.5），列出隊友一擊打倒我方的機率變高的招式；擊掌奇襲、看我嘛、憤怒粉只提醒。'
+    + '「先處理」列我方場上這回合一下打得倒發動那隻的招式和誰先動；幫助、擊掌奇襲、看我嘛、憤怒粉的先制比一般招式高，這回合先打倒牠也擋不住這回合的效果，'
+    + '戲法空間是 −7 先制，一般招式都比牠早。'
     + '特性是變身者的百變怪：在場上的當成已經變身成正對面那隻（雙打是對面另一側的位置；招式、能力照牠的，HP、道具、位置卡的能力變化照百變怪自己的），'
     + '換上來的照變成那隻對手算（連牠目前的能力變化）。'
     + '上方場上對位的「⚠ 先動就打得倒」只要有機率一擊就警告（後面寫機率），換人的 ⚠ 和幾下打倒照出戰選角取機率一半以上的，所以亂數一擊不到一半時只有上方會警告。'
