@@ -135,6 +135,10 @@ function megaInfo(m, fmt) {
     return { mon: x, p, counted: p >= ROLE_PCT };
   });
 }
+// 對手 m 當成的型態：某顆超級石使用率過半的當成那個超級進化型態，不然就是 m（猜對手帶誰、對戰中對手的預設型態共用，對戰模擬的對手也照這個）
+const likelyForm = (m, fmt) => megaInfo(m, fmt).filter(x => x.p >= 50).sort((x, y) => y.p - x.p)[0]?.mon || m;
+// 寶可夢 key 在 fmt 的 OP.GG 使用率前 4 招（含變化招式；同預填的配招 defaultSet，也是對位 duel 替沒登錄招式的一方算的招式）
+const topMoves = (key, fmt) => byUse(useOf(key, fmt)?.moves || []).slice(0, 4).map(([k]) => k);
 // 對手 m 的 unit，加上算進判斷的超級進化型態（answerOf 的 megas）
 const oppUnit = (m, fmt) => ({ ...monUnit(m, fmt), megas: megaInfo(m, fmt).filter(x => x.counted).map(x => monUnit(x.mon, fmt)) });
 // 超級進化型態寫成「超級噴火龍Ｙ 76%」（沒有統計的不寫 %）
@@ -165,7 +169,7 @@ const lackNeeds = (roles, fmt) => roles.length ? NEEDS[fmt].filter(n => !roles.s
 //   4. recommendMember 的屬性評分，最後看排名（沒排名的排最後）
 // 搭配、角色、隊友只在隊上已有挑了寶可夢的隊員、候選有排名時比（候選在 fmt 沒排名時，OP.GG 仍可能有零星統計，樣本太少不採用）。
 // 超級進化和原型屬性一樣、比較結果也一樣時只留原型。fix 每項是 { w 解決的提醒, by 候選撐起它的特性／招式（traitScan 的 has 項目）}
-// sets：隊上成員 key → 登錄的配招（見 useOf；候選不會在隊上，所以不受影響）
+// sets：隊上成員 key → 登錄的配招（見 useOf）；候選照挑了以後會登錄的預設配招（defaultSet）評估角色、搭配與對策，加入後說的才對得上
 const COUNTER_RANK = 60;
 function recommendMon(others, base, fmt, onTeam = [], units = [], sets = {}) {
   const rk = m => m.rank[fmt] || Infinity, fams = onTeam.map(k => family(MON[k]));
@@ -175,8 +179,8 @@ function recommendMon(others, base, fmt, onTeam = [], units = [], sets = {}) {
   const none = units.length ? threatCheck(units, fmt, THREAT_N).filter(t => !t.level).map(t => t.mon) : [];
   const list = MONS.filter(m => base.every(t => m.types.includes(t)) && !fams.includes(family(m)))
     .map(m => {
-      const role = m.rank[fmt] ? roleOf(m.key, fmt) : null;
-      const after = role && onTeam.length ? traitScan([...onTeam, m.key], fmt, sets) : null;
+      const ds = defaultSet(m.key, fmt), role = m.rank[fmt] ? roleOf(m.key, fmt, ds) : null;
+      const after = role && onTeam.length ? traitScan([...onTeam, m.key], fmt, { ...sets, [m.key]: ds }) : null;
       // 「戲法空間下偏快」改由慢的攻擊手加分處理：一隻慢的加進來，偏快的比例常常還降不到一半
       const fix = after ? before.filter(w => w.kind !== 'trfast' && !after.warns.some(a => a.id === w.id))
         .map(w => ({ w, by: w.kind === 'need' ? after.set.filter(s => s.j === me && FIELD_SET[s.k] === w.f) : [] })) : [];
@@ -184,7 +188,7 @@ function recommendMon(others, base, fmt, onTeam = [], units = [], sets = {}) {
       const add = after ? after.warns.filter(a => !before.some(w => w.id === a.id)) : [];
       // 對策只從排名前 COUNTER_RANK 的候選找（含牠們的超級進化；樣本夠多、配招統計可信，也免得上百隻候選都算傷害太慢），
       // 要先在屬性上擋得住或剋得到（answerOf，便宜），再看速度與傷害正面打得贏（teamVs）
-      const me1 = { defs: m.types, atk: attacksOf(m.key, m.types, fmt), key: m.key };
+      const me1 = { defs: m.types, atk: attacksOf(m.key, m.types, fmt, ds), key: m.key, set: ds };
       const threats = rk(m) > COUNTER_RANK ? [] : none.filter(t => answerOf([me1], oppUnit(t, fmt)).level > 0 && teamVs([me1], t, fmt).level > 0);
       const mates = role ? onTeam.filter(k => useOf(k, fmt)?.mates.includes(family(m)) || role.use.mates.includes(family(MON[k]))) : [];
       return { mon: m, role, fills: role ? lack.filter(n => needBy(role, n)) : [], fix, add, threats, mates, ...memberScore(others, m.types) };
@@ -404,7 +408,6 @@ function bringPlan(mems, opps, fmt) {
 function oppBringPlan(oppKeys, myKeys, fmt) {
   const at = oppKeys.map((k, i) => MON[k] ? i : -1).filter(i => i >= 0), mine = myKeys.filter(k => MON[k]).map(k => MON[k]);
   if (!at.length || !mine.length) return null;
-  const formOf = m => megaInfo(m, fmt).filter(x => x.p >= 50).sort((x, y) => y.p - x.p)[0]?.mon || m;
-  const mems = at.map(i => { const m = formOf(MON[oppKeys[i]]); return { defs: m.types, key: m.key }; });
+  const mems = at.map(i => { const m = likelyForm(MON[oppKeys[i]], fmt); return { defs: m.types, key: m.key }; });
   return { ...bringPlan(mems, mine, fmt), at, mems };
 }

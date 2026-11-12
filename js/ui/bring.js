@@ -38,7 +38,7 @@ function bringHTML(members, opps) {
         + (f.sw ? '・換上來吃一下還打得贏' : f.head ? '・正面打得贏' : f.ohko ? '・牠先動一下打倒我' : ''); }).join('；');
   let t = '<thead><tr><th class="corner">我方 ↓<br>對手 →</th>'
     + opps.map(([m, i], o) => `<th title="${m.zh}${oppMegas[o].length ? `（可能超級進化成${oppMegas[o].map(x => x.zh).join('、')}）` : ''}">`
-      + `<span class="tcol"><span class="slot-n">${i + 1}${oppMegas[o].length ? '・超' : ''}</span><span class="duo">`
+      + `<span class="tcol"><span class="slot-n">${i + 1}${oppMegas[o].length ? '・超' : ''}</span><span class="slot-n">${m.zh}</span><span class="duo">`
       + `${m.types.map(id => `<span class="vchip" style="${style(id)}">${T[id].zh}</span>`).join('')}</span>`
       + `<span class="slot-n">${[m.spe, ...oppMegas[o].filter(x => x.spe !== m.spe).map(x => `超${x.spe}`)].join('<br>')}</span></span></th>`).join('')
     + '</tr></thead><tbody>';
@@ -48,7 +48,8 @@ function bringHTML(members, opps) {
     t += `<tr><th>${best.idx.includes(j) ? '★ ' : ''}${name(j)}${spe(j) ? ` <span class="meta">${spe(j)}</span>` : ''}</th>`
       + opps.map(([op], o) => {
         const r = pairOf(j, o), [v, c] = cell(r), tt = tip(r, me ? MON[me].zh : slotName(members[j][1]), o);
-        return `<td class="${c}">${me ? `<button class="vs-go" data-ca="${me}" data-cd="${op.key}" title="${tt}（點一下到傷害計算看細節）">${v}</button>` : `<span title="${tt}">${v}</span>`}</td>`;
+        return `<td class="${c}">${me ? `<button class="vs-go" data-ca="${me}" data-cd="${op.key}" data-tip="${tt}" title="${tt}（點一下到傷害計算看細節）">${v}</button>`
+          : `<button class="vs-go" data-tip="${tt}" title="${tt}">${v}</button>`}</td>`;
       }).join('') + '</tr>';
   });
   return `<div class="res-head">建議出戰<span class="muted small">（${FMT_ZH[team.fmt]}帶 ${k} 隻，共 ${combos.length} 種帶法）</span></div>`
@@ -74,13 +75,14 @@ function bringHTML(members, opps) {
       + (c.none ? `<span class="who x-msg">沒解：${c.res.map((x, o) => x.level ? '' : opps[o][0].zh).filter(Boolean).join('、')}</span>` : '')
       + '</div>').join('')
     + oppGuessHTML()
-    + `<h3>對位表</h3><div class="mwrap cover"><table class="matrix vs">${t}</tbody></table></div>`
+    + `<h3>對位表</h3><div class="mwrap cover"><table class="matrix vs">${t}</tbody></table></div><div id="pCellTip"></div>`
     + '<p class="note">※ ✔＝換上來先吃牠最痛的一招（取最高傷害）、剩下的 HP 對打還打得贏；贏＝正面對打（雙方 HP 全滿）打得贏；'
     + '⚠＝打不贏，而且牠一下就打得倒我、又比我先出手（速度較快、同速或用先制招式），還沒出手就倒；✘＝其他打不贏的。'
     + '「打得贏」＝我連用同一招打倒牠的次數比牠打倒我的少；一樣多時，有先制招式能打倒的一方先出手，不然看實際速度（同速算打不贏），'
-    + '四下都打不倒算打不贏。幾下打倒取打倒機率過半的次數（例如亂數一擊 60% 算一下、40% 算兩下）。'
-    + '傷害、速度、配招、道具、能力點數的算法同下方「出招表」（我方照登錄的配招，對手照 OP.GG 最常見的）；換上來吃過一下後，氣勢披帶、多重鱗片就沒用了。'
-    + '滑鼠停在格子上看誰先動與幾下打倒，點格子帶到「傷害計算」看每一招（按「⇄ 對調」看牠打我方；只選屬性的隊員不能點）。'
+    + '四下都打不倒算打不贏。幾下打倒取打倒機率一半以上的次數（例如亂數一擊 60%、50% 算一下，40% 算兩下）；擊掌奇襲、迎頭一擊只有上場第一回合能用，只算一下打倒的。'
+    + '傷害、速度、配招、道具、能力點數的算法同下方「出招表」（我方照登錄的配招，對手照 OP.GG 最常見的，招式用使用率前 4 招）；換上來吃過一下後，氣勢披帶、多重鱗片就沒用了。'
+    + '滑鼠停在格子上看誰先動與幾下打倒，點格子帶到「傷害計算」看每一招（按「⇄ 對調」看牠打我方；只選屬性的隊員不能帶）；'
+    + '手機（沒有滑鼠停留）點格子先在表的下方顯示誰先動與幾下打倒，再按「傷害計算」過去。'
     + `只選屬性沒挑寶可夢、或沒有招式統計的，改看屬性：不怕牠${FMT_ZH[team.fmt]}常帶的攻擊又招式剋得到算 ✔、招式剋得到算「贏」（同「隊伍分析」的熱門威脅檢查）。`
     + `對手選一般型態、但 OP.GG 道具統計有 ${ROLE_PCT}% 以上帶超級石的（表頭標「超」，如噴火龍多半帶噴火龍進化石Ｙ），`
     + '要對進化前後每種型態都成立才算（⚠ 任一種成立就標）；各型態的超級石使用率見下方「對手情報」。'
@@ -95,15 +97,16 @@ function bringHTML(members, opps) {
     + `${ITEMS['air-balloon'] ? `，或帶${ITEMS['air-balloon'][0]}（${T.ground.zh}）` : ''}就不算。</p>`
     + moveTableHTML(members, opps, best, alt, oppMegas);
 }
-// 對手可能帶的（oppBringPlan）：前 3 種帶法，第 1 種附先發；名字照對手格子選的型態
+// 對手可能帶的（oppBringPlan）：前 3 種帶法，第 1 種附先發；名字照猜的時候當成的型態（超級石過半的當成超級進化；
+// 一種帶法裡超級進化 2 隻以上時只有 c.evo 那隻進化，其他寫原型）
 function oppGuessHTML() {
   const g = oppBringPlan(bring.opp, team.mons, team.fmt), head = '<h3>對手可能帶的</h3>';
   if (!g) return head + '<p class="muted small b-intro">我方都只選屬性、沒挑寶可夢，沒有能力值可以替對手算。</p>';
-  const nm = j => `${g.at[j] + 1} ${MON[bring.opp[g.at[j]]].zh}`;
+  const nm = c => j => { const m = MON[g.mems[j].key]; return `${g.at[j] + 1} ${(m.base && c.evo != null && j !== c.evo ? MON[m.base] : m).zh}`; };
   return head + '<p class="muted small b-intro">把對手當成也用上面同一套方法選角猜的，只是參考：對手看不到我方的配招，所以我方也照 OP.GG 最常見的配置算'
-    + '（只選屬性的隊員不算）；對手選一般型態、但某顆超級石使用率過半的，當成會超級進化。到「對戰中」放上場的對手會標成出場過，再改猜還沒出場的。</p>'
-    + g.combos.slice(0, 3).map((c, r) => `<div class="combo"><span class="rank">${r + 1}</span><b>${c.idx.map(nm).join('、')}</b>`
-      + (r ? '' : `<span class="who">先發：${g.pick.js.map(nm).join('、')}</span>`) + '</div>').join('');
+    + '（只選屬性的隊員不算）；對手選一般型態、但某顆超級石使用率過半的，當成會超級進化（名字寫超級進化型態）。到「對戰中」放上場的對手會標成出場過，再改猜還沒出場的。</p>'
+    + g.combos.slice(0, 3).map((c, r) => `<div class="combo"><span class="rank">${r + 1}</span><b>${c.idx.map(nm(c)).join('、')}</b>`
+      + (r ? '' : `<span class="who">先發：${g.pick.js.map(nm(c)).join('、')}</span>`) + '</div>').join('');
 }
 // 出招表：第 1 名組合 best 的每隻（一場只能超級進化一隻，不進化的用原型）對上每隻對手（常帶超級石的另列超級進化後），
 // 用 duel 算誰先動、我方最痛的一招、對手打回來最痛的一招；我方有登錄配招的照登錄的算
@@ -132,7 +135,7 @@ function moveTableHTML(members, opps, best, alt, oppMegas) {
     + '<p class="note">※ 我方有在「隊伍分析」登錄配招的照登錄的招式、特性、道具、能力點數與性格算；沒登錄的欄位和對手都照「傷害計算」的預設：'
     + '能力點數與性格用 OP.GG 最常見的（沒有統計的攻擊／特攻 32＋性格、速度 32＋性格、HP／防禦／特防 0）、'
     + '道具帶 OP.GG 最常帶的（超級進化帶超級石）、特性用 OP.GG 最常見的（超級進化用固定特性）。'
-    + '招式看登錄的或 OP.GG 常用招式裡的攻擊招式，列傷害最高的一招；幾擊＝連續用同一招幾次打倒。'
+    + '招式看登錄的，沒登錄的（含對手）看 OP.GG 使用率前 4 招（同挑寶可夢時預填的）裡的攻擊招式，列傷害最高的一招；幾擊＝連續用同一招幾次打倒。'
     + '先動看實際速度（括號是我方／對手的速度；同速各 50%，先制招式不看速度）。不含天氣、場地、能力變化與出場特性（如威嚇、日照）。'
     + '對手常帶超級石的另列「超級進化後」；一場只能超級進化一隻，第 1 名組合裡不進化的隊員以原型計。按「傷害計算」看每一招的細節。</p>';
 }
@@ -149,18 +152,22 @@ function oppInfoHTML(opps) {
         + `<span class="meta">${m.rank[team.fmt] ? `#${m.rank[team.fmt]}` : '無排名'}${scarf(m)}${m.base ? `・沿用${MON[m.base].zh}的統計` : ''}</span></div>`
         + statsHTML(m)
         + (mg.length ? `<div class="bst">${mg.length > mgOut.length ? `<span>可能超級進化：${megaText(mg.filter(x => x.counted))}</span>` : ''}`
-          + `${mgOut.length ? `<span class="muted">超級石不到 ${ROLE_PCT}%、不算：${megaText(mgOut)}</span>` : ''}</div>` : '');
+          + `${mgOut.length ? `<span class="muted">超級石不到 ${ROLE_PCT}%、不算：${megaText(mgOut)}</span>` : ''}</div>` : '')
+        // 原地切換型態（不用先移除再篩屬性）：確定會進化就改成超級進化型態，選錯了改回原型
+        + (mg.length || m.base ? `<div class="bst">${m.base ? `<button class="mini" data-omega="${i}" data-k="${m.base}">改回${MON[m.base].zh}</button>`
+          : mg.map(x => `<button class="mini" data-omega="${i}" data-k="${x.mon.key}">確定會進化：改成${x.mon.zh}</button>`).join('')}</div>` : '');
       const realLine = real ? `<div class="bst">${real}</div>` : '';
       if (!r) return `${head}<div class="bst"><span>${fz}沒有統計資料，對位表看本系</span></div>${realLine}</div>`;
       const abils = [top(r.use.abils.filter(([k]) => !r.mega.includes(k)), ABILS, 2), ...r.mega.map(k => `<b>${ABILS[k][0]}</b> 超級進化後固定`)].filter(Boolean).join('・');
-      return head + `<div class="bst"><span>常帶攻擊 <b>${oppAtkText(monUnit(m, team.fmt))}</b></span></div>`
+      return head + `<div class="bst"><span>常帶攻擊 <b>${oppAtkText(monUnit(m, team.fmt))}</b></span><span>對位算的招式（使用率前 4 招）<b>${top4Text(m.key)}</b></span></div>`
         + `<div class="bst">${abils ? `<span>特性 ${abils}</span>` : ''}${r.use.fixedItem ? megaItemHTML(r.use) : r.use.items.length ? `<span>道具 ${top(r.use.items, ITEMS, 3)}</span>` : ''}</div>`
         + realLine + useDetailsHTML(r) + '</div>';
     }).join('')
-    + `<p class="note">※「常帶攻擊」＝同屬性招式使用率加總 ${ROLE_PCT}% 以上的攻擊招式（輔助用、固定傷害、反擊類不算），對位表的「不怕」就是看這些；`
+    + `<p class="note">※「常帶攻擊」＝同屬性招式使用率加總 ${ROLE_PCT}% 以上的攻擊招式（輔助用、固定傷害、反擊類不算），只選屬性的隊員在對位表看的「不怕」就是這些；`
+    + '「對位算的招式」＝對位表、出招表算傷害時替牠算的招式（OP.GG 使用率前 4 招裡的攻擊招式，同挑寶可夢時預填的配招）；'
     + '特性列前 2 名、道具列前 3 名（超級進化型態的道具固定是自己的超級石，不看統計），「實戰」同「隊伍分析」熱門威脅檢查的說明。'
     + `「可能超級進化」＝選的是一般型態、但 OP.GG 道具統計有 ${ROLE_PCT}% 以上帶這顆超級石（% 是超級石使用率；沒有道具統計的每種都算），`
-    + '對位表會連進化後的屬性一起看；確定牠會進化就直接選超級進化型態。</p>';
+    + '對位表會連進化後的屬性一起看；確定牠會進化就按「改成超級進化」，只看進化後的。</p>';
 }
 function renderBring() {
   $('#pOpp').innerHTML = bring.opp.map((k, i) => `<button class="slot" data-i="${i}"${k ? ' title="點一下移除"' : ''}><span class="slot-n">第 ${i + 1} 隻</span>`
@@ -207,14 +214,26 @@ $('#pList').addEventListener('click', e => {
   const b = e.target.closest('[data-opp]');
   if (b) addOpp(b.dataset.opp);
 });
-// 對位表的格子、出招表的「傷害計算」：攻擊方放我方、防守方放對手，切到傷害計算並捲到最上面
+// 對位表的格子、出招表的「傷害計算」：攻擊方放我方、防守方放對手，切到傷害計算並捲到最上面。
+// 沒有滑鼠停留（手機）時，點對位表的格子先在表下方顯示誰先動與幾下打倒（格子的 title），再按「傷害計算」過去
 $('#pResult').addEventListener('click', e => {
+  const cell = e.target.closest('.vs-go');
+  if (cell && !matchMedia('(hover: hover)').matches) {
+    const d = cell.dataset;
+    $('#pCellTip').innerHTML = `<div class="c-sum">${escHTML(d.tip || '')}${d.ca ? `<button class="mini" data-ca="${d.ca}" data-cd="${d.cd}">傷害計算</button>` : ''}</div>`;
+    return;
+  }
   const b = e.target.closest('[data-ca]');
   if (!b) return;
   setCalcMon('atk', b.dataset.ca);
   setCalcMon('def', b.dataset.cd, true);
   showTab('calc');
   $('#p-calc').scrollIntoView({ block: 'start' });
+});
+// 對手情報的「改成超級進化／改回原型」：那一格換成另一個型態
+$('#pInfo').addEventListener('click', e => {
+  const b = e.target.closest('[data-omega]');
+  if (b && MON[b.dataset.k]) { bring.opp[+b.dataset.omega] = b.dataset.k; renderBring(); }
 });
 $('#pOpp').addEventListener('click', e => {
   const b = e.target.closest('.slot');

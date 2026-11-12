@@ -11,7 +11,8 @@
 //   bp＝對手各格剩下的 HP %（100 空白）、bs＝場上位置的能力變化（我方位置 1, 我方位置 2, 對手位置 1, 對手位置 2，每個「攻擊.防禦.特攻.特防.速度」，都 0 空白）、
 //   bi＝對手各格標的道具（沒標的空白、用預設，沒有道具寫 -）、bb＝對手各格選的特性、bx／by＝我方／對手各格選的型態、bw＝天氣、bf＝場地、br=1（戲法空間）、bg＝有順風的一方（me.opp）、
 //   bk＝我方這場帶的隊伍格子（. 分隔；照出戰選角時不寫，全部拿掉寫 -）、bv＝對手出場過的格子（. 分隔）、
-//   bu＝對手各格用過的招式（招式 key 用 + 接）、bz＝對手各格改過的能力點數與性格（「HP+攻擊+防禦+特攻+特防+速度.↑+↓」，沒改的那半空白）
+//   bu＝對手各格用過的招式（招式 key 用 + 接）、bz＝對手各格改過的能力點數與性格（「HP+攻擊+防禦+特攻+特防+速度.↑+↓」，沒改的那半空白）、
+//   bc＝異常狀態（我方 6 格, 對手 6 格；par／brn，沒有空白）、bl＝牆（我方.對手，各自 + 接）、bn＝我方道具沒了的格子（. 分隔）
 //   模擬對戰：sb＝我方自己點的帶出場格子（先發排第一，. 分隔；照出戰選角建議時不寫）、sv＝超級進化的格子（自己點過才寫）、
 //   sk＝對手每種帶法打幾場（10 不寫）、sa＝決策方式 fast／fine（標準 std 不寫）
 const STATE_KEY = 'pkmn-champions-state';
@@ -67,7 +68,9 @@ function stateQuery() {
     ['bi', joinTrim(battle.item)], ['bb', joinTrim(battle.ab)], ['bx', joinTrim(battle.form.me)], ['by', joinTrim(battle.form.opp)],
     ['bw', battle.weather], ['bf', battle.terrain], ['br', battle.tr ? '1' : ''], ['bg', battle.tw.join('.')],
     ['bk', battle.bring ? battle.bring.join('.') || '-' : ''], ['bv', battle.seen.map((v, i) => v ? i : -1).filter(i => i >= 0).join('.')],
-    ['bu', joinTrim(battle.used.map(u => u.join('+')))], ['bz', joinTrim(battle.osp.map(o => o ? `${o.sp ? o.sp.join('+') : ''}.${o.nat ? o.nat.join('+') : ''}` : ''))]]
+    ['bu', joinTrim(battle.used.map(u => u.join('+')))], ['bz', joinTrim(battle.osp.map(o => o ? `${o.sp ? o.sp.join('+') : ''}.${o.nat ? o.nat.join('+') : ''}` : ''))],
+    ['bc', joinTrim([...battle.status.me, ...battle.status.opp])], ['bl', BT_SIDES.some(s => battle.walls[s].length) ? BT_SIDES.map(s => battle.walls[s].join('+')).join('.') : ''],
+    ['bn', battle.noItem.map((v, i) => v ? i : -1).filter(i => i >= 0).join('.')]]
     .forEach(([k, v]) => { if (v) q.push(k + '=' + v); });
   if (sim.sel) {
     const pk = simMyPick();
@@ -164,7 +167,7 @@ function loadState(q) {
     return k;
   });
   battle.ab = cells(kv.bb).map((k, i) => bring.opp[i] && (Object.hasOwn(ABILS, k) || Object.hasOwn(ABIL_ZH, k)) ? k : '');
-  BT_SIDES.forEach(side => { battle.form[side] = cells(kv[side === 'me' ? 'bx' : 'by']).map((k, i) => btForms(side, i).some(m => m.key === k) && k !== btList(side)[i] ? k : ''); });
+  BT_SIDES.forEach(side => { battle.form[side] = cells(kv[side === 'me' ? 'bx' : 'by']).map((k, i) => btForms(side, i).some(m => m.key === k) && k !== btKey0(side, i) ? k : ''); });
   battle.weather = WEATHERS.includes(kv.bw) ? kv.bw : '';
   battle.terrain = TERRAINS.includes(kv.bf) ? kv.bf : '';
   battle.tr = kv.br === '1';
@@ -175,6 +178,12 @@ function loadState(q) {
   battle.seen = [0, 1, 2, 3, 4, 5].map(i => !!bring.opp[i] && slots(kv.bv).includes(i));
   // 對手用過的招式：資料裡有的招式、不重複、最多 4 招；改過的能力點數（6 項 0～32、合計不超過 66）／性格（↑↓ 1～5 不同，或 0+0 不加減）
   battle.used = cells(kv.bu).map((s, i) => bring.opp[i] ? [...new Set(s.split('+').filter(k => Object.hasOwn(MOVES, k)))].slice(0, 4) : []);
+  // 異常狀態只收 par／brn、有寶可夢的格子；牆只收 BT_WALLS 的、不重複；我方道具沒了只收挑了寶可夢的格子
+  const bc = (kv.bc || '').split(','), stOk = (k, list, i) => list[i] && BT_STATUS.some(([v]) => v && v === k) ? k : '';
+  battle.status = { me: [0, 1, 2, 3, 4, 5].map(i => stOk(bc[i], team.mons, i)), opp: [0, 1, 2, 3, 4, 5].map(i => stOk(bc[6 + i], bring.opp, i)) };
+  const bl = (kv.bl || '').split('.');
+  battle.walls = { me: BT_WALLS.filter(w => (bl[0] || '').split('+').includes(w)), opp: BT_WALLS.filter(w => (bl[1] || '').split('+').includes(w)) };
+  battle.noItem = [0, 1, 2, 3, 4, 5].map(i => !!team.mons[i] && slots(kv.bn).includes(i));
   battle.osp = cells(kv.bz).map((s, i) => {
     if (!bring.opp[i] || !s) return null;
     const [a = '', b = ''] = s.split('.'), sp = a.split('+').map(Number), nat = b.split('+').map(Number);

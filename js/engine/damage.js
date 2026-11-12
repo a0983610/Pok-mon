@@ -107,7 +107,8 @@ const WB_TYPE = { sun: 'fire', rain: 'water', sand: 'rock', snow: 'ice' };
 // 影響傷害的道具（只收 ITEMS 裡有的，也就是 OP.GG 有人帶的），從說明文字判斷效果，倍率照 Smogon 冠軍版：
 // 攻擊方 side a：屬性強化道具該屬性威力 ×1.2（4915）、力量頭帶／博識眼鏡物理／特殊威力 ×1.1（4505）、寶石該屬性威力 ×1.3（5325）、
 //   生命寶珠 ×1.3（5324）、達人帶效果絕佳時 ×1.2（4915）、電氣球皮卡丘攻擊特攻 ×2；
-// 防守方 side d：抗性樹果受到效果絕佳的該屬性招式傷害減半（只擋第一下）、氣勢披帶 HP 全滿時撐住會倒下的一擊（剩 1 HP）；
+// 防守方 side d：抗性樹果受到效果絕佳的該屬性招式傷害減半（只擋第一下）、氣勢披帶 HP 全滿時撐住會倒下的一擊（剩 1 HP）、
+//   氣球浮在空中：地面招式打不到、不吃場地（Showdown items.ts airballoon；被打中就破掉，對戰中自己標「沒有道具」，對戰模擬會打破）；
 // 兩邊都能帶 side ad：講究圍巾速度 ×1.5（不影響傷害，算在 speedOf）
 const TYPE_BY_ZH = Object.fromEntries(TYPES.map(t => [t.zh, t.id]));
 const DMG_ITEMS = {};
@@ -119,7 +120,8 @@ Object.entries(ITEMS).forEach(([k, [, e]]) => {
   else if ((m = e.match(/^受到效果絕佳的(.+?)屬性招式時，傷害會減半/)) && TYPE_BY_ZH[m[1]]) DMG_ITEMS[k] = { side: 'd', berry: TYPE_BY_ZH[m[1]] };
 });
 [['life-orb', { side: 'a', final: 5324 }], ['expert-belt', { side: 'a', se: 4915 }], ['light-ball', { side: 'a', mon: 'pikachu', atk: 8192 }],
-  ['focus-sash', { side: 'd', sash: true }], ['choice-scarf', { side: 'ad', spe: 6144 }]].forEach(([k, v]) => { if (ITEMS[k]) DMG_ITEMS[k] = v; });
+  ['focus-sash', { side: 'd', sash: true }], ['air-balloon', { side: 'd', balloon: true }], ['choice-scarf', { side: 'ad', spe: 6144 }]]
+  .forEach(([k, v]) => { if (ITEMS[k]) DMG_ITEMS[k] = v; });
 // 投資＝[能力點數 0～32, 性格 ×10（9 −性格／10／11 ＋性格）]，套在這招用到的那項能力（物理看攻擊／防禦、特殊看特攻／特防）；
 // 下面是快選檔位 [能力點數, 性格 ×10, 名稱]，也可以在畫面上自己輸入點數、選性格（HP 沒有性格）
 const ATK_INV = [[0, 10, '無投資'], [32, 10, '滿投資'], [32, 11, '滿投資＋性格']];
@@ -157,8 +159,9 @@ function speedPair(x, y, f) {
   const spd = [x, y].map(s => speedOf(s, { weather, terrain: f.terrain }));
   return { spd, first: spd[0].v === spd[1].v ? -1 : (spd[0].v > spd[1].v) !== !!f.tr ? 0 : 1 };
 }
-// 攻擊方 a：{ key, inv 投資 [點數, 性格], st { atk, spa } 能力變化, item, ab 特性 }；防守方 d：{ key, hp／inv 投資 [點數, 性格], st { def, spd }, item, ab, cur 目前剩下的 HP（沒給＝全滿） }
-// （投資也可以改給 sp／nat，見 invAt；a 另外可帶 set 給 dmgRows 用登錄的招式）；
+// 攻擊方 a：{ key, inv 投資 [點數, 性格], st { atk, spa, def（撲擊用） } 能力變化, item, ab 特性 }；防守方 d：{ key, hp／inv 投資 [點數, 性格], st { def, spd }, item, ab, cur 目前剩下的 HP（沒給＝全滿） }
+// （投資也可以改給 sp／nat，見 invAt；a 另外可帶 set 給 dmgRows 用登錄的招式）；d.noItem＝確定沒有道具（對戰中標了「沒有道具」：拍落不加成）；
+// 雙打時 a.field／d.field＝攻擊方／防守方場上還站著幾隻（沒給當 2）：範圍招式實際只打到 1 隻時不減傷（Showdown battle-actions.ts：targets.length > 1 才 spreadHit）；
 // o：{ fmt 's'／'d', weather, crit, terrain, hh 幫助, walls 防守方的牆, burn 攻擊方灼傷, bp 威力（對戰模擬給噴火、噴水這種隨 HP 變的；沒給照資料）}
 // （必定急所的招式不管 crit 都算急所）。不算的招式回傳 { skip 原因 }；
 // 沒有效果的回傳 eff 0（沒有 hp 以後的欄位；immuneBy＝讓招式無效的防守方特性，blockedBy＝其他原因的說明，如精神場地擋先制）；
@@ -177,8 +180,9 @@ function damageCalc(a, d, mk, o) {
   if (d.ab && !dab && DEF_ABILS.has(d.ab)) notes.add(`${abilZh(aab)}無視${abilZh(d.ab)}`);
   const offBy = [aab, d.ab].find(k => WEATHER_OFF.includes(k)), wthr = offBy ? '' : o.weather;
   if (offBy && o.weather) notes.add(`${abilZh(offBy)}讓天氣沒有作用`);
-  // 在地面上：不是飛行屬性、沒有飄浮（Smogon isGrounded；重力、黑色鐵球、氣球不在可選的道具裡，不用看）
-  const terr = o.terrain || '', aGround = !A.types.includes('flying') && aab !== 'levitate', dGround = !D.types.includes('flying') && dab !== 'levitate';
+  // 在地面上：不是飛行屬性、沒有飄浮、沒帶氣球（Smogon isGrounded；重力、黑色鐵球不在可選的道具裡，不用看）
+  const terr = o.terrain || '', balloon = DMG_ITEMS[d.item]?.balloon;
+  const aGround = !A.types.includes('flying') && aab !== 'levitate' && !DMG_ITEMS[a.item]?.balloon, dGround = !D.types.includes('flying') && dab !== 'levitate' && !balloon;
   // 招式屬性：氣象球隨天氣（超級日光當晴天）、大地波動隨場地、皮膚類把一般招式變屬性（氣象球、大地波動不會）、濕潤之聲把聲音招式變水
   let type = mtype, power = power0, ate = false;
   if (mk === 'weather-ball') {
@@ -191,14 +195,16 @@ function damageCalc(a, d, mk, o) {
   if (mk === 'rising-voltage' && terr === 'electric' && dGround) { power *= 2; notes.add(`${FIELD_ZH[terr]}威力 ×2`); }
   let [hits, hitNote] = HITS[mk] || [1], pb = false;
   if (aab === 'skill-link' && hitNote === VAR_HITS) [hits, hitNote] = [5, use(aab) && `${abilZh(aab)}固定 5 下`];
-  // 廣域戰力在精神場地（攻擊方在地面上）變成打所有對手
-  const spread = o.fmt === 'd' && (SPREAD.has(mk) || (mk === 'expanding-force' && terr === 'psychic' && aGround));
+  // 廣域戰力在精神場地（攻擊方在地面上）變成打所有對手；實際打到的：對手場上的，地震這種打周圍全部的（all-other-pokemon）再加自己的隊友
+  const hitN = (d.field ?? 2) + (MOVES[mk][8] === 'all-other-pokemon' ? (a.field ?? 2) - 1 : 0);
+  const spread = o.fmt === 'd' && hitN > 1 && (SPREAD.has(mk) || (mk === 'expanding-force' && terr === 'psychic' && aGround));
   if (aab === 'parental-bond' && hits === 1 && !spread) [hits, hitNote, pb] = [2, use(aab) && `${abilZh(aab)}：第 2 下傷害 ¼`, true];
   const scrappy = aab === 'scrappy' && (type === 'normal' || type === 'fighting') && D.types.includes('ghost') && use(aab);
   const r = { type, cat, power, hits, hitNote, spread, eff: eff(type, scrappy ? D.types.filter(t => t !== 'ghost') : D.types),
     crit: (o.crit || ALWAYS_CRIT.has(mk)) && !(['shell-armor', 'battle-armor'].includes(dab) && use(dab)) };
   if (ABIL_IMMUNE[dab] === type || (dab === 'bulletproof' && FLAG.bullet.has(mk)) || (dab === 'soundproof' && FLAG.sound.has(mk))
     || (['queenly-majesty', 'armor-tail'].includes(dab) && FLAG.priority.has(mk))) [r.eff, r.immuneBy] = [0, dab];
+  else if (r.eff && balloon && type === 'ground') [r.eff, r.blockedBy] = [0, `${ITEMS[d.item][0]}浮在空中`];
   else if (r.eff && terr === 'psychic' && dGround && FLAG.priority.has(mk)) [r.eff, r.blockedBy] = [0, `${FIELD_ZH.psychic}擋先制招式`];
   if (!r.eff) return r;
   // 本系 ×1.5；變幻自如／自由者每招都算本系；適應力本系再 +0.5
@@ -210,8 +216,8 @@ function damageCalc(a, d, mk, o) {
   r.hp = statOf(D.bs[0], invAt(d, 0, d.hp)[0], 0);
   // 剩下的 HP need：沒給 cur 或不少於最大 HP 都算全滿
   const full = !(d.cur < r.hp), need = full ? r.hp : Math.max(1, d.cur);
-  // 能力變化：急所時不計攻擊方的下降、防守方的上升；對方是天然就不計
-  let ast = ai === 1 ? a.st.atk : ai === 3 ? a.st.spa : 0;
+  // 能力變化：急所時不計攻擊方的下降、防守方的上升；對方是天然就不計（撲擊看自己防禦的能力變化）
+  let ast = (ai === 1 ? a.st.atk : ai === 3 ? a.st.spa : a.st.def) || 0;
   if (CHARGE_SPA.has(mk) && ai === 3) {
     ast = Math.max(-6, Math.min(6, ast + (aab === 'contrary' ? -1 : 1)));
     notes.add(aab === 'contrary' ? `出招前特攻 −1（${abilZh(aab)}）` : '出招前特攻 +1');
@@ -242,9 +248,9 @@ function damageCalc(a, d, mk, o) {
   if (tMove) notes.add(`${FIELD_ZH[terr]}威力 ×1.5`);
   if (tBoost) notes.add(`${FIELD_ZH[terr]} ×1.3`);
   if (tCut) notes.add(`${FIELD_ZH[terr]}威力 ×½`);
-  // 拍落：防守方有道具時威力 ×1.5（Smogon champions.ts）；超級進化帶的是自己的超級石，不算。一般寶可夢幾乎都帶道具，當作有帶；
+  // 拍落：防守方有道具時威力 ×1.5（Smogon champions.ts）；超級進化帶的是自己的超級石，不算。一般寶可夢幾乎都帶道具，當作有帶（標了確定沒有道具 noItem 的除外）；
   // 第一下就把道具拍掉，之後連用不再加倍（黏著拍不掉，每下都加倍）
-  const knock = mk === 'knock-off' && !D.base, keep = knock && dab === 'sticky-hold';
+  const knock = mk === 'knock-off' && !D.base && !d.noItem, keep = knock && dab === 'sticky-hold';
   if (knock) notes.add(keep ? `${abilZh(dab)}拍不掉道具，每下威力 ×1.5` : '第一下威力 ×1.5（對手有道具）');
   // 威力修正（依 Smogon 的順序；技術高手看這一下的威力 p；first＝整場第一下）
   const bpModsOf = (p, first) => {
@@ -348,10 +354,12 @@ function koText(ko) {
   return { n: n + 1, text: `亂數${NUM_ZH[n]}擊（${Math.min(99.9, Math.max(0.1, Math.round(ko[n] * 1000) / 10))}%）` };
 }
 // 攻擊方 a 打防守方 d（damageCalc 的格式）：a 在 o.fmt 的常用攻擊招式（a.set 有登錄招式就用登錄的，見 useOf；再加 extra）逐招算，
+// o.top＝沒登錄招式時只算 OP.GG 使用率前幾招（含變化招式一起排，同預填的配招 defaultSet；對位 duel 給 4，傷害計算分頁不給＝全部常用招式）；
 // ok 依最大傷害排序、why 是不算的招式依原因分組；kos 會被一擊打倒的招式、top 最痛的一招
 function dmgRows(a, d, o, extra) {
   const use = useOf(a.key, o.fmt, a.set)?.moves || [];
-  const list = use.filter(([k]) => MOVES[k][2] !== 'status');
+  const pool = o.top && !a.set?.moves?.some(Boolean) ? byUse(use).slice(0, o.top) : use;
+  const list = pool.filter(([k]) => MOVES[k][2] !== 'status');
   if (extra && !list.some(([k]) => k === extra)) list.push([extra, 0]);
   const rows = list.map(([k, p]) => ({ k, p, r: damageCalc(a, d, k, o) }));
   const ok = rows.filter(x => !x.r.skip).sort((x, y) => (y.r.max || 0) - (x.r.max || 0)), why = {};
@@ -368,22 +376,28 @@ function battler(key, fmt, set) {
 }
 // battler b 的最大 HP
 const hpOf = b => statOf(MON[b.key].bs[0], invAt(b, 0, b.hp)[0], 0);
-// 一對一對位：x、y 是 battler，對戰中另外帶 st { atk, def, spa, spd, spe } 能力變化、cur 目前剩下的 HP、tw 順風（沒給的當沒有、全滿）；
-// f：{ fmt, weather, terrain, tr, crit 雙方都急所（對戰中反推傷害用）}（沒給的當沒有）；灼傷、麻痺、幫助、牆、開場特性都不算。
+// 一對一對位：x、y 是 battler，對戰中另外帶 st { atk, def, spa, spd, spe } 能力變化、cur 目前剩下的 HP、tw 順風（沒給的當沒有、全滿）、
+// noItem 確定沒有道具、field 這一方場上還站著幾隻（見 damageCalc）、status 異常狀態（'brn' 灼傷：物理招式減半，毅力不減反而攻擊 ×1.5；
+// 'par' 麻痺：速度 ×½，飛毛腿不減反而 ×1.5）、walls 這一方的牆（反射壁、光牆、極光幕）；沒登錄招式的一方只算 OP.GG 使用率前 4 招（dmgRows 的 o.top，同預填的配招）；
+// f：{ fmt, weather, terrain, tr, crit 雙方都急所（對戰中反推傷害用）}（沒給的當沒有）；幫助、開場特性不算。
 // 道具兩個方向都帶著（damageCalc 只讀這個方向用得到的效果，如攻擊方不看樹果）。
 // 回傳 xy＝x 打 y、yx＝y 打 x（dmgRows 的結果）、spd／first（speedPair：first 0＝x 先動、1＝y 先動、-1＝同速）
 function duel(x, y, f) {
-  const o = { fmt: f.fmt, weather: f.weather || '', crit: !!f.crit, terrain: f.terrain || '', hh: false, walls: [], burn: false };
+  const o = { fmt: f.fmt, weather: f.weather || '', crit: !!f.crit, terrain: f.terrain || '', hh: false, top: 4 };
   const st = (b, k) => b.st?.[k] || 0;
-  const atk = b => ({ key: b.key, inv: b.atkInv, sp: b.sp, nat: b.nat, st: { atk: st(b, 'atk'), spa: st(b, 'spa') }, item: b.item, ab: b.ab, set: b.set });
-  const def = b => ({ key: b.key, hp: b.hp, inv: b.defInv, sp: b.sp, nat: b.nat, st: { def: st(b, 'def'), spd: st(b, 'spd') }, item: b.item, ab: b.ab, cur: b.cur });
-  const spe = b => ({ key: b.key, inv: b.speInv, sp: b.sp, nat: b.nat, st: st(b, 'spe'), item: b.item, ab: b.ab, tw: !!b.tw });
-  return { xy: dmgRows(atk(x), def(y), o), yx: dmgRows(atk(y), def(x), o), ...speedPair(spe(x), spe(y), { weather: o.weather, terrain: o.terrain, tr: !!f.tr }) };
+  const atk = b => ({ key: b.key, inv: b.atkInv, sp: b.sp, nat: b.nat, st: { atk: st(b, 'atk'), spa: st(b, 'spa'), def: st(b, 'def') }, item: b.item, ab: b.ab, set: b.set, field: b.field });
+  const def = b => ({ key: b.key, hp: b.hp, inv: b.defInv, sp: b.sp, nat: b.nat, st: { def: st(b, 'def'), spd: st(b, 'spd') }, item: b.item, ab: b.ab, cur: b.cur,
+    noItem: b.noItem, field: b.field });
+  const spe = b => ({ key: b.key, inv: b.speInv, sp: b.sp, nat: b.nat, st: st(b, 'spe'), item: b.item, ab: b.ab, tw: !!b.tw, par: b.status === 'par', status: !!b.status });
+  // a 打 d 這個方向：d 那一方的牆、a 灼傷（毅力有異常狀態就照灼傷的算法：攻擊 ×1.5、不減半，同對戰模擬）
+  const dir = (a, d) => ({ ...o, walls: d.walls || [], burn: a.status === 'brn' || (a.ab === 'guts' && !!a.status) });
+  return { xy: dmgRows(atk(x), def(y), dir(x, y)), yx: dmgRows(atk(y), def(x), dir(y, x)), ...speedPair(spe(x), spe(y), { weather: o.weather, terrain: o.terrain, tr: !!f.tr }) };
 }
-// dmgRows 的結果裡最快打倒對方的：n＝連用同一招幾下打倒（每招取打倒機率過半的次數，取最少的；四擊打不倒是 9）、
-// pri＝有沒有先制招式也是 n 下打倒
+// dmgRows 的結果裡最快打倒對方的：n＝連用同一招幾下打倒（每招取打倒機率一半以上的次數，取最少的；四擊打不倒是 9）、
+// pri＝有沒有先制招式也是 n 下打倒。擊掌奇襲、迎頭一擊只有上場後第一回合能用（FIRST_TURN），只算一下打倒的
+const FIRST_TURN = new Set(['fake-out', 'first-impression']);
 function fastestKO(rows) {
-  const ns = rows.ok.map(x => [x.r.ko ? x.r.ko.findIndex(p => p >= 0.5) + 1 || 9 : 9, FLAG.priority.has(x.k)]);
+  const ns = rows.ok.map(x => { const h = x.r.ko ? x.r.ko.findIndex(p => p >= 0.5) + 1 || 9 : 9; return [FIRST_TURN.has(x.k) && h > 1 ? 9 : h, FLAG.priority.has(x.k)]; });
   const n = Math.min(9, ...ns.map(([h]) => h));
   return { n, pri: n < 9 && ns.some(([h, p]) => p && h === n) };
 }

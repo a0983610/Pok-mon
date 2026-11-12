@@ -42,6 +42,7 @@ const segHTML = (list, [sp, nat]) => list.map((x, i) => `<button data-v="${i}" a
 function itemNote(v) {
   if (v.berry) return `${T[v.berry].zh}招式效果絕佳時減半`;
   if (v.sash) return 'HP 全滿時撐住一擊';
+  if (v.balloon) return '地面招式打不到，被打中就破';
   if (v.type) return `${T[v.type].zh}招式 ×${v.gem ? '1.3，限一次' : '1.2'}`;
   if (v.cat) return `${CAT_ZH[v.cat]}招式 ×1.1`;
   if (v.final) return '×1.3';
