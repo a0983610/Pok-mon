@@ -15,8 +15,15 @@ const sim = { sel: null, lead: -1, evo: -1, k: 10, algo: 'std', run: null, res: 
 const simAlgo = id => SIM_ALGOS.find(a => a.id === id) || SIM_ALGOS[1];
 // 預估時間的文字：秒數不到 1 分鐘寫秒，不然寫分鐘
 const simEta = ms => ms < 60000 ? `${Math.max(1, Math.round(ms / 1000))} 秒` : `${Math.round(ms / 60000)} 分鐘`;
-// 我方：隊伍分析挑了寶可夢的隊員（只選屬性的沒有能力值，不算）；這場要帶幾隻（單打 3 隻，不到 3 隻就全帶）
-const simMine = () => team.mons.map((k, i) => k ? { key: k, set: team.sets[i], slot: i } : null).filter(Boolean);
+// 我方：隊伍分析挑了寶可夢的隊員（只選屬性的沒有能力值，不算）；這場要帶幾隻（單打 3 隻，不到 3 隻就全帶）。
+// 模擬只做單打：隊伍分析切在雙打、配招還是雙打的預填（沒改過）時改用單打的預填
+const simSetOf = (k, s) => team.fmt === 'd' && s && JSON.stringify(s) === JSON.stringify(defaultSet(k, 'd')) ? defaultSet(k, 's') : s;
+const simMine = () => team.mons.map((k, i) => k ? { key: k, set: simSetOf(k, team.sets[i]), slot: i } : null).filter(Boolean);
+// 這隻在模擬裡不算的招式（simCanUse 以外，見規則的「不算」）與有沒有攻擊招式
+function simSkipped(x) {
+  const ks = (x.set?.moves.some(Boolean) ? x.set : defaultSet(x.key, 's'))?.moves.filter(Boolean) || [];
+  return { skip: ks.filter(k => MOVES[k] && !simCanUse(k)), atk: ks.some(k => MOVES[k] && simCanUse(k) && !SIM_SUP[k]) };
+}
 const simNeedN = () => Math.min(BRING_N.s, simMine().length);
 const simPctText = (x, n) => n ? `${Math.round(x / n * 1000) / 10}%` : '—';
 // 這場我方帶誰：{ slots 帶的格子（先發排第一；點選中可能不到 3 隻）, evo, custom 是不是自己點的 }
@@ -42,8 +49,12 @@ const simDropLive = () => { if (sim.tree?.live) sim.tree = null; };
 function renderSim() {
   const mine = simMine(), pk = simMyPick(), need = simNeedN(), nOpp = bring.opp.filter(Boolean).length;
   const seg = (id, list, cur) => document.querySelectorAll(`#${id} button`).forEach((b, i) => b.setAttribute('aria-pressed', list[i] === cur));
+  const skipText = x => { const s = simSkipped(x); return !s.atk ? '<span class="meta">⚠ 模擬裡沒有攻擊招式</span>'
+    : s.skip.length ? `<span class="meta">不算：${s.skip.map(k => MOVES[k][0]).join('、')}</span>` : ''; };
   $('#sMine').innerHTML = mine.length ? mine.map(x => `<button class="mini" data-slot="${x.slot}" aria-pressed="${pk.slots.includes(x.slot)}">`
-    + `${x.slot + 1} ${MON[x.key].zh}${chips(MON[x.key].types)}</button>`).join('') : '<span class="muted small">先到「隊伍分析」挑好我方寶可夢（只選屬性的不算）。</span>';
+    + `${x.slot + 1} ${MON[x.key].zh}${chips(MON[x.key].types)}${skipText(x)}</button>`).join('')
+    + (team.fmt === 'd' ? '<span class="muted small">模擬只做單打：目前切在雙打，建議的帶法、對手帶法的排名、沒改過的預填配招都照單打算。</span>' : '')
+    : '<span class="muted small">先到「隊伍分析」挑好我方寶可夢（只選屬性的不算）。</span>';
   $('#sLeadRow').hidden = !pk.slots.length;
   $('#sLead').innerHTML = pk.slots.map(i => `<button data-lead="${i}" aria-pressed="${i === pk.slots[0]}">${MON[team.mons[i]].zh}</button>`).join('');
   const megas = pk.slots.filter(i => MON[team.mons[i]].base), up = megas.includes(pk.evo) ? pk.evo : megas[0];
@@ -68,7 +79,8 @@ function renderSim() {
     : !r ? '' : r.n < r.total ? `已停止，只跑了 ${r.n} 場。` : `完成 ${r.n} 場。`;
   $('#sResult').innerHTML = r ? simResultHTML(r)
     : '<p class="empty">按「開始模擬」後，這裡會列出對手每一種帶法下我方的勝率（最難應付的在前），點「看怎麼打」看開局雙方各種出招的勝率。</p>';
-  renderSimTree();
+  // 正在填「改成實戰的結果」時不重畫推演（賽前整批跑完會呼叫這裡，填到一半的會被洗掉；推演的內容和這裡無關）
+  if (!sim.tree?.edit) renderSimTree();
   saveState();
 }
 // 背景計算（js/engine/sim-worker.js）開幾個：電腦的執行緒數減 1（留一個給畫面），最多 SIM_WK_MAX；
@@ -167,20 +179,24 @@ function simRulesText() {
     + '雙方再各自找「對手不管怎麼應對都最不吃虧」的出法（同時出招的賽局解：可能是幾種選擇按比例混著出，像 70% 換人、30% 留場打，'
     + '只固定出一種會被對手抓到），照比例抽一種；倒下後換上誰也用同樣方法決定。'
     + '實測讓雙方用不同方式對打，標準、精細對快速的勝率約 60%、69%。實際出招時傷害抽 16 段亂數、'
-    + '急所機率 1/24（容易擊中要害的招式、超幸運、焦點鏡各提高一級：1/8、1/2、必定），同速各 50%。'
+    + '急所機率 1/24（容易擊中要害的招式、超幸運、焦點鏡各提高一級：1/8、1/2、必定），同速各 50%（用簡單規則往下打時同速照回合輪流誰先，免得偏向一方）。'
+    + '倒下補位換上來又被撒菱類打倒的，再補到有人站著才打下一回合。'
     + '我方照「隊伍分析」登錄的配招（沒登錄的照 OP.GG 常見），對手照 OP.GG 使用率前 4 招、最常見的特性、能力點數與性格，道具同一隊不重複（使用率高的先拿）。'
     + '攻擊招式算傷害，加上招式本身的效果：擊掌奇襲、迎頭一擊只有上場後第一回合能用；大爆炸、自爆、薄霧炸裂用了自己倒下；'
     + '破壞光線等下一回合不能動；日光束、日光刃、電光束、挖洞、潛靈奇襲要先蓄力一回合（沒有天氣；挖洞、潛靈奇襲蓄力時打不到）；預知未來兩回合後打中；'
     + '突襲在對手沒出攻擊招式時失敗、快手還擊只在對手出先制招式時有效；流星群、近身戰等自己的能力變化（換下場歸零）；'
-    + '勇鳥猛攻等反作用力、吸取拳等吸血、生命寶珠扣 1/10、鐵蹄光線扣一半；急速折返等打完換人、龍尾吼叫等讓對手換人；講究圍巾鎖招；氣勢披帶、抗性樹果用掉、拍落打掉道具。'
+    + '勇鳥猛攻等反作用力、吸取拳等吸血、生命寶珠扣 1/10、鐵蹄光線扣一半；急速折返等打完換人、龍尾吼叫等讓對手換人；講究圍巾鎖招（被拍落就解除）；'
+    + '氣勢披帶、抗性樹果、寶石用掉，氣球被打中就破，拍落打掉道具。欺詐用對手的攻擊算；地球上投、黑夜魔影固定 50、憤怒門牙打掉一半、蠻幹打到和自己一樣、'
+    + '搏命打掉自己的 HP 後倒下；雙倍奉還、鏡面反射、金屬爆炸把這回合被打的物理／特殊／全部傷害 ×2／×2／×1.5 還回去（沒被打到就失敗）。'
     + '輔助招：強化（劍舞、詭計、龍之舞、破殼、腹鼓…）、守住類（守住、看穿、王者盾牌、尖刺防守、碉堡、挺住；連續用成功率 1/3、1/9…）、'
     + '回復（自我再生、羽棲、祈願、分擔痛楚、睡覺、吸取力量、寄生種子、治癒之願）、異常狀態（鬼火、劇毒、電磁波、哈欠、催眠粉…）、'
     + '撒菱類（隱形岩、撒菱、毒菱、黏黏網；清除濃霧、高速旋轉清掉）、擾亂（再來一次、挑釁、替身、反射壁、光牆、極光幕、吼叫、吹飛、黑霧、撒嬌等降對手能力、拋下狠話、臨別禮物）。'
     + '異常狀態照冠軍版：燒傷每回合扣 1/16 且物攻減半、中毒 1/8、劇毒 1/16 起逐回合加重、麻痺速度減半且 1/8 不能動、睡眠 2～3 回合。'
     + '道具與特性：吃剩的東西、文柚果、木子果、零餘果、凸凸頭盔、光之黏土、大根莖、貝殼之鈴、白色香草、心靈香草、氣球；'
     + '再生力、自然回復、毒療、蛻皮、魔法防守、惡作劇之心、黃金之軀、魔法鏡、毅力、同步、唱反調、恆淨之軀、鏡甲、不服輸、好勝、粗糙皮膚、各種異常免疫特性。'
-    + '不算：攻擊招式的機率性追加效果（畏縮、灼傷、降能力…）、天氣場地（極光幕只有特性降雪的能用）、出場特性（如威嚇）、命中率（當全中）、'
-    + '戲法空間、順風、同命、接棒、戲法、滅亡之歌等其他輔助招，逆鱗的連續攻擊與混亂、羽棲當回合失去飛行屬性；'
+    + '不算：攻擊招式的追加效果（畏縮、灼傷、降能力…，連擊掌奇襲必定畏縮、冰凍之風必定降速度這種一定會發生的也不算）、天氣場地（極光幕只有特性降雪的能用）、出場特性（如威嚇）、命中率（當全中）、'
+    + '一擊必殺（地裂、角鑽、絕對零度；命中率當全中會變成必中，所以不列）、看體重的招式（打草結、重磅衝撞等，資料沒有體重）、變身，'
+    + '戲法空間、順風、同命、接棒、戲法、滅亡之歌等其他輔助招，逆鱗的連續攻擊與混亂、羽棲當回合失去飛行屬性（不算的招式不會出，我方帶的隻上面會標）；'
     + '連續攻擊招式照「傷害計算」以 3 下計，雜技、掃墓等威力會變的招式照資料的威力（噴火、噴水會隨 HP 變小）。'
     + 'PP 照 OP.GG 冠軍版的數值（如羽棲、守住 8、地震 12），用一次扣 1、對手特性壓迫感時扣 2；能用的招式都沒 PP 時只能換人或掙扎（威力 50、沒有屬性，自己扣 1/4）。'
     + '連續兩回合雙方都沒扣血也沒換人時，打不到對方的攻擊招式就不能選（不然會原地空轉）；雙方同時全倒時最後倒下的一方贏（第五世代起的規則，同 Showdown：打倒對手最後一隻後被反作用力打倒算贏、大爆炸同歸於盡算輸）；打滿 100 回合算平手。'
@@ -198,10 +214,12 @@ function simOpenTree(i) {
   renderSim();
   simCalcTree();
 }
-// 看到對手先發（對手第 slot 格）：我方照上面點的帶法，對手後排先猜「對手可能帶的」帶法裡有這隻先發、排名最高的那種
+// 看到對手先發（對手第 slot 格）：我方照上面點的帶法，對手後排先猜「對手可能帶的」帶法裡會派這隻先發、排名最高的那種（見 simOppRoster）。
+// 同一隻先發已經推演了幾步時再點一次，先確認要不要重來
 function simStartLive(slot) {
-  const mine = simMine(), pk = simMyPick();
+  const mine = simMine(), pk = simMyPick(), t = sim.tree;
   if (pk.slots.length !== simNeedN()) return;
+  if (t?.live && t.lead === slot && t.path.length > 1 && !confirm(`重新從開局推演？目前已經推到第 ${t.path.length - 1} 步。`)) return;
   const roster = simOppRoster(bring.opp, mine.map(x => x.key), 's'), g = roster?.guess(slot);
   if (!g) return;
   const sides = [{ mons: simMySide(mine, pk.slots, pk.evo, 's') }, { mons: simOppSide(roster, g.slots, g.evo, 's') }];
@@ -328,7 +346,7 @@ function renderSimTree() {
     + body
     + '<p class="note">※ 每一層總共往下打約 3000 次、平均分給每一格（格子上停著看次數），樹搜尋與規則見最下面的「規則細節」。'
     + '往下一步是照期望值打（傷害取平均、不會急所、麻痺不會不能動、同速我方先、打完換人照簡單規則挑），實戰會有運氣差，可以改成實戰的結果再往下算。'
-    + (t.live ? '對手還沒上場的後排是猜的（「出戰選角」的「對手可能帶的」帶法裡有這隻先發、排名最高的那種），對手每一隻的配招、道具照 OP.GG 常見。' : '') + '</p>'
+    + (t.live ? '對手還沒上場的後排是猜的（「出戰選角」的「對手可能帶的」帶法裡會派這隻先發、排名最高的那種；沒有一種會派牠先發就取有帶牠的），對手每一隻的配招、道具照 OP.GG 常見。' : '') + '</p>'
     + `<details class="b-more note"><summary>規則細節</summary>${simRulesText()}</details>`;
 }
 $('#sMine').addEventListener('click', e => {
@@ -336,8 +354,9 @@ $('#sMine').addEventListener('click', e => {
   if (!b || sim.run) return;
   simEditPick();
   const i = +b.dataset.slot;
+  // 點滿了再點：換掉最早點的（先發不換，免得先發默默跳到別隻）
   if (sim.sel.includes(i)) sim.sel = sim.sel.filter(x => x !== i);
-  else { sim.sel.push(i); if (sim.sel.length > simNeedN()) sim.sel.shift(); }
+  else { sim.sel.push(i); if (sim.sel.length > simNeedN()) sim.sel.splice(Math.max(0, sim.sel.findIndex(x => x !== sim.lead)), 1); }
   simDropLive();
   renderSim();
 });

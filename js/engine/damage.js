@@ -23,8 +23,8 @@ const HITS = { 'dragon-darts': [2], 'dual-wingbeat': [2], 'twin-beam': [2], 'tri
   'bullet-seed': [3, VAR_HITS], 'icicle-spear': [3, VAR_HITS], 'pin-missile': [3, VAR_HITS], 'rock-blast': [3, VAR_HITS], 'scale-shot': [3, VAR_HITS], 'water-shuriken': [3, VAR_HITS] };
 // 特殊招式但打對手防禦的（Smogon 的 overrideDefensiveStat）；撲擊用自己的防禦當攻擊
 const HIT_DEF = new Set(['psyshock', 'psystrike', 'secret-sword']);
-// 不算的攻擊招式與原因；威力是 null 的（看體重、HP、速度，或固定傷害、一擊必殺）也不算
-const NO_CALC = { 'foul-play': '用對手的攻擊計算' };
+// 不算的攻擊招式與原因；威力是 null 的（看體重、HP、速度，或固定傷害、一擊必殺）也不算（欺詐改成算了：用防守方的攻擊，見 damageCalc）
+const NO_CALC = {};
 const canCalc = k => MOVES[k][2] !== 'status' && MOVES[k][3] != null && !NO_CALC[k];
 // 必定急所的招式（說明寫「必定／一定會擊中要害」，同 Smogon moves.ts 的 willCrit）
 const ALWAYS_CRIT = new Set(Object.keys(MOVES).filter(k => /(必定|一定)會?擊中要害/.test(MOVES[k][4])));
@@ -159,7 +159,8 @@ function speedPair(x, y, f) {
   const spd = [x, y].map(s => speedOf(s, { weather, terrain: f.terrain }));
   return { spd, first: spd[0].v === spd[1].v ? -1 : (spd[0].v > spd[1].v) !== !!f.tr ? 0 : 1 };
 }
-// 攻擊方 a：{ key, inv 投資 [點數, 性格], st { atk, spa, def（撲擊用） } 能力變化, item, ab 特性 }；防守方 d：{ key, hp／inv 投資 [點數, 性格], st { def, spd }, item, ab, cur 目前剩下的 HP（沒給＝全滿） }
+// 攻擊方 a：{ key, inv 投資 [點數, 性格], st { atk, spa, def（撲擊用） } 能力變化, item, ab 特性 }；防守方 d：{ key, hp／inv 投資 [點數, 性格], st { def, spd, atk（欺詐用） }, item, ab,
+// cur 目前剩下的 HP（沒給＝全滿）, atkInv 攻擊投資（欺詐用；沒有 sp 時才看） }
 // （投資也可以改給 sp／nat，見 invAt；a 另外可帶 set 給 dmgRows 用登錄的招式）；d.noItem＝確定沒有道具（對戰中標了「沒有道具」：拍落不加成）；
 // 雙打時 a.field／d.field＝攻擊方／防守方場上還站著幾隻（沒給當 2）：範圍招式實際只打到 1 隻時不減傷（Showdown battle-actions.ts：targets.length > 1 才 spreadHit）；
 // o：{ fmt 's'／'d', weather, crit, terrain, hh 幫助, walls 防守方的牆, burn 攻擊方灼傷, bp 威力（對戰模擬給噴火、噴水這種隨 HP 變的；沒給照資料）}
@@ -211,19 +212,22 @@ function damageCalc(a, d, mk, o) {
   const own = A.types.includes(type);
   r.stab = 4096 + (own || (['protean', 'libero'].includes(aab) && use(aab)) ? 2048 : 0) + (aab === 'adaptability' && own && use(aab) ? 2048 : 0);
   const ai = mk === 'body-press' ? 2 : cat === 'physical' ? 1 : 3, di = cat === 'physical' || HIT_DEF.has(mk) ? 2 : 4;
-  const [asp, anat] = invAt(a, ai, a.inv), [dsp, dnat] = invAt(d, di, d.inv);
+  // 欺詐：攻擊用防守方的攻擊能力值與攻擊的能力變化（Showdown overrideOffensivePokemon 'target'）；防守方的攻擊投資看 d.sp，沒有再看 d.atkInv，都沒有算 0 點
+  const foul = mk === 'foul-play';
+  if (foul) notes.add(`用${D.zh}的攻擊計算`);
+  const [asp, anat] = foul ? invAt(d, 1, d.atkInv || [0, 10]) : invAt(a, ai, a.inv), [dsp, dnat] = invAt(d, di, d.inv);
   const ait = DMG_ITEMS[a.item] || {}, dit = DMG_ITEMS[d.item] || {};
   r.hp = statOf(D.bs[0], invAt(d, 0, d.hp)[0], 0);
   // 剩下的 HP need：沒給 cur 或不少於最大 HP 都算全滿
   const full = !(d.cur < r.hp), need = full ? r.hp : Math.max(1, d.cur);
   // 能力變化：急所時不計攻擊方的下降、防守方的上升；對方是天然就不計（撲擊看自己防禦的能力變化）
-  let ast = (ai === 1 ? a.st.atk : ai === 3 ? a.st.spa : a.st.def) || 0;
+  let ast = (foul ? d.st.atk : ai === 1 ? a.st.atk : ai === 3 ? a.st.spa : a.st.def) || 0;
   if (CHARGE_SPA.has(mk) && ai === 3) {
     ast = Math.max(-6, Math.min(6, ast + (aab === 'contrary' ? -1 : 1)));
     notes.add(aab === 'contrary' ? `出招前特攻 −1（${abilZh(aab)}）` : '出招前特攻 +1');
   }
   const dst = di === 2 ? d.st.def : d.st.spd;
-  let atk = statOf(A.bs[ai], asp, ai, anat);
+  let atk = statOf((foul ? D : A).bs[ai], asp, ai, anat);
   if (ast && !(r.crit && ast < 0) && !(dab === 'unaware' && use(dab))) atk = stageStat(atk, ast);
   if (aab === 'hustle' && cat === 'physical' && use(aab)) atk = pokeRound(atk * 3 / 2);
   const atMods = [];
@@ -386,8 +390,8 @@ function duel(x, y, f) {
   const o = { fmt: f.fmt, weather: f.weather || '', crit: !!f.crit, terrain: f.terrain || '', hh: false, top: 4 };
   const st = (b, k) => b.st?.[k] || 0;
   const atk = b => ({ key: b.key, inv: b.atkInv, sp: b.sp, nat: b.nat, st: { atk: st(b, 'atk'), spa: st(b, 'spa'), def: st(b, 'def') }, item: b.item, ab: b.ab, set: b.set, field: b.field });
-  const def = b => ({ key: b.key, hp: b.hp, inv: b.defInv, sp: b.sp, nat: b.nat, st: { def: st(b, 'def'), spd: st(b, 'spd') }, item: b.item, ab: b.ab, cur: b.cur,
-    noItem: b.noItem, field: b.field });
+  const def = b => ({ key: b.key, hp: b.hp, inv: b.defInv, sp: b.sp, nat: b.nat, st: { def: st(b, 'def'), spd: st(b, 'spd'), atk: st(b, 'atk') }, item: b.item, ab: b.ab, cur: b.cur,
+    noItem: b.noItem, field: b.field, atkInv: b.atkInv });
   const spe = b => ({ key: b.key, inv: b.speInv, sp: b.sp, nat: b.nat, st: st(b, 'spe'), item: b.item, ab: b.ab, tw: !!b.tw, par: b.status === 'par', status: !!b.status });
   // a 打 d 這個方向：d 那一方的牆、a 灼傷（毅力有異常狀態就照灼傷的算法：攻擊 ×1.5、不減半，同對戰模擬）
   const dir = (a, d) => ({ ...o, walls: d.walls || [], burn: a.status === 'brn' || (a.ab === 'guts' && !!a.status) });
