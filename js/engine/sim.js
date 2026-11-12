@@ -1,8 +1,9 @@
 // 計算引擎：資料與純邏輯，不碰 DOM（畫面在 js/ui/）
 // ---------- 對戰模擬（單打：6 選 3，雙方每回合同時出招） ----------
-// 算攻擊招式的傷害與招式本身附帶的效果（使用限制、自己的能力變化、反作用力與吸血、打完換人），
+// 算攻擊招式的傷害與招式本身附帶的效果（使用限制、自己的能力變化、反作用力與吸血、打完換人、追加效果見 SIM_SEC）、命中率（見 simAcc），
 // 加上輔助招（強化、守住、回復、異常狀態、撒菱、擾亂，見 SIM_SUP）與相關的道具、特性、回合結束效果，以及 PP（照 OP.GG 冠軍版的 PP，用完只能掙扎）。
-// 不算：攻擊招式的機率性追加效果（畏縮、灼傷、降能力…）、天氣場地、威嚇以外的出場特性、命中率（當全中）。
+// 看場上狀況的特性：猛火類、大將（simCalc）、畫皮（simDisguised）、加速（simEnd）、踩影（simOpts）。
+// 不算：天氣場地、威嚇以外的出場特性、命中閃避的能力變化、少數特殊的追加效果（見 SIM_SEC 上方）。
 // 各表的資料來源寫在表的上方；Showdown＝Pokémon Showdown 的 data/moves.ts、conditions.ts、items.ts、abilities.ts、
 // sim/battle-actions.ts、sim/battle.ts，冠軍版改過的照 data/mods/champions/（conditions.ts、moves.ts、abilities.ts）。
 
@@ -17,8 +18,8 @@ const SIM_FIXED = { 'seismic-toss': () => 50, 'night-shade': () => 50, 'super-fa
 // 反擊類：這回合被對手打的傷害 × 倍數還回去（雙倍奉還只還物理、鏡面反射只還特殊，先制 −5；金屬爆炸都還、×1.5，要比對手晚出招）；
 // 這回合沒被打到就失敗（Showdown counter／mirrorcoat／metalburst）
 const SIM_REACT = { counter: { cat: 'physical', x: 2 }, 'mirror-coat': { cat: 'special', x: 2 }, 'metal-burst': { cat: '', x: 1.5 } };
-// 一擊必殺（Showdown data/moves.ts 的 ohko、sim/battle-actions.ts 的命中判定；冠軍版 mod 沒改）：其他招式當全中，只有這幾招照命中率（固定 30，
-// 不吃命中閃避變化）；絕對零度不是冰屬性的用時命中率 20、打冰屬性沒有效果；特性結實不受影響（破格無視結實）；打中就倒下（氣勢披帶、挺住撐得住）。
+// 一擊必殺（Showdown data/moves.ts 的 ohko、sim/battle-actions.ts 的命中判定；冠軍版 mod 沒改）：命中率固定 30（不吃 simAcc 的修正，
+// 雙方任一隻特性無防守就必中）；絕對零度不是冰屬性的用時命中率 20、打冰屬性沒有效果；特性結實不受影響（破格無視結實）；打中就倒下（氣勢披帶、挺住撐得住）。
 // 照亂數打時抽中不中，期望值時算打掉剩下的 HP × 命中率
 const SIM_OHKO = new Set(['fissure', 'horn-drill', 'sheer-cold', 'guillotine']);
 // 容易擊中要害（急所等級 +1）的招式（Showdown critRatio 2）；必定急所的看 damageCalc（ALWAYS_CRIT）
@@ -41,6 +42,50 @@ const SIM_RECOIL = { 'brave-bird': [33, 100], 'double-edge': [33, 100], 'flare-b
 // 吸血：回復打出的傷害 × 比例，四捨五入、至少 1（Showdown drain）；道具大根莖 ×1.3（5324/4096，Showdown bigroot）
 const SIM_DRAIN = { 'bitter-blade': [1, 2], 'drain-punch': [1, 2], 'giga-drain': [1, 2], 'horn-leech': [1, 2], 'leech-life': [1, 2],
   'matcha-gotcha': [1, 2], 'parabolic-charge': [1, 2], 'draining-kiss': [3, 4] };
+// 攻擊招式的追加效果（Showdown data/moves.ts 的 secondary／secondaries，冠軍版 mods/champions/moves.ts 改過的照改：鐵頭畏縮 20%、
+// 月亮之力降特攻 10%、冷凍乾燥沒有追加效果、剋命爪 30% 隨機中毒／麻痺／睡眠；OP.GG 的資料缺幾招、也沒有冠軍版的修改，所以不用）。
+// 每項：c 機率 %；s 對手陷入異常狀態（陣列＝隨機一種）、fl 對手畏縮、cf 對手混亂、d 對手的能力變化、me 自己的能力變化。
+// 打在替身上、對手倒下時，對手那邊的不算、自己的照算；特性強行沒有追加效果（FLAG.secondary 的招式，威力 ×1.3 在 damageCalc）。
+// 機率 100% 的自己能力變化（流水旋舞、蓄能焰襲等）寫在 SIM_SELF，晶光轉轉的中毒見 simMove。
+// 不算：魅誘之聲、妒火（要對手這回合能力上升過）、鹽醃、地獄突刺、縫影、泡影的詠歎調、精神噪音、糖漿炸彈這些特殊狀態，濁流、暗黑爆破的降命中
+const SIM_SEC = {
+  'acid-spray': [{ c: 100, d: { spd: -2 } }], 'air-slash': [{ c: 30, fl: 1 }], 'ancient-power': [{ c: 10, me: { atk: 1, def: 1, spa: 1, spd: 1, spe: 1 } }],
+  'apple-acid': [{ c: 100, d: { spd: -1 } }], 'barb-barrage': [{ c: 50, s: 'psn' }], 'bite': [{ c: 30, fl: 1 }],
+  'bitter-malice': [{ c: 100, d: { atk: -1 } }], 'blaze-kick': [{ c: 10, s: 'brn' }], 'blizzard': [{ c: 10, s: 'frz' }],
+  'body-slam': [{ c: 30, s: 'par' }], 'bug-buzz': [{ c: 10, d: { spd: -1 } }], 'bulldoze': [{ c: 100, d: { spe: -1 } }],
+  'charge-beam': [{ c: 70, me: { spa: 1 } }], 'cross-poison': [{ c: 10, s: 'psn' }], 'crunch': [{ c: 20, d: { def: -1 } }],
+  'dark-pulse': [{ c: 20, fl: 1 }], 'dire-claw': [{ c: 30, s: ['psn', 'par', 'slp'] }], 'discharge': [{ c: 30, s: 'par' }],
+  'dragon-rush': [{ c: 20, fl: 1 }], 'drum-beating': [{ c: 100, d: { spe: -1 } }], 'dynamic-punch': [{ c: 100, cf: 1 }],
+  'earth-power': [{ c: 10, d: { spd: -1 } }], 'electroweb': [{ c: 100, d: { spe: -1 } }], 'energy-ball': [{ c: 10, d: { spd: -1 } }],
+  'extrasensory': [{ c: 10, fl: 1 }], 'fake-out': [{ c: 100, fl: 1 }], 'fiery-dance': [{ c: 50, me: { spa: 1 } }],
+  'fire-blast': [{ c: 10, s: 'brn' }], 'fire-fang': [{ c: 10, s: 'brn' }, { c: 10, fl: 1 }], 'fire-punch': [{ c: 10, s: 'brn' }],
+  'flamethrower': [{ c: 10, s: 'brn' }], 'flare-blitz': [{ c: 10, s: 'brn' }], 'flash-cannon': [{ c: 10, d: { spd: -1 } }],
+  'focus-blast': [{ c: 10, d: { spd: -1 } }], 'grav-apple': [{ c: 100, d: { def: -1 } }], 'gunk-shot': [{ c: 30, s: 'psn' }],
+  'heat-wave': [{ c: 10, s: 'brn' }], 'hurricane': [{ c: 30, cf: 1 }], 'ice-beam': [{ c: 10, s: 'frz' }],
+  'ice-fang': [{ c: 10, s: 'frz' }, { c: 10, fl: 1 }], 'ice-punch': [{ c: 10, s: 'frz' }], 'icicle-crash': [{ c: 30, fl: 1 }],
+  'icy-wind': [{ c: 100, d: { spe: -1 } }], 'infernal-parade': [{ c: 30, s: 'brn' }], 'iron-head': [{ c: 20, fl: 1 }],
+  'iron-tail': [{ c: 30, d: { def: -1 } }], 'lava-plume': [{ c: 30, s: 'brn' }], 'liquidation': [{ c: 20, d: { def: -1 } }],
+  'lumina-crash': [{ c: 100, d: { spd: -2 } }], 'lunge': [{ c: 100, d: { atk: -1 } }], 'matcha-gotcha': [{ c: 20, s: 'brn' }],
+  'meteor-mash': [{ c: 20, me: { atk: 1 } }], 'moonblast': [{ c: 10, d: { spa: -1 } }], 'mountain-gale': [{ c: 30, fl: 1 }],
+  'mud-shot': [{ c: 100, d: { spe: -1 } }], 'mystical-fire': [{ c: 100, d: { spa: -1 } }], 'nuzzle': [{ c: 100, s: 'par' }],
+  'play-rough': [{ c: 10, d: { atk: -1 } }], 'poison-fang': [{ c: 50, s: 'tox' }], 'poison-jab': [{ c: 30, s: 'psn' }],
+  'psychic': [{ c: 10, d: { spd: -1 } }], 'pyro-ball': [{ c: 10, s: 'brn' }], 'razor-shell': [{ c: 50, d: { def: -1 } }],
+  'rock-slide': [{ c: 30, fl: 1 }], 'rock-tomb': [{ c: 100, d: { spe: -1 } }], 'scald': [{ c: 30, s: 'brn' }],
+  'scorching-sands': [{ c: 30, s: 'brn' }], 'shadow-ball': [{ c: 20, d: { spd: -1 } }], 'shell-side-arm': [{ c: 20, s: 'psn' }],
+  'sludge-bomb': [{ c: 30, s: 'psn' }], 'sludge-wave': [{ c: 10, s: 'psn' }], 'snarl': [{ c: 100, d: { spa: -1 } }],
+  'spirit-break': [{ c: 100, d: { spa: -1 } }], 'struggle-bug': [{ c: 100, d: { spa: -1 } }], 'thunder': [{ c: 30, s: 'par' }],
+  'thunder-fang': [{ c: 10, s: 'par' }, { c: 10, fl: 1 }], 'thunder-punch': [{ c: 10, s: 'par' }], 'thunderbolt': [{ c: 10, s: 'par' }],
+  'triple-arrows': [{ c: 50, d: { def: -1 } }, { c: 30, fl: 1 }], 'trop-kick': [{ c: 100, d: { atk: -1 } }], 'upper-hand': [{ c: 100, fl: 1 }],
+  'volt-tackle': [{ c: 10, s: 'par' }], 'water-pulse': [{ c: 20, cf: 1 }], 'waterfall': [{ c: 20, fl: 1 }], 'zap-cannon': [{ c: 100, s: 'par' }],
+  'zen-headbutt': [{ c: 20, fl: 1 }] };
+// 冰凍（Showdown flags.defrost／thawsTarget）：冰凍時用 SIM_DEFROST 的招式會先融化再出招（燃盡要是火屬性）；
+// 冰凍的對手被火屬性攻擊招式或 SIM_THAW 的招式打中就融化
+const SIM_DEFROST = new Set(['burn-up', 'flare-blitz', 'matcha-gotcha', 'pyro-ball', 'scald', 'scorching-sands']);
+const SIM_THAW = new Set(['matcha-gotcha', 'scald', 'scorching-sands']);
+// 每一下都判定命中的連續攻擊（Showdown multiaccuracy；特性連續攻擊只判定第一下）
+const SIM_MULTIACC = new Set(['population-bomb', 'triple-axel']);
+// 沒打中（沒命中、被守住、沒有效果、對手在地底等）自己扣最大 HP 的一半（Showdown hasCrashDamage／onMoveFail；特性魔法防守不受）
+const SIM_CRASH = new Set(['high-jump-kick', 'supercell-slam']);
 // 使用限制（Showdown）：擊掌奇襲、迎頭一擊只有上場後第一回合能用（onTry）；大爆炸、自爆、薄霧炸裂用了就倒下（selfdestruct always）；
 // 破壞光線等打中後下一回合不能動（recharge）；日光束、日光刃（要晴天）、電光束（要下雨）、挖洞、潛靈奇襲先蓄力一回合（charge；
 // 模擬沒有天氣，所以都要蓄力；挖洞、潛靈奇襲蓄力時打不到；電光束蓄力時特攻 +1）；預知未來兩回合後才打中；急速折返等打完換人（selfSwitch）；
@@ -100,7 +145,7 @@ const SIM_SUP = {
   'parting-shot': { kind: 'shot', d: { atk: -1, spa: -1 }, sub: 1, ...SIM_FOE }, memento: { kind: 'memento', d: { atk: -2, spa: -2 }, tgt: 1, f: 1 },
   transform: { kind: 'transform', tgt: 1 },
 };
-const SIM_STATUS_ZH = { brn: '灼傷', par: '麻痺', psn: '中毒', tox: '劇毒', slp: '睡眠' };
+const SIM_STATUS_ZH = { brn: '灼傷', par: '麻痺', psn: '中毒', tox: '劇毒', slp: '睡眠', frz: '冰凍' };
 const SIM_HAZ_ZH = { sr: '隱形岩', spikes: '撒菱', tspikes: '毒菱', web: '黏黏網' };
 // 一場最多幾回合（到了算平手）、往前算的時候簡單規則最多再打幾回合
 const SIM_MAX_TURN = 100, SIM_LOOK = 40;
@@ -109,8 +154,9 @@ const SIM_ST0 = () => ({ atk: 0, def: 0, spa: 0, spd: 0, spe: 0 });
 // 上場的一隻：key 這場的型態、set 配招（能算傷害的攻擊招式與 SIM_SUP 有的輔助招；沒有招式就用 OP.GG 前 4 招 defaultSet）、
 // item 道具（沒給照 battler）、s 哪一方。能力點數、性格、特性同 battler；其餘是場上狀態：hp、item（會被打掉、用掉）、st 能力變化、
 // lock 講究圍巾鎖住的招式、chg 蓄力中的招式、hide 蓄力時打不到、rech 下一回合要休息、in 第幾回合上場（擊掌奇襲用）、kos 打倒幾隻、
-// out 有沒有上過場、status 異常狀態（tox 劇毒累積、slp 還要睡幾次）、v 換下場就清掉的狀態（sub 替身 HP、taunt、enc／encK 再來一次、seed、
-// curse、yawn、focus、charge、trap、prot／endure／stall／protUsed 守住類）、last 上一次用的招式（再來一次用）、pp 各招剩下的 PP（OP.GG 冠軍版的 PP）
+// out 有沒有上過場、status 異常狀態（tox 劇毒累積、slp 還要睡幾次、frz 冰凍還剩幾次出招機會）、v 換下場就清掉的狀態（sub 替身 HP、taunt、enc／encK 再來一次、seed、
+// curse、yawn、focus、charge、trap、prot／endure／stall／protUsed 守住類、flinch 這回合畏縮、conf 混亂還剩幾次出招機會、fallen 大將算的倒下隻數）、
+// last 上一次用的招式（再來一次用）、pp 各招剩下的 PP（OP.GG 冠軍版的 PP）、bust 畫皮被揭穿了（換下場也不會恢復）
 // 能算的招式：damageCalc 算得了的攻擊招式（含看體重的）、固定傷害、反擊類與一擊必殺（SIM_FIXED／SIM_REACT／SIM_OHKO）、SIM_SUP 的輔助招；其他（變身…）不列
 const simCanUse = k => canCalc(k) || !!SIM_FIXED[k] || !!SIM_REACT[k] || SIM_OHKO.has(k) || !!SIM_SUP[k];
 function simMon(key, set, item, s, fmt) {
@@ -133,6 +179,13 @@ function simStruggleDmg(st, A, D, rnd) {
   if (A.status === 'brn' && A.b.ab !== 'guts') d = Math.floor(d / 2);
   if (scr.reflect || scr['aurora-veil']) d = Math.floor(d / 2);
   return Math.max(1, d);
+}
+// 混亂打到自己（Showdown getConfusionDamage）：威力 40，自己的攻擊（含能力變化）打自己的防禦（含能力變化），亂數 85～100%，
+// 沒有屬性、本系、道具特性的修正，不吃灼傷與牆，至少 1
+function simConfDmg(M, rnd) {
+  const [asp, anat] = invAt(M.b, 1, M.b.atkInv), [dsp, dnat] = invAt(M.b, 2, M.b.defInv);
+  const atk = stageStat(statOf(MON[M.key].bs[1], asp, 1, anat), M.st.atk), def = stageStat(statOf(MON[M.key].bs[2], dsp, 2, dnat), M.st.def);
+  return Math.max(1, Math.floor((Math.floor(Math.floor(22 * 40 * atk / def) / 50) + 2) * (85 + Math.floor(rnd() * 16)) / 100));
 }
 // 照 bringPlan 的結果 plan 的帶法 c（combos 的一項）帶出場（mems 是傳給 bringPlan 的隊員 { key, set, item }），先發 lead 排第一；
 // 一場只能超級進化一隻，不進化的以原型上場、沒有道具（同出戰選角）
@@ -226,21 +279,39 @@ const simTypes = M => MON[M.key].types;
 const simGround = M => !simTypes(M).includes('flying') && M.b.ab !== 'levitate' && M.item !== 'air-balloon';
 // 這一招的先制等級：SIM_PRI 或輔助招的 p；特性惡作劇之心讓輔助招 +1（Showdown prankster）
 const simPri = (M, k) => (SIM_PRI[k] ?? SIM_SUP[k]?.p ?? 0) + (SIM_SUP[k] && M.b.ab === 'prankster' ? 1 : 0);
+// M 用招式 k 打 T 的命中率 %（Showdown battle-actions.ts hitStepAccuracy 與 ModifyAccuracy／Accuracy 事件）：招式的命中率（OP.GG 冠軍版，
+// 和 Showdown 冠軍版 mod 改過的一致；null＝必中）依序乘特性複眼 ×1.3、活力的物理招式 ×0.8、對手特性蹣跚在混亂時 ×0.5（破格無視）、
+// 道具廣角鏡 ×1.1、對焦鏡在對手這回合已經行動過時（moved）×1.2、對手道具光粉 ×0.9（4096 制連乘再四捨五入）；
+// 雙方任一隻特性無防守、毒屬性用劇毒時必中。回傳 100 以下（100＝必中）；一擊必殺不在這裡算（固定 30，見 simFixed），回傳 100
+function simAcc(M, T, k, moved) {
+  const a0 = MOVES[k]?.[6];
+  if (a0 == null || SIM_OHKO.has(k) || M.b.ab === 'no-guard' || T.b.ab === 'no-guard' || (k === 'toxic' && simTypes(M).includes('poison'))) return 100;
+  const mods = [];
+  if (M.b.ab === 'compound-eyes') mods.push(5325);
+  if (M.b.ab === 'hustle' && simCat(k) === 'physical') mods.push(3277);
+  if (T.b.ab === 'tangled-feet' && T.v.conf && M.b.ab !== 'mold-breaker') mods.push(2048);
+  if (M.item === 'wide-lens') mods.push(4505);
+  if (M.item === 'zoom-lens' && moved) mods.push(4915);
+  if (T.item === 'bright-powder') mods.push(3686);
+  return Math.min(100, mods.length ? pokeRound(a0 * chainMods(mods, 0, Infinity) / 4096) : a0);
+}
 
 // A 打 D 用招式 k 的 damageCalc（crit 急所）；結果依會影響傷害的狀態快取（D 剩下的 HP 只看滿不滿：氣勢披帶、結實、多重鱗片）。
-// D 那一方的牆、A 灼傷（特性毅力有異常狀態就照 damageCalc 的灼傷算，攻擊 ×1.5、不減半）、充電（電屬性威力 ×2）也算進去
+// D 那一方的牆、A 灼傷（特性毅力有異常狀態就照 damageCalc 的灼傷算，攻擊 ×1.5、不減半）、充電（電屬性威力 ×2）也算進去；
+// 看場上狀況的特性：猛火類（PINCH_AB）看 A 剩下的 HP、大將看 A.v.fallen（見 simSwitch）；畫皮不在這裡算（見 simMove）
 function simCalc(ctx, st, A, D, k, crit) {
   const pw = MOVES[k][3], dSide = st.sd[+D.id[0]];
   const bp = SIM_HPBP.has(k) ? Math.max(1, Math.floor(pw * A.hp / A.max)) : A.v.charge && MOVES[k][1] === 'electric' ? pw * 2 : undefined;
   // 電光束蓄力時已經特攻 +1，damageCalc 又會在出招前 +1，所以先扣回來
   const spa = A.st.spa - (CHARGE_SPA.has(k) ? 1 : 0), full = D.hp >= D.max;
   const burn = A.status === 'brn' || (A.b.ab === 'guts' && !!A.status), walls = Object.keys(dSide.scr);
+  const pinch = !!PINCH_AB[A.b.ab] && A.hp <= A.max / 3, fallen = A.v.fallen || 0;
   // 撲擊看自己的防禦變化、欺詐看對手的攻擊變化，都要進快取的鍵
-  const key = [A.id, A.item, A.st.atk, spa, A.st.def, burn, D.id, D.item, D.st.def, D.st.spd, D.st.atk, full, walls.join('.'), k, crit, bp].join('|');
+  const key = [A.id, A.item, A.st.atk, spa, A.st.def, burn, D.id, D.item, D.st.def, D.st.spd, D.st.atk, full, walls.join('.'), k, crit, bp, pinch, fallen].join('|');
   let r = ctx.memo.get(key);
   if (!r) {
     const a = A.b, d = D.b;
-    r = damageCalc({ key: A.key, inv: a.atkInv, sp: a.sp, nat: a.nat, st: { atk: A.st.atk, spa, def: A.st.def }, item: A.item, ab: a.ab },
+    r = damageCalc({ key: A.key, inv: a.atkInv, sp: a.sp, nat: a.nat, st: { atk: A.st.atk, spa, def: A.st.def }, item: A.item, ab: a.ab, pinch, fallen },
       { key: D.key, hp: d.hp, inv: d.defInv, sp: d.sp, nat: d.nat, st: { def: D.st.def, spd: D.st.spd, atk: D.st.atk }, item: D.item, ab: d.ab,
         cur: full ? undefined : D.hp, atkInv: d.atkInv },
       k, { fmt: ctx.fmt, weather: '', crit, terrain: '', hh: false, walls, burn, bp });
@@ -261,7 +332,7 @@ function simFixed(ctx, st, A, D, k, exp) {
   let d, acc = 0;
   if (SIM_OHKO.has(k)) {
     if ((D.b.ab === 'sturdy' && A.b.ab !== 'mold-breaker') || (k === 'sheer-cold' && simTypes(D).includes('ice'))) return { eff: 0 };
-    acc = k === 'sheer-cold' && !simTypes(A).includes('ice') ? 20 : MOVES[k][6] ?? 30;
+    acc = A.b.ab === 'no-guard' || D.b.ab === 'no-guard' ? 100 : k === 'sheer-cold' && !simTypes(A).includes('ice') ? 20 : MOVES[k][6] ?? 30;
     d = exp ? Math.max(1, Math.floor(D.hp * acc / 100)) : D.hp;
   } else if (rc) {
     const g = A.v.got, ok = x => !rc.cat || x === rc.cat;
@@ -277,15 +348,20 @@ function simFixed(ctx, st, A, D, k, exp) {
 }
 // 這一招打 D 的計算：固定傷害、反擊類、一擊必殺用 simFixed，其他用 simCalc
 const simHit = (ctx, st, A, D, k, crit, exp) => SIM_FIXED[k] || SIM_REACT[k] || SIM_OHKO.has(k) ? simFixed(ctx, st, A, D, k, exp) : simCalc(ctx, st, A, D, k, crit);
-// 期望傷害（各下的 16 個亂數取平均加總；氣勢披帶、結實撐住時最多打到剩 1）；輔助招是 0
-function simExp(ctx, st, A, D, k) {
+// 打中時的期望傷害（各下的 16 個亂數取平均加總；每下判定命中的招式第二下起乘上命中的機率；氣勢披帶、結實撐住時最多打到剩 1；
+// 畫皮還在時第一下改算揭穿的 1/8）；輔助招是 0
+function simExpHit(ctx, st, A, D, k) {
   if (SIM_SUP[k]) return 0;
-  if (k === SIM_STRUGGLE) return simStruggleDmg(st, A, D, null);
+  const disg = simDisguised(D, A);
+  if (k === SIM_STRUGGLE) return disg ? D.max / 8 : simStruggleDmg(st, A, D, null);
   const r = simHit(ctx, st, A, D, k, false, true);
   if (!r.eff) return 0;
-  const e = simRolls(r, D, k).reduce((t, xs) => t + xs.reduce((a, x) => a + x, 0) / 16, 0);
+  const pm = SIM_MULTIACC.has(k) && A.b.ab !== 'skill-link' ? simAcc(A, D, k, false) / 100 : 1;
+  const e = simRolls(r, D, k).reduce((t, xs, h) => t + (h || !disg ? pm ** h * xs.reduce((a, x) => a + x, 0) / 16 : D.max / 8), 0);
   return r.endured && D.hp >= D.max ? Math.min(e, D.hp - 1) : e;
 }
+// 期望傷害＝打中時的期望傷害 × 命中率（simAcc；這裡不知道出招順序，對焦鏡不算）
+const simExp = (ctx, st, A, D, k) => simExpHit(ctx, st, A, D, k) * simAcc(A, D, k, false) / 100;
 function simSpeed(ctx, M) {
   const key = [M.id, M.item, M.st.spe, M.status].join('|');
   if (!ctx.spd.has(key)) {
@@ -311,6 +387,14 @@ function simHeal(st, s, M, v, why) {
   M.hp += h;
   simLog(st, `${simName(st, s, M)}${why} +${simPct(h, M.max)}%（${simPct(M.hp, M.max)}%）`);
   return h;
+}
+// 畫皮（Showdown disguise）：謎擬Ｑ還沒被揭穿（bust）時，攻擊招式（含掙扎、預知未來、混亂打到自己）的這一下沒有傷害，揭穿後扣最大 HP 的 1/8；
+// 揭穿了就一直是揭穿的樣子（換下場也不會恢復）。攻擊方 A 的特性破格無視；變身來的不算
+const simDisguised = (T, A) => T.key === 'mimikyu' && T.b.ab === 'disguise' && !T.bust && !T.tf && A?.b.ab !== 'mold-breaker';
+function simBust(st, s, T) {
+  T.bust = true;
+  simLog(st, `${simName(st, s, T)}的${abilZh('disguise')}擋下了這一下`);
+  simHurt(st, s, T, T.max / 8, `的${abilZh('disguise')}被揭穿了`);
 }
 // 文柚果：HP 一半以下時回復 1/4（Showdown sitrusberry）
 function simSitrus(st, s, M) {
@@ -348,18 +432,19 @@ function simCanStatus(M, x, src) {
   if (x === 'brn') return !ty.includes('fire') && !['water-veil', 'water-bubble', 'thermal-exchange'].includes(ab);
   if (x === 'par') return !ty.includes('electric') && ab !== 'limber';
   if (x === 'slp') return !['insomnia', 'vital-spirit', 'sweet-veil'].includes(ab);
+  if (x === 'frz') return !ty.includes('ice');
   return (!(ty.includes('poison') || ty.includes('steel')) || src?.b.ab === 'corrosion') && ab !== 'immunity';
 }
-// 陷入異常狀態：睡眠照冠軍版 2～3 回合（mods/champions/conditions.ts：[2, 3, 3] 抽一個，期望值模式取 3）；
-// 木子果（任何異常）、零餘果（睡眠）馬上治好；特性同步把灼傷、麻痺、中毒傳回給對手。回傳成功與否
+// 陷入異常狀態：睡眠照冠軍版 2～3 回合（mods/champions/conditions.ts：[2, 3, 3] 抽一個，期望值模式取 3）；冰凍照冠軍版最多 3 次出招機會（見 simMove）；
+// 木子果（任何異常）、零餘果（睡眠）馬上治好；特性同步把灼傷、麻痺、中毒傳回給對手（睡眠、冰凍不傳）。回傳成功與否
 function simStatus(st, s, M, x, rnd, src) {
   if (!simCanStatus(M, x, src)) return false;
-  Object.assign(M, { status: x, tox: 0, slp: x === 'slp' ? (rnd ? [2, 3, 3][Math.floor(rnd() * 3)] : 3) : 0 });
+  Object.assign(M, { status: x, tox: 0, slp: x === 'slp' ? (rnd ? [2, 3, 3][Math.floor(rnd() * 3)] : 3) : 0, frz: x === 'frz' ? 3 : 0 });
   simLog(st, `${simName(st, s, M)}陷入${SIM_STATUS_ZH[x]}狀態`);
   if (M.item === 'lum-berry' || (x === 'slp' && M.item === 'chesto-berry')) {
     simLog(st, `${simName(st, s, M)}吃了${ITEMS[M.item][0]}，治好了`);
     Object.assign(M, { status: '', item: '' });
-  } else if (M.b.ab === 'synchronize' && src && src.hp > 0 && x !== 'slp') simStatus(st, 1 - s, src, x, rnd, M);
+  } else if (M.b.ab === 'synchronize' && src && src.hp > 0 && x !== 'slp' && x !== 'frz') simStatus(st, 1 - s, src, x, rnd, M);
   return true;
 }
 // 換上第 i 隻：換下來的（還站著的）特性再生力回 1/3、自然回復治好異常（冠軍版），能力變化與換下場就清掉的狀態都清掉，
@@ -376,6 +461,9 @@ function simSwitch(st, s, i, rnd, late = false) {
   const M = side.mons[i];
   Object.assign(M, { in: st.turn, out: true, tox: 0 });
   simLog(st, `${s ? '對手' : '我方'}換上${MON[M.key].zh}（HP ${simPct(M.hp, M.max)}%）`);
+  // 大將（Showdown supremeoverlord onStart）：上場時記下這一方倒下幾隻（最多 5），威力照這個算到換下場（v.fallen，見 simCalc）
+  const down = side.mons.filter(m => m.hp <= 0).length;
+  if (M.b.ab === 'supreme-overlord' && down) { M.v.fallen = Math.min(5, down); simLog(st, `${simName(st, s, M)}的${abilZh('supreme-overlord')}：倒下 ${down} 隻，威力 ×${1 + M.v.fallen / 10}`); }
   if (side.hwish && (M.hp < M.max || M.status)) {
     Object.assign(M, { hp: M.max, status: '' });
     side.hwish = false;
@@ -475,7 +563,7 @@ function simFutile(st, s, k) {
   }
 }
 // 一方這回合能做的：招式（再來一次鎖住的那招；講究圍巾鎖住的那招（圍巾被拍落就解除，Showdown choicelock）；PP 用完的、被挑釁時的輔助招不能選；
-// 擊掌奇襲、迎頭一擊要上場後第一回合；一定失敗的輔助招不列，見 simFutile）、換人（後排還站著的；背水一戰不能換）。
+// 擊掌奇襲、迎頭一擊要上場後第一回合；一定失敗的輔助招不列，見 simFutile）、換人（後排還站著的；背水一戰、被對手的踩影困住不能換）。
 // 能選的招式（有 PP、沒被挑釁擋）一招都沒有時只能掙扎（或換人）；要休息的、蓄力中的只能照做、不能換人；
 // 招式都會失敗又不能換人時是 none（什麼都不做）。
 // 連續 SIM_IDLE 回合雙方都沒扣血也沒換人時，打不到對手場上那隻的攻擊招式不能選（不然雙方都出無效招式會原地空轉）；只剩這種招式又不能換人就照舊
@@ -488,7 +576,9 @@ function simOpts(ctx, st, s) {
   const can = ks.filter(k => M.pp[k] > 0 && !(M.v.taunt && SIM_SUP[k]));
   let mv = !can.length ? [{ t: 'mv', k: SIM_STRUGGLE }]
     : can.filter(k => (!SIM_FIRST.has(k) || M.in === st.turn) && !simFutile(st, s, k)).map(k => ({ t: 'mv', k }));
-  const sw = M.v.trap ? [] : simBench(st, s).map(i => ({ t: 'sw', i }));
+  // 不能換人：背水一戰；對手場上那隻特性踩影（Showdown shadowtag：自己也是踩影、幽靈屬性不受影響；打完換人、被吹走照樣換）
+  const tagged = T.hp > 0 && T.b.ab === 'shadow-tag' && M.b.ab !== 'shadow-tag' && !simTypes(M).includes('ghost');
+  const sw = M.v.trap || tagged ? [] : simBench(st, s).map(i => ({ t: 'sw', i }));
   if (st.idle >= SIM_IDLE) {
     const hit = mv.filter(o => SIM_SUP[o.k] || o.k === SIM_STRUGGLE || simHit(ctx, st, M, T, o.k, false, true).eff);
     if (hit.length || sw.length) mv = hit;
@@ -509,6 +599,9 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
   if (x.tgt && T.b.ab === 'good-as-gold') return fail(`${tn}的黃金之軀`);
   if (x.tgt && !bounced && M.b.ab === 'prankster' && simTypes(T).includes('dark')) return fail('惡屬性不受惡作劇之心的招式影響');
   if (x.tgt && T.v.sub && !x.sub) return fail(`${tn}有替身`);
+  // 命中率（simAcc；打自己、撒在場上的輔助招是必中）：照亂數抽，期望值模式當命中
+  const acc = simAcc(M, T, k, !oWill);
+  if (acc < 100 && rnd && rnd() * 100 >= acc) return say(`，但沒有命中（命中率 ${acc}%）`);
   const herb = () => { if (T.item === 'mental-herb') { delete T.v.taunt; delete T.v.enc; delete T.v.encK; T.item = ''; simLog(st, `${tn}用心靈香草解除了`); } };
   switch (x.kind) {
     case 'boost': case 'charge': case 'focus':
@@ -661,6 +754,27 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
       return;
   }
 }
+// s 這方的 M 用攻擊招式 k 打中 T 之後的追加效果（SIM_SEC；Showdown battle-actions.ts secondaries）：照機率抽（期望值模式只算機率 100% 的）；
+// 特性強行沒有追加效果（FLAG.secondary 的招式）；道具王者之證讓沒有畏縮效果的攻擊招式多 10% 畏縮（Showdown kingsrock，加在強行拿掉之後，所以強行也有）。
+// 對手那邊的：打在替身上（subbed）、對手倒下了不算；畏縮要對手這回合還沒行動（oWill），特性精神力不會畏縮、我行我素不會混亂；
+// 異常狀態照 simStatus（已經有異常、屬性特性免疫的不會）、能力變化照 simBoost（恆淨之軀等擋得住）
+function simSecondary(st, s, M, T, k, oWill, rnd, subbed) {
+  const list = M.b.ab === 'sheer-force' && FLAG.secondary.has(k) ? [] : SIM_SEC[k] || [];
+  const all = M.item === 'kings-rock' && !list.some(x => x.fl) ? [...list, { c: 10, fl: 1 }] : list;
+  for (const x of all) {
+    if (rnd ? rnd() * 100 >= x.c : x.c < 100) continue;
+    if (x.me) { if (M.hp > 0) simBoost(st, s, M, x.me); continue; }
+    if (subbed || T.hp <= 0) continue;
+    if (x.s) simStatus(st, 1 - s, T, Array.isArray(x.s) ? x.s[Math.floor(rnd() * x.s.length)] : x.s, rnd, M);
+    else if (x.fl) { if (oWill && T.b.ab !== 'inner-focus') T.v.flinch = true; }
+    else if (x.cf) {
+      if (T.v.conf || T.b.ab === 'own-tempo') continue;
+      // 混亂 2～5 次出招機會（Showdown random(2, 6)；期望值模式不會打到自己，次數取 3）
+      T.v.conf = rnd ? 2 + Math.floor(rnd() * 4) : 3;
+      simLog(st, `${simName(st, 1 - s)}混亂了`);
+    } else if (x.d) simBoost(st, 1 - s, T, x.d, s);
+  }
+}
 // 被守住類擋下的接觸招式：王者盾牌攻擊 −1、尖刺防守扣 1/8、碉堡中毒（Showdown kingsshield／spikyshield／banefulbunker）
 function simProtHit(st, s, M, T, rnd) {
   if (T.v.prot === 'kings') simBoost(st, s, M, { atk: -1 }, 1 - s);
@@ -678,7 +792,8 @@ function simStruggle(st, s, M, T, rnd) {
     simLog(st, `${me}用掙扎 → 打在${tn}的替身上${T.v.sub <= 0 ? '，替身消失了' : ''}`);
     if (T.v.sub <= 0) delete T.v.sub;
   } else {
-    let d = simStruggleDmg(st, M, T, rnd), held = '';
+    const disg = simDisguised(T, M);
+    let d = disg ? 0 : simStruggleDmg(st, M, T, rnd), held = '';
     if (d >= T.hp && T.hp >= T.max && (T.item === 'focus-sash' || T.b.ab === 'sturdy')) { d = T.hp - 1; held = T.item === 'focus-sash' ? ITEMS[T.item][0] : abilZh('sturdy'); if (T.item === 'focus-sash') T.item = ''; }
     else if (T.v.endure && d >= T.hp) { d = T.hp - 1; held = '挺住'; }
     const dd = Math.min(d, T.hp);
@@ -688,6 +803,7 @@ function simStruggle(st, s, M, T, rnd) {
     const pop = T.item === 'air-balloon' && d > 0;
     if (pop) T.item = '';
     simLog(st, `${me}用掙扎 → ${tn} −${simPct(d, T.max)}%（剩 ${simPct(T.hp, T.max)}%）${held ? `，靠${held}撐住` : ''}${pop ? '，氣球破了' : ''}${T.hp <= 0 ? `，${tn}倒下` : ''}`);
+    if (disg) simBust(st, 1 - s, T);
     if (T.hp <= 0) M.kos++;
     if (T.item === 'rocky-helmet') simHurt(st, s, M, M.max / 6, '被凸凸頭盔刺傷');
     if (T.b.ab === 'rough-skin') simHurt(st, s, M, M.max / 8, '被粗糙皮膚刺傷');
@@ -696,7 +812,8 @@ function simStruggle(st, s, M, T, rnd) {
   simHurt(st, s, M, Math.round(M.max / 4), '受到掙扎的反作用力', false);
 }
 // s 這方的 M 用招式 k 打對手場上那隻；oa＝對手這回合的選擇、oWill＝對手這回合還會出招（突襲、快手還擊、守住類、再來一次看這個）；
-// rnd 亂數（null＝期望值：傷害取平均、不會急所、麻痺不會不能動）；pick(st, s) 打完換人、被吹走時換上誰
+// rnd 亂數（null＝期望值：傷害取平均、命中率不到 100 的傷害乘命中率、不會急所、麻痺不會不能動、冰凍不會提早融化、混亂不會打到自己、
+// 機率不到 100% 的追加效果不算）；pick(st, s) 打完換人、被吹走時換上誰
 function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
   const M = simAct(st, s), me = simName(st, s), mz = simMoveZh(k);
   if (M.status === 'slp') {
@@ -704,6 +821,27 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
     if (M.slp > 0) return simLog(st, `${me}睡著了`);
     M.status = '';
     simLog(st, `${me}醒來了`);
+  }
+  // 冰凍（冠軍版 mods/champions/conditions.ts）：每次要出招先扣次數，每次 1/4 融化、第 3 次一定融化；用 SIM_DEFROST 的招式會自己融化
+  if (M.status === 'frz') {
+    if (SIM_DEFROST.has(k) && !(k === 'burn-up' && !simTypes(M).includes('fire'))) { M.status = ''; simLog(st, `${me}用${mz}融化了冰`); }
+    else if (--M.frz <= 0 || (rnd && rnd() < 1 / 4)) { M.status = ''; simLog(st, `${me}的冰融化了`); }
+    else return simLog(st, `${me}結冰了，不能動`);
+  }
+  // 畏縮（Showdown flinch）：這回合先被打中畏縮的不能動；特性不屈之心速度 +1
+  if (M.v.flinch) {
+    simLog(st, `${me}畏縮了，不能動`);
+    if (M.b.ab === 'steadfast') simBoost(st, s, M, { spe: 1 });
+    return;
+  }
+  // 混亂（Showdown confusion）：每次要出招先扣次數，扣完就解除；沒解除時 1/3 打到自己（simConfDmg）
+  if (M.v.conf) {
+    if (!--M.v.conf) { delete M.v.conf; simLog(st, `${me}的混亂解除了`); }
+    else if (rnd && rnd() < 1 / 3) {
+      if (simDisguised(M, null)) { simLog(st, `${me}混亂中打到自己`); simBust(st, s, M); }
+      else simHurt(st, s, M, simConfDmg(M, rnd), '混亂中打到自己', false);
+      return;
+    }
   }
   // 麻痺：冠軍版 1/8 不能動（mods/champions/conditions.ts）
   if (M.status === 'par' && rnd && rnd() < 1 / 8) return simLog(st, `${me}麻痺了，不能動`);
@@ -738,26 +876,41 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
   // 自爆類：先倒下才打（Showdown selfdestruct always 在出招前 faint），同時全倒時算對手最後倒下
   if (SIM_BOOM.has(k)) { M.hp = 0; simFaint(st, M); }
   const contact = FLAG.contact.has(k) && M.b.ab !== 'long-reach';
+  // 沒打中時的撞擊傷害（SIM_CRASH）
+  const crash = () => { if (SIM_CRASH.has(k)) simHurt(st, s, M, M.max / 2, '沒打中，摔傷自己'); };
   let dealt = -1;
   if (T.hp <= 0) fail('沒有目標');
-  else if (T.hide) simLog(st, `${me}用${mz}，但打不到（${tn}${T.chg === 'dig' ? '在地底' : '消失了'}）`);
+  // 蓄力中躲起來的打不到（雙方任一隻特性無防守就打得到）
+  else if (T.hide && M.b.ab !== 'no-guard' && T.b.ab !== 'no-guard') { simLog(st, `${me}用${mz}，但打不到（${tn}${T.chg === 'dig' ? '在地底' : '消失了'}）`); crash(); }
   else if (T.v.prot && k !== 'phantom-force' && k !== 'feint') {
     simLog(st, `${me}用${mz}，被${tn}擋下`);
     if (contact) simProtHit(st, s, M, T, rnd);
+    crash();
   } else {
     if (T.v.prot) { delete T.v.prot; simLog(st, `${me}的${mz}打破了守住`); }
     // 一擊必殺：期望值模式（沒有 rnd）直接算期望傷害；照亂數打時先抽中不中
     let r = simHit(ctx, st, M, T, k, false, !rnd && SIM_OHKO.has(k));
-    if (!r.eff) r.fail ? fail(r.fail) : simLog(st, `${me}用${mz}，對${tn}沒有效果`);
-    else if (r.acc && rnd && rnd() * 100 >= r.acc) simLog(st, `${me}用${mz}，沒有命中（命中率 ${r.acc}%）`);
+    // 命中率：一擊必殺用 simFixed 的，其他看 simAcc（對手這回合已經行動過時對焦鏡有作用）
+    const acc = SIM_OHKO.has(k) ? r.acc : simAcc(M, T, k, !oWill);
+    if (!r.eff) { r.fail ? fail(r.fail) : simLog(st, `${me}用${mz}，對${tn}沒有效果`); crash(); }
+    else if (acc < 100 && rnd && rnd() * 100 >= acc) { simLog(st, `${me}用${mz}，沒有命中（命中率 ${acc}%）`); crash(); }
     else {
       const rank = SIM_HICRIT.has(k) + (M.b.ab === 'super-luck') + (M.item === 'scope-lens') + (M.v.focus ? 2 : 0);
       if (!r.fixed && !r.crit && rnd && rnd() < SIM_CRIT_P[Math.min(3, rank)]) r = simCalc(ctx, st, M, T, k, true);
       // 寶石：這招屬性的寶石打出去就用掉（只加成一次）
       const gem = DMG_ITEMS[M.item]?.gem && DMG_ITEMS[M.item].type === r.type ? M.item : '';
-      let dmg = simRolls(r, T, k).reduce((t, xs) => t + (rnd ? xs[Math.floor(rnd() * 16)] : xs.reduce((a, x) => a + x, 0) / 16), 0), held = '';
       // 替身：聲音招式、特性穿透打得穿；打在替身上的不會有接觸懲罰、拍落、強制換人
       const subbed = T.v.sub > 0 && !FLAG.sound.has(k) && M.b.ab !== 'infiltrator';
+      // 畫皮（simDisguised）：第一下沒有傷害，打完揭穿（打在替身上的不算）
+      const disg = !subbed && simDisguised(T, M);
+      // 各下的傷害加總：每下判定命中的招式（SIM_MULTIACC）第二下起照命中率抽、沒中就停；
+      // 期望值模式整招乘命中率（一擊必殺 simFixed 已經乘過）、第二下起再乘命中的機率
+      const pm = SIM_MULTIACC.has(k) && M.b.ab !== 'skill-link' ? acc / 100 : 1;
+      let dmg = 0, held = '', w = rnd || SIM_OHKO.has(k) ? 1 : acc / 100;
+      for (const [h, xs] of simRolls(r, T, k).entries()) {
+        if (h && pm < 1) { if (!rnd) w *= pm; else if (rnd() >= pm) break; }
+        if (h || !disg) dmg += w * (rnd ? xs[Math.floor(rnd() * 16)] : xs.reduce((a, x) => a + x, 0) / 16);
+      }
       if (subbed) {
         dealt = Math.min(dmg, T.v.sub);
         T.v.sub -= dealt;
@@ -779,6 +932,7 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
         if (pop || (k === 'knock-off' && T.item && !MON[T.key].base && T.b.ab !== 'sticky-hold' && M.hp > 0)) T.item = '';
         simLog(st, `${me}用${mz}${r.crit ? '（急所）' : ''} → ${tn} −${simPct(dealt, T.max)}%（剩 ${simPct(T.hp, T.max)}%）`
           + (held ? `，靠${held}撐住` : '') + (pop ? '，氣球破了' : '') + (T.hp <= 0 ? `，${tn}倒下` : ''));
+        if (disg) simBust(st, 1 - s, T);
         if (T.hp <= 0) M.kos++;
       }
       if (gem) { M.item = ''; simLog(st, `${me}的${ITEMS[gem][0]}用掉了`); }
@@ -787,6 +941,10 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
       // 吸血在扣血當下（Showdown spreadDamage），接觸懲罰在那之後
       const dr = SIM_DRAIN[k], rc = SIM_RECOIL[k];
       if (dr && dealt > 0) { const v = Math.max(1, Math.round(dealt * dr[0] / dr[1])); simHeal(st, s, M, M.item === 'big-root' ? pokeRound(v * 5324 / 4096) : v, '吸取'); }
+      // 追加效果在吸血之後、接觸懲罰之前（Showdown spreadMoveHit 的 secondaries 在 DamagingHit 之前）
+      simSecondary(st, s, M, T, k, oWill, rnd, subbed);
+      // 冰凍的對手被火屬性攻擊招式、SIM_THAW 的招式打中就融化（Showdown frz onDamagingHit、thawsTarget）
+      if (T.status === 'frz' && T.hp > 0 && !subbed && (SIM_THAW.has(k) || (r.type || MOVES[k][1]) === 'fire')) { T.status = ''; simLog(st, `${tn}的冰融化了`); }
       if (!subbed) {
         // 接觸懲罰：凸凸頭盔扣 1/6、粗糙皮膚扣 1/8（Showdown rockyhelmet／roughskin，打倒也算）
         if (contact && T.item === 'rocky-helmet') simHurt(st, s, M, M.max / 6, '被凸凸頭盔刺傷');
@@ -797,7 +955,8 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
       if (rc && dealt > 0 && M.b.ab !== 'rock-head') simHurt(st, s, M, Math.max(1, Math.round(dealt * rc[0] / rc[1])), '受到反作用力');
       // 生命寶珠：每次攻擊扣最大 HP 的 1/10（Showdown lifeorb）
       if (M.item === 'life-orb' && dealt > 0) simHurt(st, s, M, M.max / 10, '生命寶珠');
-      if (M.hp > 0 && SIM_SELF[k]) simBoost(st, s, M, SIM_SELF[k]);
+      // 自己的能力變化；屬於追加效果的（FLAG.secondary，如流水旋舞）特性強行不會發動
+      if (M.hp > 0 && SIM_SELF[k] && !(M.b.ab === 'sheer-force' && FLAG.secondary.has(k))) simBoost(st, s, M, SIM_SELF[k]);
       if (M.hp > 0 && k === 'fell-stinger' && T.hp <= 0) simBoost(st, s, M, { atk: 3 });
       if (SIM_RECHARGE.has(k)) M.rech = true;
       if (SIM_SPIN.has(k) && M.hp > 0) {
@@ -813,8 +972,8 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
   if (M.hp <= 0 && SIM_BOOM.has(k)) { M.hp = 0; simLog(st, `${me}倒下`); }
   if (SIM_PIVOT.has(k) && dealt >= 0 && M.hp > 0 && !simOver(st) && simBench(st, s).length) simSwitch(st, s, pick(st, s), rnd);
 }
-// 回合結束（Showdown onResidualOrder 的順序）：預知未來、祈願、蛻皮、吃剩的東西、寄生種子、中毒、灼傷、詛咒、挑釁／再來一次／哈欠倒數、牆倒數；
-// 守住類這回合沒用的連續計數歸零。殘血傷害照 Showdown：灼傷 1/16、中毒 1/8、劇毒 n/16（換下場重算、最多 15/16）、寄生種子 1/8、詛咒 1/4，
+// 回合結束（Showdown onResidualOrder 的順序）：預知未來、祈願、蛻皮、吃剩的東西、寄生種子、中毒、灼傷、詛咒、挑釁／再來一次／哈欠倒數、牆倒數、加速；
+// 守住類這回合沒用的連續計數歸零、畏縮清掉（只有這回合有效）。殘血傷害照 Showdown：灼傷 1/16、中毒 1/8、劇毒 n/16（換下場重算、最多 15/16）、寄生種子 1/8、詛咒 1/4，
 // 特性魔法防守不受、毒療改成回 1/8
 function simEnd(ctx, st, rnd) {
   st.fut.forEach(f => {
@@ -823,6 +982,7 @@ function simEnd(ctx, st, rnd) {
     if (T.hp <= 0) return;
     const r = simCalc(ctx, st, f.src, T, 'future-sight', false);
     if (!r.eff) return;
+    if (simDisguised(T, f.src)) { simLog(st, `預知未來打中${simName(st, f.s)}`); simBust(st, f.s, T); return; }
     const d = Math.min(T.hp, r.rolls.reduce((t, xs) => t + (rnd ? xs[Math.floor(rnd() * 16)] : xs.reduce((a, x) => a + x, 0) / 16), 0));
     T.hp -= d;
     simFaint(st, T);
@@ -858,8 +1018,10 @@ function simEnd(ctx, st, rnd) {
     if (M.v.yawn && !--M.v.yawn) { delete M.v.yawn; simStatus(st, s, M, 'slp', rnd, null); }
   });
   st.sd.forEach(side => Object.keys(side.scr).forEach(w => { if (!--side.scr[w]) delete side.scr[w]; }));
+  // 加速（Showdown speedboost onResidual，在回合結束的最後）：這回合開始時已經在場上的（不是這回合才換上來的）速度 +1
+  each((M, s) => { if (M.b.ab === 'speed-boost' && M.in < st.turn) simBoost(st, s, M, { spe: 1 }); });
   st.sd.forEach(side => side.mons.forEach(m => {
-    delete m.v.prot; delete m.v.endure;
+    delete m.v.prot; delete m.v.endure; delete m.v.flinch;
     if (!m.v.protUsed) delete m.v.stall;
     delete m.v.protUsed;
   }));
@@ -903,8 +1065,9 @@ function simValue(st) {
   return w === 0 ? 1 + a / 2 : w === 1 ? -1 - b / 2 : (a - b) / 2;
 }
 // ---------- 簡單規則（往前算之後的局面用） ----------
-// 出招：攻擊招式看期望傷害（打不倒時佔對方最大 HP 的比例），打得倒的再加 1、用先制打得倒的再加 0.5；要蓄力、要休息的打不倒時只算一半；
-// 自爆類扣掉自己剩下的 HP（打不倒再扣 1）；快手還擊不預判（算 0）；對手有替身時只算打替身的一半。輔助招見 simGreedySup。
+// 出招：攻擊招式看打中時的期望傷害（打不倒時佔對方最大 HP 的比例），打得倒的再加 1、用先制打得倒的再加 0.5，再乘命中率；
+// 要蓄力、要休息的打不倒時只算一半；自爆類扣掉自己剩下的 HP（打不倒再扣 1）；快手還擊不預判（算 0）；對手有替身時只算打替身的一半。
+// 輔助招見 simGreedySup（也乘命中率）。
 // 只有招式都沒用（如講究圍巾鎖在對方免疫的招式）時才換人
 function simGreedyAct(ctx, st, s) {
   const opts = simOpts(ctx, st, s), mv = opts.filter(o => o.t === 'mv'), sw = () => ({ t: 'sw', i: simGreedyPick(ctx, st, s) });
@@ -915,10 +1078,11 @@ function simGreedyAct(ctx, st, s) {
   mv.forEach(o => {
     const k = o.k;
     let v;
-    if (SIM_SUP[k]) v = simGreedySup(st, s, M, T, k, dt, dm);
+    const p = simAcc(M, T, k, false) / 100;
+    if (SIM_SUP[k]) v = p * simGreedySup(st, s, M, T, k, dt, dm);
     else {
-      const e = k === 'upper-hand' ? 0 : simExp(ctx, st, M, T, k), sub = T.v.sub > 0 && !FLAG.sound.has(k) && M.b.ab !== 'infiltrator', ko = !sub && e >= T.hp;
-      v = sub ? Math.min(e, T.v.sub) / T.max / 2 : Math.min(e, T.hp) / T.max + (ko ? 1 + (simPri(M, k) > 0 ? 0.5 : 0) : 0);
+      const e = k === 'upper-hand' ? 0 : simExpHit(ctx, st, M, T, k), sub = T.v.sub > 0 && !FLAG.sound.has(k) && M.b.ab !== 'infiltrator', ko = !sub && e >= T.hp;
+      v = p * (sub ? Math.min(e, T.v.sub) / T.max / 2 : Math.min(e, T.hp) / T.max + (ko ? 1 + (simPri(M, k) > 0 ? 0.5 : 0) : 0));
       if (!ko && ((SIM_CHARGE.has(k) && M.chg !== k) || SIM_RECHARGE.has(k))) v /= 2;
       if (SIM_BOOM.has(k)) v -= M.hp / M.max + (ko ? 0 : 1);
     }

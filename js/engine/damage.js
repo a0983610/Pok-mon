@@ -113,6 +113,11 @@ const DEF_ABILS = new Set([...Object.keys(ABIL_IMMUNE), 'bulletproof', 'soundpro
   'water-bubble', 'purifying-salt', 'fur-coat', 'multiscale', 'filter', 'solid-rock', 'fluffy', 'aura-guard', 'punk-rock', 'shell-armor',
   'battle-armor', 'sturdy', 'unaware', 'ripen', 'fairy-aura', ...WEATHER_OFF, 'drought', 'drizzle', 'sand-stream', 'snow-warning', 'intimidate',
   'grass-pelt', 'electric-surge', 'grassy-surge', 'misty-surge', 'psychic-surge', 'sticky-hold', 'heavy-metal', 'light-metal']);
+// 看場上狀況的特性（傷害計算分頁不算，對戰中、對戰模擬才算，見 damageCalc 的 a.pinch／a.fallen／d.disguise）：
+// PINCH_AB 猛火、激流、茂盛、蟲之預感＝HP 剩 1/3 以下時這個屬性的招式攻擊／特攻 ×1.5（Showdown blaze 等 onModifyAtk）；
+// 大將＝出場時這一方倒下幾隻（最多 5），威力 ×1.1／1.2／1.3／1.4／1.5（Showdown supremeoverlord）；畫皮＝謎擬Ｑ還沒被揭穿時擋下一下攻擊、改扣最大 HP 的 1/8
+const PINCH_AB = { blaze: 'fire', torrent: 'water', overgrow: 'grass', swarm: 'bug' };
+const LIVE_ABILS = [...Object.keys(PINCH_AB), 'supreme-overlord', 'disguise'];
 // 場地（算法在 damageCalc，照 Smogon 冠軍版）：在地面上（不是飛行屬性、沒有飄浮）的攻擊方用該屬性招式威力 ×1.3；
 // 打在地面上的防守方時，薄霧場地龍招式、青草場地地震／重踏威力 ×½，精神場地擋先制招式；大地波動有場地時變成對應屬性、威力 ×2
 const TERRAIN_TYPE = { electric: 'electric', grassy: 'grass', misty: 'fairy', psychic: 'psychic' };
@@ -179,6 +184,8 @@ function speedPair(x, y, f) {
 // 攻擊方 a：{ key, inv 投資 [點數, 性格], st { atk, spa, def（撲擊用） } 能力變化, item, ab 特性 }；防守方 d：{ key, hp／inv 投資 [點數, 性格], st { def, spd, atk（欺詐用） }, item, ab,
 // cur 目前剩下的 HP（沒給＝全滿）, atkInv 攻擊投資（欺詐用；沒有 sp 時才看） }
 // （投資也可以改給 sp／nat，見 invAt；a 另外可帶 set 給 dmgRows 用登錄的招式）；d.noItem＝確定沒有道具（對戰中標了「沒有道具」：拍落不加成）；
+// 看場上狀況的特性（LIVE_ABILS，沒給就不算）：a.pinch＝攻擊方 HP 剩 1/3 以下（PINCH_AB）、a.fallen＝攻擊方這一方倒下幾隻（大將）、
+// d.disguise＝防守方的畫皮還沒被揭穿（這次的第一下沒有傷害、改扣 1/8，之後連用照常；回傳 disguise 標記）；
 // 雙打時 a.field／d.field＝攻擊方／防守方場上還站著幾隻（沒給當 2）：範圍招式實際只打到 1 隻時不減傷（Showdown battle-actions.ts：targets.length > 1 才 spreadHit）；
 // o：{ fmt 's'／'d', weather, crit, terrain, hh 幫助, walls 防守方的牆, burn 攻擊方灼傷, bp 威力（對戰模擬給噴火、噴水這種隨 HP 變的；沒給照資料）}
 // （必定急所的招式不管 crit 都算急所）。不算的招式回傳 { skip 原因 }；
@@ -261,6 +268,7 @@ function damageCalc(a, d, mk, o) {
   else if ((aab === 'water-bubble' && type === 'water') || (['huge-power', 'pure-power'].includes(aab) && cat === 'physical')) atMods.push(use(aab) && 8192);
   if ((dab === 'thick-fat' && (type === 'fire' || type === 'ice')) || (dab === 'water-bubble' && type === 'fire') || (dab === 'purifying-salt' && type === 'ghost')
     || (dab === 'heatproof' && type === 'fire')) atMods.push(use(dab) && 2048);
+  if (a.pinch && PINCH_AB[aab] === type) atMods.push(use(aab) && 6144);
   if (ait.atk && family(A) === ait.mon) atMods.push(ait.atk);
   atk = Math.max(1, pokeRound(atk * chainMods(atMods, 410, 131072) / 4096));
   let def = statOf(D.bs[di], dsp, di, dnat);
@@ -294,6 +302,7 @@ function damageCalc(a, d, mk, o) {
     if (type === 'fairy' && (aab === 'fairy-aura' || dab === 'fairy-aura')) m.push(use('fairy-aura') && 5448);
     if ((aab === 'sheer-force' && (FLAG.secondary.has(mk) || mk === 'electro-shot')) || (aab === 'sand-force' && wthr === 'sand' && ['rock', 'ground', 'steel'].includes(type))
       || (aab === 'tough-claws' && contact) || (aab === 'punk-rock' && FLAG.sound.has(mk))) m.push(use(aab) && 5325);
+    if (aab === 'supreme-overlord' && a.fallen > 0) m.push(use(aab) && [4096, 4506, 4915, 5325, 5734, 6144][Math.min(5, a.fallen)]);
     if (ate) m.push(4915);
     if ((aab === 'reckless' && FLAG.recoil.has(mk)) || (aab === 'iron-fist' && FLAG.punch.has(mk))) m.push(use(aab) && 4915);
     if (dab === 'dry-skin' && type === 'fire') m.push(use(dab) && 5120);
@@ -353,8 +362,12 @@ function damageCalc(a, d, mk, o) {
     });
   };
   const pw = h => mk === 'triple-axel' ? 20 * (h + 1) : power;
-  const first = Array.from({ length: hits }, (_, h) => rollsOf(pw(h), !h, pb && h === 1));
-  const later = r.berry || (dab === 'multiscale' && full) || (knock && !keep) ? Array.from({ length: hits }, (_, h) => rollsOf(pw(h), false, pb && h === 1)) : first;
+  const first0 = Array.from({ length: hits }, (_, h) => rollsOf(pw(h), !h, pb && h === 1));
+  const later = r.berry || (dab === 'multiscale' && full) || (knock && !keep) ? Array.from({ length: hits }, (_, h) => rollsOf(pw(h), false, pb && h === 1)) : first0;
+  // 畫皮（d.disguise：還沒被揭穿；破格無視）：這次的第一下沒有傷害，揭穿後扣最大 HP 的 1/8（Showdown disguise onDamage／onUpdate），之後連用照常
+  const disg = d.disguise && dab === 'disguise' && d.key === 'mimikyu';
+  if (disg) { r.disguise = true; notes.add(`${abilZh(dab)}擋下第一下（改扣 1/8）`); }
+  const first = disg ? [Array(16).fill(Math.max(1, Math.floor(r.hp / 8))), ...first0.slice(1)] : first0;
   r.min = first.reduce((s, x) => s + x[0], 0);
   r.max = first.reduce((s, x) => s + x[15], 0);
   [r.rolls, r.later] = [first, later];
@@ -412,20 +425,22 @@ const hpOf = b => b.maxHp ?? statOf(MON[b.key].bs[0], invAt(b, 0, b.hp)[0], 0);
 function imposterVs(x, y, keepSt = false) {
   if (x.ab !== 'imposter' || x.tfFrom || !y || y.tfFrom) return x;
   return { ...y, tfFrom: x.key, maxHp: hpOf(x), cur: x.cur, item: x.item, noItem: x.noItem, status: x.status, walls: x.walls, field: x.field, tw: x.tw,
-    i: x.i, H: x.H, pct: x.pct, st: keepSt ? x.st : y.st };
+    i: x.i, H: x.H, pct: x.pct, st: keepSt ? x.st : y.st, live: x.live, fallen: x.fallen, bust: x.bust };
 }
 // 一對一對位：x、y 是 battler，對戰中另外帶 st { atk, def, spa, spd, spe } 能力變化、cur 目前剩下的 HP、tw 順風（沒給的當沒有、全滿）、
 // noItem 確定沒有道具、field 這一方場上還站著幾隻（見 damageCalc）、status 異常狀態（'brn' 灼傷：物理招式減半，毅力不減反而攻擊 ×1.5；
 // 'par' 麻痺：速度 ×½，飛毛腿不減反而 ×1.5）、walls 這一方的牆（反射壁、光牆、極光幕）；沒登錄招式的一方只算 OP.GG 使用率前 4 招（dmgRows 的 o.top，同預填的配招）；
 // f：{ fmt, weather, terrain, tr, crit 雙方都急所（對戰中反推傷害用）}（沒給的當沒有）；幫助、開場特性不算。
-// 道具兩個方向都帶著（damageCalc 只讀這個方向用得到的效果，如攻擊方不看樹果）。
+// live＝對戰中：算看場上狀況的特性（LIVE_ABILS：猛火類看 cur、大將看 fallen 這一方倒下幾隻、畫皮看 bust 被揭穿了沒；變身來的畫皮不算），
+// 沒給的（出戰選角、隊伍分析）不算。道具兩個方向都帶著（damageCalc 只讀這個方向用得到的效果，如攻擊方不看樹果）。
 // 回傳 xy＝x 打 y、yx＝y 打 x（dmgRows 的結果）、spd／first（speedPair：first 0＝x 先動、1＝y 先動、-1＝同速）
 function duel(x, y, f) {
   const o = { fmt: f.fmt, weather: f.weather || '', crit: !!f.crit, terrain: f.terrain || '', hh: false, top: 4 };
   const st = (b, k) => b.st?.[k] || 0;
-  const atk = b => ({ key: b.key, inv: b.atkInv, sp: b.sp, nat: b.nat, st: { atk: st(b, 'atk'), spa: st(b, 'spa'), def: st(b, 'def') }, item: b.item, ab: b.ab, set: b.set, field: b.field });
+  const atk = b => ({ key: b.key, inv: b.atkInv, sp: b.sp, nat: b.nat, st: { atk: st(b, 'atk'), spa: st(b, 'spa'), def: st(b, 'def') }, item: b.item, ab: b.ab, set: b.set, field: b.field,
+    pinch: !!b.live && (b.cur ?? hpOf(b)) <= hpOf(b) / 3, fallen: b.live ? b.fallen || 0 : 0 });
   const def = b => ({ key: b.key, hp: b.hp, inv: b.defInv, sp: b.sp, nat: b.nat, st: { def: st(b, 'def'), spd: st(b, 'spd'), atk: st(b, 'atk') }, item: b.item, ab: b.ab, cur: b.cur,
-    noItem: b.noItem, field: b.field, atkInv: b.atkInv, maxHp: b.maxHp });
+    noItem: b.noItem, field: b.field, atkInv: b.atkInv, maxHp: b.maxHp, disguise: !!b.live && !b.bust && !b.tfFrom });
   const spe = b => ({ key: b.key, inv: b.speInv, sp: b.sp, nat: b.nat, st: st(b, 'spe'), item: b.item, ab: b.ab, tw: !!b.tw, par: b.status === 'par', status: !!b.status });
   // a 打 d 這個方向：d 那一方的牆、a 灼傷（毅力有異常狀態就照灼傷的算法：攻擊 ×1.5、不減半，同對戰模擬）
   const dir = (a, d) => ({ ...o, walls: d.walls || [], burn: a.status === 'brn' || (a.ab === 'guts' && !!a.status) });
@@ -468,7 +483,8 @@ function matchup(x, y, f) {
   // 換上來：吃牠最痛的一招（這時只有我方的威嚇有作用）；剩下的 HP 比全滿少，正面都打不贏的換上來也當打不贏，不用再算
   const ds = xi === x ? d : duel(x, yi, f), cur = (x.cur ?? hpOf(x)) - Math.max(0, ...ds.yx.ok.map(r => r.r.max || 0));
   let sw = false;
-  if (head && cur > 0) { const d2 = duel({ ...x, cur }, yi, f); sw = winKO(fastestKO(d2.xy), fastestKO(d2.yx), d2.first); }
+  // 吃過一下：畫皮已經被揭穿（對戰中才算畫皮）
+  if (head && cur > 0) { const d2 = duel({ ...x, cur, bust: true }, yi, f); sw = winKO(fastestKO(d2.xy), fastestKO(d2.yx), d2.first); }
   return { head, sw, ohko: !head && b.n === 1 && (b.pri || d.first !== 0), first: d.first, spd: d.spd.map(s => s.v), me: a.n, opp: b.n,
     left: cur, big: ds.yx.ok[0]?.r.max ? ds.yx.ok[0].k : '' };
 }

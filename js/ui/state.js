@@ -12,7 +12,8 @@
 //   bi＝對手各格標的道具（沒標的空白、用預設，沒有道具寫 -）、bb＝對手各格選的特性、bx／by＝我方／對手各格選的型態、bw＝天氣、bf＝場地、br=1（戲法空間）、bg＝有順風的一方（me.opp）、
 //   bk＝我方這場帶的隊伍格子（. 分隔；照出戰選角時不寫，全部拿掉寫 -）、bv＝對手出場過的格子（. 分隔）、
 //   bu＝對手各格用過的招式（招式 key 用 + 接）、bz＝對手各格改過的能力點數與性格（「HP+攻擊+防禦+特攻+特防+速度.↑+↓」，沒改的那半空白）、
-//   bc＝異常狀態（我方 6 格, 對手 6 格；par／brn，沒有空白）、bl＝牆（我方.對手，各自 + 接）、bn＝我方道具沒了的格子（. 分隔）
+//   bc＝異常狀態（我方 6 格, 對手 6 格；par／brn，沒有空白）、bl＝牆（我方.對手，各自 + 接）、bn＝我方道具沒了的格子（. 分隔）、
+//   bd＝畫皮被揭穿了的格子（我方.對手，各自 + 接）
 //   模擬對戰：sb＝我方自己點的帶出場格子（先發排第一，. 分隔；照出戰選角建議時不寫）、sv＝超級進化的格子（自己點過才寫）、
 //   sk＝對手每種帶法打幾場（10 不寫）、sa＝決策方式 fast／fine（標準 std 不寫）
 const STATE_KEY = 'pkmn-champions-state';
@@ -70,7 +71,8 @@ function stateQuery() {
     ['bk', battle.bring ? battle.bring.join('.') || '-' : ''], ['bv', battle.seen.map((v, i) => v ? i : -1).filter(i => i >= 0).join('.')],
     ['bu', joinTrim(battle.used.map(u => u.join('+')))], ['bz', joinTrim(battle.osp.map(o => o ? `${o.sp ? o.sp.join('+') : ''}.${o.nat ? o.nat.join('+') : ''}` : ''))],
     ['bc', joinTrim([...battle.status.me, ...battle.status.opp])], ['bl', BT_SIDES.some(s => battle.walls[s].length) ? BT_SIDES.map(s => battle.walls[s].join('+')).join('.') : ''],
-    ['bn', battle.noItem.map((v, i) => v ? i : -1).filter(i => i >= 0).join('.')]]
+    ['bn', battle.noItem.map((v, i) => v ? i : -1).filter(i => i >= 0).join('.')],
+    ['bd', BT_SIDES.some(s => battle.bust[s].some(Boolean)) ? BT_SIDES.map(s => battle.bust[s].map((v, i) => v ? i : -1).filter(i => i >= 0).join('+')).join('.') : '']]
     .forEach(([k, v]) => { if (v) q.push(k + '=' + v); });
   if (sim.sel) {
     const pk = simMyPick();
@@ -184,6 +186,9 @@ function loadState(q) {
   const bl = (kv.bl || '').split('.');
   battle.walls = { me: BT_WALLS.filter(w => (bl[0] || '').split('+').includes(w)), opp: BT_WALLS.filter(w => (bl[1] || '').split('+').includes(w)) };
   battle.noItem = [0, 1, 2, 3, 4, 5].map(i => !!team.mons[i] && slots(kv.bn).includes(i));
+  // 畫皮破了：「我方格子+….對手格子+…」，只收有寶可夢的格子
+  const bust = (kv.bd || '').split('.'), busted = (s, list) => [0, 1, 2, 3, 4, 5].map(i => !!list[i] && slots((s || '').replace(/\+/g, '.')).includes(i));
+  battle.bust = { me: busted(bust[0], team.mons), opp: busted(bust[1], bring.opp) };
   battle.osp = cells(kv.bz).map((s, i) => {
     if (!bring.opp[i] || !s) return null;
     const [a = '', b = ''] = s.split('.'), sp = a.split('+').map(Number), nat = b.split('+').map(Number);

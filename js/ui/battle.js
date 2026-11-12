@@ -8,7 +8,8 @@
 // bring：我方這場帶的隊伍格子（null＝照出戰選角第 1 名組合，見 btBrought）；seen：對手各格出場過沒（放上場就標）；
 // used：對手各格用過的招式 key（見 btOppSet）；osp：對手各格改過的能力點數／性格 { sp?, nat? }（沒改的那項照 OP.GG 最常見，null＝都沒改）；
 // keys：記錄時各格的寶可夢 key（隊伍或對手換了寶可夢，那格的紀錄就清掉）；
-// status：雙方各格的異常狀態（'par' 麻痺／'brn' 灼傷，換下場不會好）；walls：雙方的牆（BT_WALLS）；noItem：我方各格的道具用掉了、被拍落（對手看 item 的 '-'）
+// status：雙方各格的異常狀態（'par' 麻痺／'brn' 灼傷，換下場不會好）；walls：雙方的牆（BT_WALLS）；noItem：我方各格的道具用掉了、被拍落（對手看 item 的 '-'）；
+// bust：雙方各格謎擬Ｑ的畫皮被揭穿了（換下場不會恢復）
 const BT_SIDES = ['me', 'opp'];
 const BT_STATS = [['atk', '攻擊'], ['def', '防禦'], ['spa', '特攻'], ['spd', '特防'], ['spe', '速度']];
 const BT_STATUS = [['', '沒有'], ['par', '麻痺'], ['brn', '灼傷']], BT_WALLS = ['reflect', 'light-screen', 'aurora-veil'];
@@ -17,10 +18,11 @@ const battle0 = () => ({ me: [-1, -1], opp: [-1, -1], sel: { me: 0, opp: 0 }, st
   hp: Array(6).fill(null), ohp: Array(6).fill(100), item: Array(6).fill(''), ab: Array(6).fill(''), form: { me: Array(6).fill(''), opp: Array(6).fill('') },
   weather: '', terrain: '', tr: false, tw: [], bring: null, seen: Array(6).fill(false), used: Array.from({ length: 6 }, () => []), osp: Array(6).fill(null),
   status: { me: Array(6).fill(''), opp: Array(6).fill('') }, walls: { me: [], opp: [] }, noItem: Array(6).fill(false),
+  bust: { me: Array(6).fill(false), opp: Array(6).fill(false) },
   keys: { me: team.mons.slice(), opp: bring.opp.slice() } });
 const battle = battle0();
-// 特性選單上算「影響這裡的計算」的（傷害、速度都看）
-const BT_REL = new Set([...ATK_REL, ...DEF_REL]);
+// 特性選單上算「影響這裡的計算」的（傷害、速度都看；猛火類、大將、畫皮這種看場上狀況的對戰中也算，見 LIVE_ABILS）
+const BT_REL = new Set([...ATK_REL, ...DEF_REL, ...LIVE_ABILS]);
 // 場上幾隻：單打 1、雙打 2（同先發的數量）
 const btN = () => LEAD_N[team.fmt];
 const btList = side => side === 'me' ? team.mons : bring.opp;
@@ -41,6 +43,7 @@ function syncBattle() {
     battle.keys[side][i] = k;
     battle.form[side][i] = '';
     battle.status[side][i] = '';
+    battle.bust[side][i] = false;
     if (side === 'me') { battle.hp[i] = null; battle.bring = null; battle.noItem[i] = false; }
     else { battle.ohp[i] = 100; battle.item[i] = ''; battle.ab[i] = ''; battle.seen[i] = false; battle.used[i] = []; battle.osp[i] = null; }
     battle[side].forEach((j, p) => { if (j === i) { battle[side][p] = -1; battle.st[side][p] = [0, 0, 0, 0, 0]; } });
@@ -98,6 +101,7 @@ function btFieldMon(side, p) {
 // 格子 i 的寶可夢：duel 用的 battler（我方照登錄的配招；對手套選的特性與 btOppItems 的道具、btOppSet），加上能力變化 st
 // （s＝[攻擊, 防禦, 特攻, 特防, 速度]；後排換上場是 0）、目前 HP cur、順風 tw、異常狀態 status、這一方的牆 walls、
 // 確定沒有道具 noItem（我方標了道具沒了、對手標了「沒有道具」）、場上還站著幾隻 field（雙打範圍招式只打到 1 隻時不減傷；至少算 1），
+// 看場上狀況的特性（duel 的 live）：fallen 這一方目前倒下幾隻（大將；HP 0 的格子）、bust 畫皮被揭穿了，
 // 另外帶 i 格子索引、H 最大 HP、pct 剩下的 HP %
 function btUnit(side, i, s) {
   const key = btKey(side, i), fmt = team.fmt, gone = side === 'me' ? battle.noItem[i] : battle.item[i] === '-';
@@ -107,7 +111,8 @@ function btUnit(side, i, s) {
   const H = hpOf(b), cur = side === 'me' ? Math.min(H, battle.hp[i] ?? H) : Math.ceil(H * battle.ohp[i] / 100);
   const field = Math.max(1, battle[side].slice(0, btN()).filter(j => j >= 0 && (side === 'me' ? battle.hp[j] !== 0 : battle.ohp[j] > 0)).length);
   return { ...b, st: Object.fromEntries(BT_STATS.map(([k], n) => [k, s[n]])), cur, tw: battle.tw.includes(side), status: battle.status[side][i],
-    walls: battle.walls[side], noItem: gone && !MON[key].base, field, i, H, pct: side === 'me' ? hpPct(cur, H) : battle.ohp[i] };
+    walls: battle.walls[side], noItem: gone && !MON[key].base, field, i, H, pct: side === 'me' ? hpPct(cur, H) : battle.ohp[i],
+    live: true, fallen: btList(side).filter((k, j) => k && (side === 'me' ? battle.hp[j] === 0 : battle.ohp[j] === 0)).length, bust: battle.bust[side][i] };
 }
 // ----- 上方：場上位置、HP、能力變化、型態、對手的特性與道具 -----
 const btHpText = (side, v, max) => !v ? '倒下' : side === 'me' ? `／${max}（${hpPct(v, max)}%）` : '%';
@@ -186,7 +191,7 @@ function btPosHTML(side, p) {
   return `<div ${attr}><div class="bt-h">${tag}<b>${m.zh}</b>${chips(m.types)}<button class="mini bt-off" data-bout="${fold}">下場</button></div>`
     + btFormHTML(side, i)
     + `<div class="bt-hp"><span class="c-l">HP</span><input type="range" ${hp}><input type="number" class="sel c-num" inputmode="numeric" ${hp}>`
-    + `<span class="meta bt-hpt">${btHpText(side, v, max)}</span></div>` + btEntryHTML(side, b)
+    + `<span class="meta bt-hpt">${btHpText(side, v, max)}</span></div>` + btEntryHTML(side, b) + btDisguiseHTML(side, i, b)
     + `<details class="bt-more" data-fold="${fold}"${btIsOpen(fold) ? ' open' : ''}><summary>${sum}</summary>${btStHTML(side, p)}${status}${info}</details></div>`;
 }
 // 出場特性一鍵套用（同傷害計算的提示）：威嚇＝對面場上每隻照 intimidateOn 改攻擊（不吃威嚇的不改、不服輸等反而上升），
@@ -197,6 +202,13 @@ function btEntryHTML(side, b) {
     wx && battle.weather !== f && `<button class="mini" data-bw="${f}">${abilZh(b.ab)}：改成${FIELD_ZH[f]}</button>`,
     tr && battle.terrain !== f && `<button class="mini" data-bf="${f}">${abilZh(b.ab)}：改成${FIELD_ZH[f]}</button>`].filter(Boolean);
   return btns.length ? `<div class="c-f"><span class="c-l">出場特性</span>${btns.join('')}</div>` : '';
+}
+// 畫皮（謎擬Ｑ的特性是畫皮時）：還在＝這一下沒有傷害、改扣 1/8；點「破了」切換（按「打中」「實際」打到牠也會自動標成破了）
+function btDisguiseHTML(side, i, b) {
+  if (b.key !== 'mimikyu' || b.ab !== 'disguise') return '';
+  const on = battle.bust[side][i];
+  return `<div class="c-f"><span class="c-l">${abilZh('disguise')}</span><button class="mini" data-bbust="${side}.${i}" aria-pressed="${on}">破了</button>`
+    + `<span class="meta">${on ? '已經破了，照一般傷害算' : '還在：第一下沒有傷害、改扣 1/8'}</span></div>`;
 }
 // 位置卡的能力變化、特性、道具可以收起：寬螢幕（並排顯示結果時）預設打開、窄螢幕預設收起，點過就照點的（不存網址）
 const btFold = {};
@@ -341,7 +353,8 @@ function btMoveRow(x, ctx) {
   // 氣勢披帶撐住了才用掉＝sash（打倒時才算）；超級進化帶的是超級石，不算
   const t = ctx.tgt, eat = !t?.item || MON[t.key].base ? '' : r.berry || DMG_ITEMS[t.item]?.balloon || (x.k === 'knock-off' && t.ab !== 'sticky-hold') ? '1'
     : r.endured === t.item ? 'sash' : '';
-  return `<div ${attr}${eat ? ` data-eat="${eat}"` : ''}><b>${MOVES[x.k][0]}</b>${chip(r.type)}${mtag(r.eff)}<span class="bt-pct">${hpPct(r.min, r.hp)}～${hpPct(r.max, r.hp)}%</span>`
+  // 打到畫皮還在的謎擬Ｑ（data-bust）：「打中」「實際」後標成破了
+  return `<div ${attr}${eat ? ` data-eat="${eat}"` : ''}${r.disguise ? ' data-bust' : ''}><b>${MOVES[x.k][0]}</b>${chip(r.type)}${mtag(r.eff)}<span class="bt-pct">${hpPct(r.min, r.hp)}～${hpPct(r.max, r.hp)}%</span>`
     + `${tags.length ? `<span class="meta">${tags.join('・')}</span>` : ''}<span class="ko k${kt.n}">${kt.text}</span>`
     + `<button class="mini bt-hit" data-bhit="${ctx.side}.${ctx.i}" data-dmg="${avg}"${r.endured ? ' data-end' : ''} title="照平均傷害扣掉約 ${hpPct(avg, r.hp)}%">打中</button>`
     + `<button class="mini bt-hit" data-bact="${id}" aria-pressed="${btEdit === id}" title="填打完剩下多少，和預測比對">實際</button>`
@@ -433,6 +446,9 @@ function btResultHTML() {
     + '先動看實際速度（能力變化、順風 ×2、戲法空間、講究圍巾、天氣／場地加速特性、麻痺 ×½）；同速各 50%，先制招式不看速度。能力變化換下場就清掉，異常狀態不會。'
     + '雙打的範圍招式打到兩隻以上時 ×0.75，對面場上只剩一隻（地震這類連隊友一起打的，隊友也不在）時不減；噴火／噴水以 HP 全滿計。'
     + '灼傷、麻痺在位置卡的「異常狀態」標，牆在下方「我方／對手的牆」標；出場特性（威嚇、開天氣／場地）在位置卡按一下套用；不含幫助與其他隊友效果。'
+    + '看場上狀況的特性（「傷害計算」分頁不算，這裡算）：猛火、激流、茂盛、蟲之預感在 HP 剩 1/3 以下時該屬性招式 ×1.5；'
+    + '大將照這一方目前倒下幾隻（HP 0 的），每隻威力 +10%（最多 5 隻）；謎擬Ｑ的畫皮還在時第一下沒有傷害、改扣 1/8（位置卡可以標「破了」，'
+    + '按「打中」「實際」打到牠也會自動標成破了，之後照一般傷害算）。加速、持久力這類回合中的能力變化請在位置卡自己調。'
     + '「打中」照那一招的平均傷害（最低、最高的平均）扣挨打那一方剩下的 HP（HP 全滿時氣勢披帶、結實撐住剩 1），實際扣多少看遊戲畫面再拉 HP 調整。'
     + '打了才知道：「實際」填遊戲裡打完剩下多少（我方 HP、對手 %），扣血並和預測比對；「實際：我先動／牠先動」和預測的速度比對。'
     + '對不上時會試對手的其他配置，列出對得上的（依 OP.GG 使用率排，最多 3 個），點「套用」就改成那樣算：'
@@ -496,9 +512,10 @@ $('#p-battle').addEventListener('click', e => {
     battle.form[side][+i] = d.k === btKey0(side, +i) ? '' : d.k;
     if (side === 'opp' && MON[d.k].base) battle.item[+i] = '';
   }
-  // 異常狀態、我方道具沒了、牆：點一下切換
+  // 異常狀態、我方道具沒了、畫皮破了、牆：點一下切換
   else if (d.bstat) { const [side, i] = d.bstat.split('.'); battle.status[side][+i] = d.v; }
   else if (d.bnoitem != null) battle.noItem[+d.bnoitem] = !battle.noItem[+d.bnoitem];
+  else if (d.bbust) { const [side, i] = d.bbust.split('.'); battle.bust[side][+i] = !battle.bust[side][+i]; }
   else if (d.bwall) { const w = battle.walls[d.bwall]; battle.walls[d.bwall] = w.includes(d.k) ? w.filter(x => x !== d.k) : [...w, d.k]; }
   // 威嚇：對面場上每隻照特性改攻擊（intimidateOn；不吃威嚇的不改）
   else if (d.bintim) {
@@ -523,6 +540,7 @@ $('#p-battle').addEventListener('click', e => {
     if (side === 'me') battle.hp[i] = v >= H ? null : v;
     else battle.ohp[i] = v ? Math.max(1, Math.round(v * 100 / H)) : 0;
     if (eat === '1' || (eat === 'sash' && cur === H && cur - +d.dmg <= 0)) btItemGone(side, i);
+    if (b.closest('.bt-mv')?.dataset.bust != null) battle.bust[side][i] = true;
     btMarkUsed(b.closest('.bt-mv'));
   }
   // 實際誰先動：和預測比對，結果顯示在那組對位
@@ -541,6 +559,7 @@ $('#p-battle').addEventListener('click', e => {
     if (dir === 'xy') battle.ohp[oi] = after; else battle.hp[mi] = after >= M.H ? null : after;
     // 道具沒了（同「打中」）：氣勢披帶要全滿時被打到剩 1（對手剩 1% 以下）才算撐住
     if (eat === '1' || (eat === 'sash' && T.cur >= T.H && after > 0 && after <= 1)) btItemGone(dir === 'xy' ? 'opp' : 'me', T.i);
+    if (b.closest('.bt-mv')?.dataset.bust != null) battle.bust[dir === 'xy' ? 'opp' : 'me'][T.i] = true;
     btMarkUsed(b.closest('.bt-mv'));
     btEdit = null;
   }
