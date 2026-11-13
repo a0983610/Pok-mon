@@ -7,7 +7,7 @@
 //   node tools/sim_check.js one 寶可夢A 寶可夢B 招式A 招式B [場數 200]   只比一組，並印出兩邊第一場的逐回合紀錄
 //   node tools/sim_check.js moves   招式資料（OP.GG 的 MOVES）對照 Showdown：屬性、分類、威力、命中、PP、先制
 // 雙方的配招、點數、性格、特性、道具都照模擬用的（OP.GG 預設：simMon），Showdown 用「[Gen 9 Champions] Custom Game」（Lv50、不驗隊伍）。
-// 想出的招不能選（PP 用完、被挑釁、定身、再來一次或講究圍巾鎖在別招）時兩邊都改出招式欄第一個能選的；擊掌奇襲類上場第一回合以後不當備用。
+// 想出的招不能選（PP 用完、被挑釁、定身、巨力錘連用、再來一次或講究圍巾鎖在別招）時兩邊都改出招式欄第一個能選的；擊掌奇襲類上場第一回合以後不當備用。
 // 注意：npm 上的 Showdown 不一定跟得上遊戲改版（0.11.11 是 2026-07 的，早於 1.2 版：祈願、吸取力量的 PP 遊戲已經改成 8），
 // 這類差異列在 KNOWN 的「Showdown 舊資料」。
 const fs = require('fs'), vm = require('vm'), path = require('path');
@@ -22,21 +22,17 @@ const ctxG = { console };
 vm.createContext(ctxG);
 vm.runInContext(['base-stats.js', 'mons-data.js', 'js/engine/core.js', 'js/engine/roles.js', 'js/engine/damage.js', 'js/engine/sim.js']
   .map(f => fs.readFileSync(path.join(R, f), 'utf8')).join('\n;\n') + `
-;globalThis.E = { MONS, MON, MOVES, SIM_FIRST, SIM_SUP, SIM_PRI, simMon, simStart, simTurn, simOver, simWinner, simAct, simCtx, simGreedyPick,
+;globalThis.E = { MONS, MON, MOVES, SIM_FIRST, SIM_SUP, SIM_PRI, SIM_TWICE, simMon, simStart, simTurn, simOver, simWinner, simAct, simCtx, simGreedyPick,
   statOf, natOf, stoneOf, useOf };`, ctxG);
 const E = ctxG.E;
 const alnum = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
 // ---------- 已知的缺口（還沒做的）：Showdown id → 原因；有差異的組合牽涉到這些就標 △ ----------
 const KNOWN = Object.fromEntries(Object.entries({
-  '持久力': 'stamina', '碎裂鎧甲': 'weakarmor', '幻覺': 'illusion', '危險迴避': 'emergencyexit', '火焰之軀': 'flamebody', '輕裝': 'unburden',
-  '複製': 'trace', '電力轉換': 'electromorphosis', '自信過度': 'moxie', '正義之心': 'justified', '心情不定': 'moody', '黏滑': 'gooey',
-  '毒刺': 'poisonpoint', '迷人之軀': 'cutecharm', '毒滿地': 'toxicdebris', '怒火沖天': 'berserk', '熱交換攻擊+1': 'thermalexchange',
-  '吸收類特性的回血／強化': 'lightningrod stormdrain motordrive sapsipper waterabsorb voltabsorb flashfire eartheater dryskin',
-  '超級狠辣椒特性': 'spicyspray', '超級龍頭地鼠特性': 'piercingdrill', '超級大食花特性': 'innardsout', '超級日光（日光束不蓄力）': 'megasol',
-  '巨劍突擊副作用': 'glaiverush', '電光雙擊失去屬性': 'doubleshock', '靈騷': 'poltergeist', '岩斧撒岩': 'stoneaxe', '千重濤撒菱': 'ceaselessedge',
-  '巨力錘不能連用': 'gigatonhammer', '逆鱗': 'outrage', '羽棲失去飛行屬性': 'roost', '綁住類': 'infestation whirlpool firespin sandtomb bind wrap',
-  '冰旋清場地': 'icespinner', '連續攻擊固定3下': 'bulletseed rockblast iciclespear pinmissile watershuriken scaleshot tailslap',
+  '幻覺': 'illusion', '危險迴避': 'emergencyexit', '火焰之軀': 'flamebody', '輕裝': 'unburden', '複製': 'trace', '電力轉換': 'electromorphosis',
+  '自信過度': 'moxie', '正義之心': 'justified', '黏滑': 'gooey', '毒刺': 'poisonpoint', '迷人之軀': 'cutecharm', '毒滿地': 'toxicdebris', '怒火沖天': 'berserk',
+  '超級龍頭地鼠特性': 'piercingdrill', '超級大食花特性': 'innardsout', '巨劍突擊副作用': 'glaiverush', '靈騷': 'poltergeist', '岩斧撒岩': 'stoneaxe',
+  '千重濤撒菱': 'ceaselessedge', '逆鱗': 'outrage', '羽棲失去飛行屬性': 'roost', '冰旋清場地': 'icespinner',
   '逃脫按鍵': 'ejectbutton', '紅牌': 'redcard', '場地種子': 'psychicseed grassyseed electricseed mistyseed',
   'Showdown 舊資料（祈願、吸取力量 PP）': 'wish strengthsap',
 }).flatMap(([why, ks]) => ks.split(' ').map(k => [k, why])));
@@ -113,7 +109,7 @@ function ourAct(st, s, k) {
   const M = E.simAct(st, s);
   if (M.rech) return { t: 'rech' };
   if (M.chg) return { t: 'mv', k: M.chg };
-  const ok = x => M.pp[x] > 0 && !(M.v.taunt && E.SIM_SUP[x]) && M.v.dis?.k !== x
+  const ok = x => M.pp[x] > 0 && !(M.v.taunt && E.SIM_SUP[x]) && M.v.dis?.k !== x && !(E.SIM_TWICE.has(x) && M.last === x)
     && !(M.v.enc && M.moves.includes(M.v.encK) && M.pp[M.v.encK] > 0 && M.v.encK !== x)
     && !(M.lock && M.item === 'choice-scarf' && M.moves.includes(M.lock) && M.lock !== x);
   if (ok(k)) return { t: 'mv', k };
@@ -207,7 +203,9 @@ cases.forEach(([ka, kb, ma, mb], ci) => {
   if (one && !sets[ka]?.M.moves.includes(ma)) console.log(`注意：${ma} 不在 ${ka} 模擬用的招式裡（${sets[ka].M.moves.join(' ')}），兩邊都會改出第一個能選的`);
   const o = runOurs(ka, kb, ma, mb, N, SEED * 1000 + ci, !!one), s = runSD(sets[ka], sets[kb], ma, mb, N), f = compare(o, s);
   const ai = k => `${sets[k].set.ability}/${sets[k].set.item || '沒有道具'}`;
-  const known = [...new Set([ka, kb].flatMap(k => [alnum(sets[k].set.ability), alnum(sets[k].set.item)]).concat([alnum(ma), alnum(mb)]).filter(x => KNOWN[x]).map(x => KNOWN[x]))];
+  // PP 不同的招式（祈願、吸取力量）常在想出的招 PP 用完後當備用招出現，整套招式都看
+  const ppAll = [ka, kb].flatMap(k => sets[k].M.moves.map(alnum)).filter(x => ['wish', 'strengthsap'].includes(x));
+  const known = [...new Set([ka, kb].flatMap(k => [alnum(sets[k].set.ability), alnum(sets[k].set.item)]).concat([alnum(ma), alnum(mb)], ppAll).filter(x => KNOWN[x]).map(x => KNOWN[x]))];
   if (f.length) { bad++; if (!known.length) unknown++; known.forEach(x => { tally[x] = (tally[x] || 0) + 1; }); }
   if (f.length || one) console.log(`${!f.length ? '○' : known.length ? '△' : '✘'} #${ci} ${E.MON[ka].zh}(${E.MOVES[ma]?.[0] || ma}) vs ${E.MON[kb].zh}(${E.MOVES[mb]?.[0] || mb})`
     + ` [${ka} ${kb} ${ma} ${mb}]〈${ai(ka)}｜${ai(kb)}〉：${f.join('；') || '沒有差異'}${known.length ? '　⇐ 已知：' + known.join('、') : ''}`);

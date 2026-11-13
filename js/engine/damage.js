@@ -62,7 +62,7 @@ const FLAG = Object.fromEntries(Object.entries({
     + 'shadow-punch shadow-sneak slash snap-trap solar-blade spirit-break steel-roller stomping-tantrum stone-axe storm-throw sucker-punch '
     + 'super-fang supercell-slam superpower temper-flare thrash throat-chop thunder-fang thunder-punch trailblaze triple-axel trop-kick u-turn '
     + 'upper-hand volt-tackle waterfall wave-crash wild-charge wood-hammer x-scissor zen-headbutt',
-  punch: 'bullet-punch double-shock drain-punch dynamic-punch fire-punch hammer-arm headlong-rush ice-hammer ice-punch jet-punch mach-punch '
+  punch: 'bullet-punch drain-punch dynamic-punch fire-punch hammer-arm headlong-rush ice-hammer ice-punch jet-punch mach-punch '
     + 'meteor-mash rage-fist shadow-punch thunder-punch',
   bite: 'bite crunch fire-fang ice-fang jaw-lock poison-fang psychic-fangs thunder-fang',
   bullet: 'acid-spray aura-sphere beak-blast bullet-seed energy-ball focus-blast gyro-ball pollen-puff pyro-ball rock-blast rock-wrecker seed-bomb '
@@ -85,8 +85,9 @@ const FLAG = Object.fromEntries(Object.entries({
     + 'sucker-punch upper-hand vacuum-wave water-shuriken',
 }).map(([f, s]) => [f, new Set(s.split(' '))]));
 // 特性，效果與倍率照 Smogon champions.ts。超級進化專屬、ABILS（一般寶可夢的 OP.GG 詳細頁）裡沒有的中文名依神奇寶貝百科「特性列表」
+// （辣椒噴發依 Bulbapedia Spicy Spray 頁的中文名）
 const ABIL_ZH = { aerilate: '飛行皮膚', dragonize: '龍皮膚', eelevate: '鰻鰻高升', 'mega-sol': '超級日光', 'fire-mane': '火焰鬃毛',
-  'aura-guard': '波導防護', 'parental-bond': '親子愛', 'fairy-aura': '妖精氣場' };
+  'aura-guard': '波導防護', 'parental-bond': '親子愛', 'fairy-aura': '妖精氣場', 'spicy-spray': '辣椒噴發' };
 const abilZh = k => ABILS[k]?.[0] || ABIL_ZH[k] || '';
 // 寶可夢 key 在 fmt 實際用的特性：超級進化用固定特性；其他用選的 cur，沒選或不在這隻的常用特性裡就用使用率最高的；沒有統計回傳 ''
 function defAbOf(key, fmt, cur = '') {
@@ -192,7 +193,7 @@ function speedPair(x, y, f) {
 // 看場上狀況的特性（LIVE_ABILS，沒給就不算）：a.pinch＝攻擊方 HP 剩 1/3 以下（PINCH_AB）、a.fallen＝攻擊方這一方倒下幾隻（大將）、
 // d.disguise＝防守方的畫皮還沒被揭穿（這次的第一下沒有傷害、改扣 1/8，之後連用照常；回傳 disguise 標記）；
 // 對戰模擬另外給：a.types／d.types＝場上現在的屬性（變幻自如、自由者換過；沒給照圖鑑）、a.ptUsed＝攻擊方的變幻自如／自由者這次上場已經發動過
-// （發動過就只有現在的屬性算本系；沒發動過的這招出手前會變成招式的屬性，照樣算本系）；
+// （發動過就只有現在的屬性算本系；沒發動過的這招出手前會變成招式的屬性，照樣算本系）、a.flashFire＝攻擊方的引火吸收過火屬性招式（火屬性招式攻擊／特攻 ×1.5）；
 // 雙打時 a.field／d.field＝攻擊方／防守方場上還站著幾隻（沒給當 2）：範圍招式實際只打到 1 隻時不減傷（Showdown battle-actions.ts：targets.length > 1 才 spreadHit）；
 // o：{ fmt 's'／'d', weather, crit, terrain, hh 幫助, walls 防守方的牆, burn 攻擊方灼傷, bp 威力（對戰模擬給隨場上狀況變的，見 simVarBp；沒給照資料）,
 //   last 攻擊方比防守方晚出招（特性分析；沒給當先出招）}
@@ -282,6 +283,8 @@ function damageCalc(a, d, mk, o) {
   if ((dab === 'thick-fat' && (type === 'fire' || type === 'ice')) || (dab === 'water-bubble' && type === 'fire') || (dab === 'purifying-salt' && type === 'ghost')
     || (dab === 'heatproof' && type === 'fire')) atMods.push(use(dab) && 2048);
   if (a.pinch && PINCH_AB[aab] === type) atMods.push(use(aab) && 6144);
+  // 引火（Showdown flashfire 狀態 onModifyAtk／onModifySpA）：吸收過火屬性招式後自己的火屬性招式 ×1.5（對戰模擬給 a.flashFire）
+  if (a.flashFire && aab === 'flash-fire' && type === 'fire') atMods.push(use(aab) && 6144);
   if (ait.atk && family(A) === ait.mon) atMods.push(ait.atk);
   atk = Math.max(1, pokeRound(atk * chainMods(atMods, 410, 131072) / 4096));
   let def = statOf(D.bs[di], dsp, di, dnat);

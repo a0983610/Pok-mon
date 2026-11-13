@@ -2,8 +2,8 @@
 // ---------- 對戰模擬（單打：6 選 3，雙方每回合同時出招） ----------
 // 算攻擊招式的傷害與招式本身附帶的效果（使用限制、自己的能力變化、反作用力與吸血、打完換人、追加效果見 SIM_SEC）、命中率（見 simAcc），
 // 加上輔助招（強化、守住、回復、異常狀態、撒菱、擾亂，見 SIM_SUP）與相關的道具、特性、回合結束效果，以及 PP（照 OP.GG 冠軍版的 PP，用完只能掙扎）。
-// 看場上狀況的特性：猛火類、大將（simCalc）、畫皮（simDisguised）、加速（simEnd）、踩影（simOpts）、變幻自如／自由者（simProtean）、
-// 戰鬥切換（simStance）、詛咒之軀（simMove）；威力會變的招式見 simVarBp。
+// 看場上狀況的特性：猛火類、大將（simCalc）、畫皮（simDisguised）、加速、心情不定（simEnd）、踩影（simOpts）、變幻自如／自由者（simProtean）、
+// 戰鬥切換（simStance）、吸收類（simAbsorb）、被打中發動的（simOnHit）、超級日光（simWxOf）；威力會變的招式見 simVarBp。
 // 不算：威嚇、變身者、開天氣場地以外的出場特性、命中閃避的能力變化、少數特殊的追加效果（見 SIM_SEC 上方）。
 // 各表的資料來源寫在表的上方；Showdown＝Pokémon Showdown 的 data/moves.ts、conditions.ts、items.ts、abilities.ts、
 // sim/battle-actions.ts、sim/battle.ts，冠軍版改過的照 data/mods/champions/（conditions.ts、moves.ts、abilities.ts）。
@@ -99,6 +99,22 @@ const SIM_HIDE = new Set(['dig', 'phantom-force']);
 const SIM_PIVOT = new Set(['u-turn', 'volt-switch', 'flip-turn']);
 const SIM_PHAZE = new Set(['dragon-tail', 'circle-throw']);
 const SIM_SPIN = new Set(['rapid-spin', 'mortal-spin']);
+// 不能連續使用（Showdown flags.cantusetwice：上一次用的就是這招時不能選；資料裡只有巨力錘）
+const SIM_TWICE = new Set(['gigaton-hammer']);
+// 打中後自己失去這個屬性、沒有這個屬性時失敗（Showdown doubleshock／burnup：onTryMove 失敗、self.onHit setType 把它換成 ???＝沒有屬性）
+const SIM_LOSE_TYPE = { 'double-shock': 'electric', 'burn-up': 'fire' };
+// 綁住類（Showdown volatileStatus partiallytrapped）：打中後 5 或 6 回合（random(5, 7)，期望值模式取 5；含這回合，回合結束先扣再看）
+// 每回合結束扣最大 HP 的 1/8（緊綁束帶 1/6），被綁住的不能換人（幽靈屬性可以）；用的那隻離場或倒下就解除；高速旋轉解除自己的
+const SIM_BIND = new Set(['infestation', 'whirlpool', 'fire-spin', 'sand-tomb', 'bind', 'wrap', 'snap-trap']);
+// 連續攻擊 2～5 下的（damageCalc 的 VAR_HITS）實際下數：35%／35%／15%／15%（Showdown multihit [2, 5]，連續攻擊特性固定 5 下）；
+// 期望值模式各下的權重（打到第 h 下的機率，平均 3.1 下）
+const SIM_HIT_N = [[2, 0.35], [3, 0.35], [4, 0.15], [5, 0.15]];
+const SIM_HIT_W = [1, 1, 0.65, 0.3, 0.15];
+// 吸收類特性（Showdown onTryHit）：t 吸收的屬性；heal 回最大 HP 的 1/4（儲水、蓄電、乾燥皮膚、食土）、b 提升能力（避雷針、引水、電氣引擎、食草）、
+// ff 引火（之後自己的火屬性招式 ×1.5，換下場消失；見 damageCalc 的 a.flashFire）
+const SIM_ABSORB = { 'water-absorb': { t: 'water', heal: 1 }, 'volt-absorb': { t: 'electric', heal: 1 }, 'dry-skin': { t: 'water', heal: 1 },
+  'earth-eater': { t: 'ground', heal: 1 }, 'lightning-rod': { t: 'electric', b: { spa: 1 } }, 'storm-drain': { t: 'water', b: { spa: 1 } },
+  'motor-drive': { t: 'electric', b: { spe: 1 } }, 'sap-sipper': { t: 'grass', b: { atk: 1 } }, 'flash-fire': { t: 'fire', ff: 1 } };
 // 威力隨自己剩下的 HP：資料的威力 × 剩下 HP ÷ 最大 HP，取整、至少 1（Showdown basePowerCallback）
 const SIM_HPBP = new Set(['eruption', 'water-spout']);
 // 輔助招（Showdown data/moves.ts，冠軍版有改的照 mods/champions）：kind 效果種類；p 先制等級；tgt＝目標是對手場上那隻；
@@ -167,7 +183,8 @@ const SIM_ST0 = () => ({ atk: 0, def: 0, spa: 0, spd: 0, spe: 0 });
 // out 有沒有上過場、status 異常狀態（tox 劇毒累積、slp 還要睡幾次、frz 冰凍還剩幾次出招機會）、v 換下場就清掉的狀態（sub 替身 HP、taunt、enc／encK 再來一次、seed、
 // curse、yawn、focus、charge、trap、prot／endure／stall／protUsed 守住類、flinch 這回合畏縮、conf 混亂還剩幾次出招機會、fallen 大將算的倒下隻數、
 // types／pt 變幻自如換過的屬性與這次上場發動過了（simProtean）、dis 被定身的招式 { k, n 還剩幾次回合結束 }（詛咒之軀）、
-// mt 這隻最近一次出招 { t 第幾回合, ok 有沒有成功 }（豁出去、跺腳）、got 這回合被打的傷害（反擊類、雪崩））、
+// mt 這隻最近一次出招 { t 第幾回合, ok 有沒有成功 }（豁出去、跺腳）、got 這回合被打的傷害（反擊類、雪崩）、ff 引火吸收過火屬性招式、
+// bind 被綁住類招式綁住 { s 用的那方, i 用的那隻在隊伍第幾隻, dur 還剩幾回合, div 每回合扣最大 HP 的 1/div, k 招式 }）、
 // last 上一次用的招式（再來一次用）、pp 各招剩下的 PP（OP.GG 冠軍版的 PP）、bust 畫皮被揭穿了（換下場也不會恢復）、
 // fk 戰鬥切換後能力值用的型態（simStance；換下場變回 key）、hits 被攻擊打中幾下（憤怒之拳；換下場不重算）
 // 能算的招式：damageCalc 算得了的攻擊招式（含看體重的）、固定傷害、反擊類與一擊必殺（SIM_FIXED／SIM_REACT／SIM_OHKO）、SIM_SUP 的輔助招；其他（變身…）不列
@@ -290,6 +307,8 @@ const simClone = st => ({ sd: st.sd.map(x => ({ ...x, mons: x.mons.map(simCloneM
 // 場上現在的屬性（變幻自如、自由者換過的，見 simProtean）；能力值用的型態（戰鬥切換換過的，見 simStance）
 const simTypes = M => M.v.types || MON[M.key].types;
 const simFk = M => M.fk || M.key;
+// M 被綁住類綁著、用的那隻還在場上（離場或倒下就不算，見 SIM_BIND）
+const simBound = (st, M) => !!M.v.bind && st.sd[M.v.bind.s].act === M.v.bind.i && simAct(st, M.v.bind.s).hp > 0;
 // 在地面上（撒菱、毒菱、黏黏網用）：不是飛行屬性、沒有飄浮、沒帶氣球（Showdown isGrounded）
 const simGround = M => !simTypes(M).includes('flying') && M.b.ab !== 'levitate' && M.item !== 'air-balloon';
 // ---------- 天氣與場地 ----------
@@ -315,7 +334,17 @@ function simFieldAb(st, s, M, t, hit = false) {
 }
 const simEntryField = (st, s, M) => simFieldAb(st, s, M, WX_AB[M.b.ab] || TER_AB[M.b.ab]);
 // 這一招現在要不要先蓄力（SIM_CHARGE；晴天的日光束、日光刃、下雨的電光束不用，SIM_CHARGE_WX）
-const simMustCharge = (st, M, k) => SIM_CHARGE.has(k) && M.chg !== k && simWx(st) !== SIM_CHARGE_WX[k];
+const simMustCharge = (st, M, k) => SIM_CHARGE.has(k) && M.chg !== k && simWxOf(st, M, k) !== SIM_CHARGE_WX[k];
+// M 出招 k 時看的天氣：超級日光自己出招時一律當晴天（Showdown pokemon.effectiveWeather：出招中的是超級日光、而且不是電光束）
+const simWxOf = (st, M, k) => M.b.ab === 'mega-sol' && k !== 'electro-shot' ? 'sun' : simWx(st);
+// M 出招 k 實際的屬性（氣象球照天氣、大地波動照場地、皮膚類把一般招式變屬性、濕潤之聲把聲音招式變水，同 damageCalc；掙扎沒有屬性）
+function simMoveType(st, M, k) {
+  if (k === SIM_STRUGGLE) return '';
+  const wx = simWxOf(st, M, k), ter = simTer(st), ty = MOVES[k][1];
+  if (k === 'weather-ball') return wx ? WB_TYPE[wx] : ty;
+  if (k === 'terrain-pulse') return ter && simGround(M) ? TERRAIN_TYPE[ter] : ty;
+  return ATE[M.b.ab] && ty === 'normal' ? ATE[M.b.ab] : M.b.ab === 'liquid-voice' && FLAG.sound.has(k) ? 'water' : ty;
+}
 // 這一招的先制等級：SIM_PRI 或輔助招的 p；特性惡作劇之心讓輔助招 +1（Showdown prankster）；青草滑梯在青草場地、自己在地面上時 +1（grassyglide onModifyPriority）
 const simPri = (st, M, k) => (SIM_PRI[k] ?? SIM_SUP[k]?.p ?? 0) + (SIM_SUP[k] && M.b.ab === 'prankster' ? 1 : 0)
   + (k === 'grassy-glide' && simTer(st) === 'grassy' && simGround(M) ? 1 : 0);
@@ -367,7 +396,8 @@ function simVarBp(st, A, D, k, last) {
 }
 // A 打 D 用招式 k 的 damageCalc（crit 急所）；結果依會影響傷害的狀態快取（D 剩下的 HP 只看滿不滿：氣勢披帶、結實、多重鱗片）。
 // D 那一方的牆、A 灼傷（特性毅力有異常狀態就照 damageCalc 的灼傷算，攻擊 ×1.5、不減半）、威力會變的招式（simVarBp）也算進去；
-// 雙方照場上現在的屬性（simTypes）與能力值用的型態（simFk），A 的變幻自如這次上場發動過了就不再每招本系；D 沒有道具時拍落不加成（noItem）；
+// 雙方照場上現在的屬性（simTypes）與能力值用的型態（simFk），A 的變幻自如這次上場發動過了就不再每招本系、引火吸收過（v.ff）火屬性招式 ×1.5；
+// D 沒有道具時拍落不加成（noItem）；
 // 看場上狀況的特性：猛火類（PINCH_AB）看 A 剩下的 HP、大將看 A.v.fallen（見 simSwitch）；畫皮不在這裡算（見 simMove）；
 // last＝D 這回合已經出過招（特性分析 ×1.3；同對焦鏡，算期望值時不知道順序不給）
 function simCalc(ctx, st, A, D, k, crit, last = false) {
@@ -376,16 +406,16 @@ function simCalc(ctx, st, A, D, k, crit, last = false) {
   const spa = A.st.spa - (CHARGE_SPA.has(k) ? 1 : 0), full = D.hp >= D.max;
   const burn = A.status === 'brn' || (A.b.ab === 'guts' && !!A.status), walls = Object.keys(dSide.scr);
   const pinch = !!PINCH_AB[A.b.ab] && A.hp <= A.max / 3, fallen = A.v.fallen || 0;
-  const ak = simFk(A), dk = simFk(D), aTy = simTypes(A), dTy = simTypes(D), pt = !!A.v.pt;
+  const ak = simFk(A), dk = simFk(D), aTy = simTypes(A), dTy = simTypes(D), pt = !!A.v.pt, ff = !!A.v.ff;
   // 撲擊看自己的防禦變化、欺詐看對手的攻擊變化，都要進快取的鍵
   // 天氣、場地（simWx、simTer）照 damageCalc 算：晴雨強化減弱、沙暴岩石特防、下雪冰防禦、氣象球、場地強化與減弱、精神場地擋先制、鐵滾輪沒場地失敗…
   const wx = simWx(st), ter = simTer(st);
-  const key = [A.id, ak, aTy.join('.'), pt, A.item, A.st.atk, spa, A.st.def, burn, D.id, dk, dTy.join('.'), D.item, D.st.def, D.st.spd, D.st.atk, full,
+  const key = [A.id, ak, aTy.join('.'), pt, ff, A.item, A.st.atk, spa, A.st.def, burn, D.id, dk, dTy.join('.'), D.item, D.st.def, D.st.spd, D.st.atk, full,
     walls.join('.'), k, crit, bp, pinch, fallen, last, wx, ter].join('|');
   let r = ctx.memo.get(key);
   if (!r) {
     const a = A.b, d = D.b;
-    r = damageCalc({ key: ak, types: aTy, ptUsed: pt, inv: a.atkInv, sp: a.sp, nat: a.nat, st: { atk: A.st.atk, spa, def: A.st.def }, item: A.item, ab: a.ab, pinch, fallen },
+    r = damageCalc({ key: ak, types: aTy, ptUsed: pt, flashFire: ff, inv: a.atkInv, sp: a.sp, nat: a.nat, st: { atk: A.st.atk, spa, def: A.st.def }, item: A.item, ab: a.ab, pinch, fallen },
       { key: dk, types: dTy, hp: d.hp, inv: d.defInv, sp: d.sp, nat: d.nat, st: { def: D.st.def, spd: D.st.spd, atk: D.st.atk }, item: D.item, noItem: !D.item, ab: d.ab,
         cur: full ? undefined : D.hp, atkInv: d.atkInv },
       k, { fmt: ctx.fmt, weather: wx, crit, terrain: ter, hh: false, walls, burn, bp, last });
@@ -418,8 +448,10 @@ function simFixed(ctx, st, A, D, k, exp) {
   const rolls = [Array(16).fill(d)];
   return { eff: 1, crit: false, rolls, later: rolls, endured, berry: false, fixed: true, acc };
 }
-// 這一招打 D 的計算：固定傷害、反擊類、一擊必殺用 simFixed，其他用 simCalc
-const simHit = (ctx, st, A, D, k, crit, exp, last) => SIM_FIXED[k] || SIM_REACT[k] || SIM_OHKO.has(k) ? simFixed(ctx, st, A, D, k, exp) : simCalc(ctx, st, A, D, k, crit, last);
+// 這一招打 D 的計算：固定傷害、反擊類、一擊必殺用 simFixed，其他用 simCalc；電光雙擊、燃盡自己沒有那個屬性時失敗（SIM_LOSE_TYPE）
+const simHit = (ctx, st, A, D, k, crit, exp, last) => SIM_LOSE_TYPE[k] && !simTypes(A).includes(SIM_LOSE_TYPE[k])
+  ? { eff: 0, fail: `已經沒有${TYPES[IDX[SIM_LOSE_TYPE[k]]].zh}屬性` }
+  : SIM_FIXED[k] || SIM_REACT[k] || SIM_OHKO.has(k) ? simFixed(ctx, st, A, D, k, exp) : simCalc(ctx, st, A, D, k, crit, last);
 // 打中時的期望傷害（各下的 16 個亂數取平均加總；每下判定命中的招式第二下起乘上命中的機率；氣勢披帶、結實撐住時最多打到剩 1；
 // 畫皮還在時第一下改算揭穿的 1/8）；輔助招是 0
 function simExpHit(ctx, st, A, D, k) {
@@ -429,7 +461,9 @@ function simExpHit(ctx, st, A, D, k) {
   const r = simHit(ctx, st, A, D, k, false, true);
   if (!r.eff) return 0;
   const pm = SIM_MULTIACC.has(k) && A.b.ab !== 'skill-link' ? simAcc(st, A, D, k, false) / 100 : 1;
-  const e = r.rolls.reduce((t, xs, h) => t + (h || !disg ? pm ** h * xs.reduce((a, x) => a + x, 0) / 16 : D.max / 8), 0);
+  // 2～5 下的連續攻擊照各下打到的機率（SIM_HIT_W，同 simMove）
+  const ws = HITS[k]?.[1] === VAR_HITS && A.b.ab !== 'skill-link' ? SIM_HIT_W : r.rolls.map(() => 1);
+  const e = ws.reduce((t, w, h) => t + w * (h || !disg ? pm ** h * r.rolls[Math.min(h, r.rolls.length - 1)].reduce((a, x) => a + x, 0) / 16 : D.max / 8), 0);
   return r.endured && D.hp >= D.max ? Math.min(e, D.hp - 1) : e;
 }
 // 期望傷害＝打中時的期望傷害 × 命中率（simAcc；這裡不知道出招順序，對焦鏡不算）
@@ -609,7 +643,8 @@ function simFutile(st, s, k) {
   if (!x) return false;
   const side = st.sd[s], M = simAct(st, s), T = simAct(st, 1 - s), tSide = st.sd[1 - s], tb = T.b.ab;
   const capped = (P, d) => Object.entries(d).every(([st_, v]) => ((P.b.ab === 'contrary' ? -v : v) > 0 ? P.st[st_] >= 6 : P.st[st_] <= -6));
-  if (x.tgt && (T.hp <= 0 || tb === 'good-as-gold' || (T.v.sub && !x.sub) || (M.b.ab === 'prankster' && simTypes(T).includes('dark')) || simPsyBlock(st, M, T, k))) return true;
+  if (x.tgt && (T.hp <= 0 || tb === 'good-as-gold' || (T.v.sub && !x.sub) || (M.b.ab === 'prankster' && simTypes(T).includes('dark')) || simPsyBlock(st, M, T, k)
+    || (SIM_ABSORB[tb] && M.b.ab !== 'mold-breaker' && SIM_ABSORB[tb].t === simMoveType(st, M, k)))) return true;
   if (x.r && tb === 'magic-bounce') return true;
   const bare = !Object.values(side.haz).some(Boolean) && !Object.values(tSide.haz).some(Boolean);
   switch (x.kind) {
@@ -649,8 +684,10 @@ function simFutile(st, s, k) {
     default: return false;
   }
 }
-// 一方這回合能做的：招式（再來一次鎖住的那招；講究圍巾鎖住的那招（圍巾被拍落就解除，Showdown choicelock）；PP 用完的、被挑釁時的輔助招、被定身的招式不能選；
-// 擊掌奇襲、迎頭一擊要上場後第一回合；一定失敗的輔助招不列，見 simFutile）、換人（後排還站著的；背水一戰、被對手的踩影困住不能換）。
+// 一方這回合能做的：招式（再來一次鎖住的那招；講究圍巾鎖住的那招（圍巾被拍落就解除，Showdown choicelock）；PP 用完的、被挑釁時的輔助招、被定身的招式、
+// 上一次剛用過的巨力錘（SIM_TWICE）不能選；
+// 擊掌奇襲、迎頭一擊要上場後第一回合；一定失敗的輔助招不列，見 simFutile）、換人（後排還站著的；背水一戰、被對手的踩影困住、
+// 被綁住類綁著（用的那隻還在場上，simBound；幽靈屬性不受影響）不能換）。
 // 能選的招式（有 PP、沒被挑釁擋）一招都沒有時只能掙扎（或換人）；要休息的、蓄力中的只能照做、不能換人；
 // 招式都會失敗又不能換人時是 none（什麼都不做）。
 // 連續 SIM_IDLE 回合雙方都沒扣血也沒換人時，打不到對手場上那隻的攻擊招式不能選（不然雙方都出無效招式會原地空轉）；只剩這種招式又不能換人就照舊
@@ -660,12 +697,13 @@ function simOpts(ctx, st, s) {
   if (M.rech) return [{ t: 'rech' }];
   if (M.chg) return [{ t: 'mv', k: M.chg }];
   const ks = M.v.enc && M.moves.includes(M.v.encK) && M.pp[M.v.encK] > 0 ? [M.v.encK] : M.lock && M.item === 'choice-scarf' && M.moves.includes(M.lock) ? [M.lock] : M.moves;
-  const can = ks.filter(k => M.pp[k] > 0 && !(M.v.taunt && SIM_SUP[k]) && M.v.dis?.k !== k);
+  const can = ks.filter(k => M.pp[k] > 0 && !(M.v.taunt && SIM_SUP[k]) && M.v.dis?.k !== k && !(SIM_TWICE.has(k) && M.last === k));
   let mv = !can.length ? [{ t: 'mv', k: SIM_STRUGGLE }]
     : can.filter(k => (!SIM_FIRST.has(k) || M.in === st.turn) && !simFutile(st, s, k)).map(k => ({ t: 'mv', k }));
   // 不能換人：背水一戰；對手場上那隻特性踩影（Showdown shadowtag：自己也是踩影、幽靈屬性不受影響；打完換人、被吹走照樣換）
   const tagged = T.hp > 0 && T.b.ab === 'shadow-tag' && M.b.ab !== 'shadow-tag' && !simTypes(M).includes('ghost');
-  const sw = M.v.trap || tagged ? [] : simBench(st, s).map(i => ({ t: 'sw', i }));
+  const bound = simBound(st, M) && !simTypes(M).includes('ghost');
+  const sw = M.v.trap || tagged || bound ? [] : simBench(st, s).map(i => ({ t: 'sw', i }));
   if (st.idle >= SIM_IDLE) {
     const hit = mv.filter(o => SIM_SUP[o.k] || o.k === SIM_STRUGGLE || simHit(ctx, st, M, T, o.k, false, true).eff);
     if (hit.length || sw.length) mv = hit;
@@ -685,6 +723,7 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
   // 精神場地（onTryHitPriority 4）在守住（3）之前
   if (x.tgt && simPsyBlock(st, M, T, k)) return fail(`${FIELD_ZH.psychic}擋下先制招式`);
   if (x.f && T.v.prot && T.v.prot !== 'kings') { bad(); return say(`，被${tn}擋下`); }
+  if (x.tgt && simAbsorb(st, s, M, T, k)) return bad();
   if (x.r && !bounced && T.b.ab === 'magic-bounce') { say(`，被${tn}的魔法鏡反彈`); return simSupport(st, 1 - s, k, null, false, rnd, pick, true); }
   if (x.tgt && T.b.ab === 'good-as-gold') return fail(`${tn}的黃金之軀`);
   if (x.tgt && !bounced && M.b.ab === 'prankster' && simTypes(T).includes('dark')) return fail('惡屬性不受惡作劇之心的招式影響');
@@ -733,7 +772,7 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
       if (M.hp >= M.max) return fail('HP 已經全滿');
       say('');
       // 光合作用、晨光、月光照天氣（SIM_SUNHEAL；this.modify 取整同 pokeRound），其他一半
-      const f = SIM_SUNHEAL.has(k) && (SIM_SUNHEAL_F[simWx(st)] || 0.5);
+      const f = SIM_SUNHEAL.has(k) && (SIM_SUNHEAL_F[simWxOf(st, M, k)] || 0.5);
       simHeal(st, s, M, f ? pokeRound(M.max * Math.floor(f * 4096) / 4096) : Math.round(M.max / 2), '回復');
       return;
     }
@@ -882,7 +921,7 @@ function simProtHit(st, s, M, T, rnd) {
   if (T.v.prot === 'spiky') simHurt(st, s, M, M.max / 8, '被尖刺防守刺傷');
   if (T.v.prot === 'bunker') simStatus(st, s, M, 'psn', rnd, T);
 }
-// 掙扎（傷害見 simStruggleDmg）：接觸招式，會被守住類擋、打在替身上、被氣勢披帶／結實／挺住撐住，接觸懲罰照算；最後自己扣 1/4
+// 掙扎（傷害見 simStruggleDmg）：接觸招式，會被守住類擋、打在替身上、被氣勢披帶／結實／挺住撐住，接觸懲罰等被打中的效果照算（simOnHit）；最後自己扣 1/4
 function simStruggle(st, s, M, T, rnd) {
   const me = simName(st, s), tn = simName(st, 1 - s);
   if (T.hp <= 0) simLog(st, `${me}用掙扎，但沒有目標`);
@@ -907,21 +946,56 @@ function simStruggle(st, s, M, T, rnd) {
     simLog(st, `${me}用掙扎 → ${tn} −${simPct(d, T.max)}%（剩 ${simPct(T.hp, T.max)}%）${simMbNote(T, M)}${held ? `，靠${held}撐住` : ''}${pop ? '，氣球破了' : ''}${T.hp <= 0 ? `，${tn}倒下` : ''}`);
     if (disg) simBust(st, 1 - s, T);
     if (T.hp <= 0) M.kos++;
-    if (T.item === 'rocky-helmet') simHurt(st, s, M, M.max / 6, '被凸凸頭盔刺傷');
-    if (T.b.ab === 'rough-skin') simHurt(st, s, M, M.max / 8, '被粗糙皮膚刺傷');
+    if (!disg) simHitEffect(st, s, M, T, SIM_STRUGGLE, rnd, '', T.hp > 0);
+    simOnHit(st, s, M, T, SIM_STRUGGLE, 1, rnd, true);
     simSitrus(st, 1 - s, T);
   }
   simHurt(st, s, M, Math.round(M.max / 4), '受到掙扎的反作用力', false);
 }
 // 變幻自如、自由者（Showdown protean／libero onPrepareHit）：每次上場第一次出招前變成那招的屬性（輔助招也算；預知未來、掙扎不算；
-// 已經只有這個屬性的不變、也不算發動過），換下場就恢復（v 清掉）。只有這兩個特性會用到的氣象球、大地波動照場上的天氣場地變屬性
+// 已經只有這個屬性的不變、也不算發動過），換下場就恢復（v 清掉）。屬性照 simMoveType（氣象球、大地波動照天氣場地）
 function simProtean(st, s, M, k) {
   if (!['protean', 'libero'].includes(M.b.ab) || M.v.pt || k === 'future-sight' || k === SIM_STRUGGLE) return;
-  const wx = simWx(st), ter = simTer(st);
-  const ty = k === 'weather-ball' && wx ? WB_TYPE[wx] : k === 'terrain-pulse' && ter && simGround(M) ? TERRAIN_TYPE[ter] : MOVES[k][1];
+  const ty = simMoveType(st, M, k);
   if (simTypes(M).join() === ty) return;
   Object.assign(M.v, { types: [ty], pt: true });
-  simLog(st, `${simName(st, s, M)}的${abilZh(M.b.ab)}：變成${T[ty].zh}屬性`);
+  simLog(st, `${simName(st, s, M)}的${abilZh(M.b.ab)}：變成${TYPES[IDX[ty]].zh}屬性`);
+}
+// 吸收類特性（SIM_ABSORB；Showdown onTryHit：守住之後、命中判定之前，輔助招也算）：s 這方的 M 用招式 k 打到對手 T 的吸收屬性就沒有效果，
+// 改成 T 回 1/4、提升能力或引火（能力到頂、HP 全滿就只是沒有效果）；破格無視。回傳有沒有被吸收
+function simAbsorb(st, s, M, T, k) {
+  const x = SIM_ABSORB[T.b.ab];
+  if (!x || T.hp <= 0 || M.b.ab === 'mold-breaker' || simMoveType(st, M, k) !== x.t) return false;
+  simLog(st, `${simName(st, s)}用${simMoveZh(k)}，被${simName(st, 1 - s)}的${abilZh(T.b.ab)}吸收了`);
+  if (x.heal) simHeal(st, 1 - s, T, T.max / 4, `的${abilZh(T.b.ab)}回復`);
+  if (x.b) simBoost(st, 1 - s, T, x.b);
+  if (x.ff && !T.v.ff) { T.v.ff = true; simLog(st, `${simName(st, 1 - s)}的火屬性招式威力提高`); }
+  return true;
+}
+// 攻擊招式每打中 T 一下就發動、會影響連續攻擊後面幾下傷害的（Showdown onDamagingHit；打在替身上的不算、T 被打倒也算）：
+// 辣椒噴發讓攻擊方 M 灼傷；T 自己的碎裂鎧甲（物理招式：防禦 −1、速度 +2）、熱交換（火屬性招式：攻擊 +1）、持久力（防禦 +1）
+// （alive＝T 吃了這一下還站著；倒下的不會提升能力）。回傳有沒有發動
+function simHitEffect(st, s, M, T, k, rnd, type, alive = true) {
+  let on = false;
+  if (T.b.ab === 'spicy-spray' && M.hp > 0) on = simStatus(st, s, M, 'brn', rnd, T);
+  const self = T.b.ab === 'weak-armor' && simCat(k) === 'physical' ? { def: -1, spe: 2 } : T.b.ab === 'thermal-exchange' && type === 'fire' ? { atk: 1 }
+    : T.b.ab === 'stamina' ? { def: 1 } : null;
+  if (self && alive) on = simBoost(st, 1 - s, T, self) || on;
+  return on;
+}
+// 攻擊招式打完、打中過 T（同上；nh＝打中幾下，期望值模式是下數的期望）：不影響這招傷害的，照下數一起算：
+// 攻擊方 M 吃的接觸懲罰（凸凸頭盔 1/6、粗糙皮膚 1/8，每下一次；期望值模式合成一次扣）、
+// 詛咒之軀每下 30% 讓這招被定身（到之後第 3 次回合結束才解除：定身在出招當下先扣 1、每回合結束再扣 1，共 5；已經被定身、這招沒 PP、掙扎的不會；
+// 機率性的，期望值模式不算）
+function simOnHit(st, s, M, T, k, nh, rnd, contact) {
+  const perHit = (v, why) => { if (!rnd) simHurt(st, s, M, v * nh, why); else for (let i = 0; i < nh; i++) simHurt(st, s, M, v, why); };
+  if (contact && T.item === 'rocky-helmet') perHit(M.max / 6, '被凸凸頭盔刺傷');
+  if (contact && T.b.ab === 'rough-skin') perHit(M.max / 8, '被粗糙皮膚刺傷');
+  if (T.b.ab === 'cursed-body' && rnd && M.hp > 0 && k !== SIM_STRUGGLE) {
+    for (let i = 0; i < nh && !M.v.dis && M.pp[k] > 0; i++) {
+      if (rnd() < 0.3) { M.v.dis = { k, n: 4 }; simLog(st, `${simName(st, 1 - s)}的${abilZh('cursed-body')}：${simName(st, s)}的${simMoveZh(k)}被定身了`); }
+    }
+  }
 }
 // 戰鬥切換（Showdown stancechange onModifyMove）：堅盾劍怪出攻擊招式（含掙扎）前變刀劍形態、出王者盾牌前變盾牌形態，其他輔助招不變；
 // 變身來的不算。只換能力值用的型態 fk（種族值照新型態；key 不變，畫面與統計照舊），換下場變回來（simSwitch）
@@ -993,7 +1067,10 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
     return;
   }
   // 天氣讓蓄力招式直接打（電光束照樣先特攻 +1）
-  if (SIM_CHARGE.has(k) && M.chg !== k) { simLog(st, `${FIELD_ZH[simWx(st)]}，${mz}不用蓄力`); if (k === 'electro-shot') simBoost(st, s, M, { spa: 1 }); }
+  if (SIM_CHARGE.has(k) && M.chg !== k) {
+    simLog(st, `${simWx(st) === simWxOf(st, M, k) ? FIELD_ZH[simWx(st)] : `${me}的${abilZh(M.b.ab)}`}，${mz}不用蓄力`);
+    if (k === 'electro-shot') simBoost(st, s, M, { spa: 1 });
+  }
   Object.assign(M, { chg: '', hide: false });
   const fail = why => { M.v.mt.ok = false; simLog(st, `${me}用${mz}，但失敗了（${why}）`); };
   if (k === 'sucker-punch' && (!oWill || simCat(oa.k) === 'status')) return fail('對手沒有要出攻擊招式');
@@ -1019,7 +1096,8 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
     simLog(st, `${me}用${mz}，被${tn}擋下`);
     if (contact) simProtHit(st, s, M, T, rnd);
     crash();
-  } else {
+  } else if (simAbsorb(st, s, M, T, k)) crash();
+  else {
     if (T.v.prot) { delete T.v.prot; simLog(st, `${me}的${mz}打破了守住`); }
     // 一擊必殺：期望值模式（沒有 rnd）直接算期望傷害；照亂數打時先抽中不中
     let r = simHit(ctx, st, M, T, k, false, !rnd && SIM_OHKO.has(k), !oWill);
@@ -1038,15 +1116,23 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
       const disg = !subbed && simDisguised(T, M);
       // 各下的傷害加總：每下判定命中的招式（SIM_MULTIACC）第二下起照命中率抽、沒中就停；
       // 期望值模式整招乘命中率（一擊必殺 simFixed 已經乘過）、第二下起再乘命中的機率。
-      // nh＝實際打中幾下（期望值模式是各下命中機率的和）：對手被打倒就停（後面幾下不會打），接觸懲罰、詛咒之軀、憤怒之拳照這個算
-      const pm = SIM_MULTIACC.has(k) && M.b.ab !== 'skill-link' ? acc / 100 : 1;
-      let dmg = 0, held = '', w = rnd || SIM_OHKO.has(k) ? 1 : acc / 100, nh = 0;
-      for (const [h, xs] of r.rolls.entries()) {
+      // 2～5 下的連續攻擊（vh）照 SIM_HIT_N 抽下數，期望值模式各下再乘打到這一下的機率（SIM_HIT_W）；第 4、5 下的亂數表同第 2 下（damageCalc 照 3 下給）。
+      // nh＝實際打中幾下（期望值模式是各下機率的和）：對手被打倒就停（後面幾下不會打），接觸懲罰、詛咒之軀、憤怒之拳照這個算。
+      // 每一下打中就發動 simHitEffect（期望值模式打到機率一半以上的那幾下）；有發動就用新的狀態重算後面幾下（cur），這幾下發動的紀錄搬到傷害那行後面
+      const pm = SIM_MULTIACC.has(k) && M.b.ab !== 'skill-link' ? acc / 100 : 1, vh = HITS[k]?.[1] === VAR_HITS && M.b.ab !== 'skill-link';
+      const n = !vh ? r.rolls.length : rnd ? SIM_HIT_N[simDraw(SIM_HIT_N.map(x => x[1]), rnd)][0] : SIM_HIT_W.length;
+      const L0 = st.log?.length ?? 0, ty = r.type || MOVES[k][1];
+      let dmg = 0, held = '', w = rnd || SIM_OHKO.has(k) ? 1 : acc / 100, nh = 0, cur = r;
+      for (let h = 0; h < n; h++) {
+        const xs = cur.rolls[Math.min(h, cur.rolls.length - 1)];
         if (h && pm < 1) { if (!rnd) w *= pm; else if (rnd() >= pm) break; }
-        if (h || !disg) dmg += w * (rnd ? xs[Math.floor(rnd() * 16)] : xs.reduce((a, x) => a + x, 0) / 16);
-        nh += w;
+        const wh = vh && !rnd ? w * SIM_HIT_W[h] : w;
+        if (h || !disg) dmg += wh * (rnd ? xs[Math.floor(rnd() * 16)] : xs.reduce((a, x) => a + x, 0) / 16);
+        nh += wh;
+        if (!subbed && (h || !disg) && (rnd || wh >= 0.5) && simHitEffect(st, s, M, T, k, rnd, ty, dmg < T.hp) && h < n - 1 && !r.fixed) cur = simCalc(ctx, st, M, T, k, r.crit, !oWill);
         if (!subbed && !T.v.endure && dmg >= T.hp) break;
       }
+      const mid = st.log ? st.log.splice(L0) : [];
       if (subbed) {
         dealt = Math.min(dmg, T.v.sub);
         T.v.sub -= dealt;
@@ -1071,6 +1157,7 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
         simLog(st, `${me}用${mz}${r.crit ? '（急所）' : ''} → ${tn} −${simPct(dealt, T.max)}%（剩 ${simPct(T.hp, T.max)}%）`
           + (said ? `，第一下被${abilZh('disguise')}擋下` : simMbNote(T, M))
           + (held ? `，靠${held}撐住` : '') + (pop ? '，氣球破了' : '') + (T.hp <= 0 ? `，${tn}倒下` : ''));
+        if (st.log) st.log.push(...mid);
         if (disg) simBust(st, 1 - s, T, said);
         if (T.hp <= 0) M.kos++;
         // 被攻擊打中就開天氣場地的特性（Showdown sandspit／seedsower onDamagingHit）：吐沙開沙暴、播種開青草場地（被打倒也發動）
@@ -1091,15 +1178,12 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
       // 冰凍的對手被火屬性攻擊招式、SIM_THAW 的招式打中就融化（Showdown frz onDamagingHit、thawsTarget）
       if (T.status === 'frz' && T.hp > 0 && !subbed && (SIM_THAW.has(k) || (r.type || MOVES[k][1]) === 'fire')) { T.status = ''; simLog(st, `${tn}的冰融化了`); }
       if (!subbed) {
-        // 接觸懲罰：凸凸頭盔扣 1/6、粗糙皮膚扣 1/8，連續攻擊每打中一下扣一次（Showdown rockyhelmet／roughskin onDamagingHit，打倒也算）；
-        // 期望值模式照打中幾下的期望（nh）合成一次扣
-        const perHit = (v, why) => { if (!rnd) simHurt(st, s, M, v * nh, why); else for (let i = 0; i < nh; i++) simHurt(st, s, M, v, why); };
-        if (contact && T.item === 'rocky-helmet') perHit(M.max / 6, '被凸凸頭盔刺傷');
-        if (contact && T.b.ab === 'rough-skin') perHit(M.max / 8, '被粗糙皮膚刺傷');
-        // 詛咒之軀（Showdown cursedbody onDamagingHit＋disable）：每打中一下 30% 讓這招被定身，到之後第 3 次回合結束才解除
-        // （定身在出招當下先扣 1、每回合結束再扣 1，共 5）；已經被定身、這招沒 PP 了的不會；機率性的，期望值模式不算
-        if (T.b.ab === 'cursed-body' && rnd && M.hp > 0) {
-          for (let i = 0; i < nh && !M.v.dis && M.pp[k] > 0; i++) if (rnd() < 0.3) { M.v.dis = { k, n: 4 }; simLog(st, `${tn}的${abilZh('cursed-body')}：${me}的${mz}被定身了`); }
+        // 打完後的被打中效果（接觸懲罰、詛咒之軀，見 simOnHit；辣椒噴發、碎裂鎧甲等每下的已經在上面 simHitEffect 發動）
+        simOnHit(st, s, M, T, k, nh, rnd, contact);
+        // 綁住類（SIM_BIND）：還沒被綁住的才綁
+        if (SIM_BIND.has(k) && T.hp > 0 && !T.v.bind) {
+          T.v.bind = { s, i: st.sd[s].act, dur: rnd && rnd() < 0.5 ? 6 : 5, div: M.item === 'binding-band' ? 6 : 8, k };
+          simLog(st, `${tn}被${mz}綁住了`);
         }
         simSitrus(st, 1 - s, T);
       }
@@ -1110,11 +1194,14 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
       // 自己的能力變化；屬於追加效果的（FLAG.secondary，如流水旋舞）特性強行不會發動
       if (M.hp > 0 && SIM_SELF[k] && !(M.b.ab === 'sheer-force' && FLAG.secondary.has(k))) simBoost(st, s, M, SIM_SELF[k]);
       if (M.hp > 0 && k === 'fell-stinger' && T.hp <= 0) simBoost(st, s, M, { atk: 3 });
+      // 電光雙擊、燃盡：打中後自己失去這個屬性（只剩這個屬性的變成沒有屬性：simTypes 是空的，打誰、被誰打都 ×1、沒有本系）
+      if (SIM_LOSE_TYPE[k] && M.hp > 0) { M.v.types = simTypes(M).filter(t => t !== SIM_LOSE_TYPE[k]); simLog(st, `${me}的${TYPES[IDX[SIM_LOSE_TYPE[k]]].zh}屬性消失了`); }
       if (SIM_RECHARGE.has(k)) M.rech = true;
       if (SIM_SPIN.has(k) && M.hp > 0) {
         if (k === 'mortal-spin' && !subbed) simStatus(st, 1 - s, T, 'psn', rnd, M);
         if (Object.values(st.sd[s].haz).some(Boolean)) { Object.keys(st.sd[s].haz).forEach(h => { st.sd[s].haz[h] = 0; }); simLog(st, `${me}清掉了自己場地的撒菱類`); }
         delete M.v.seed;
+        delete M.v.bind;
       }
       if (MOVES[k][1] === 'electric') delete M.v.charge;
       if (SIM_PHAZE.has(k) && !subbed && T.hp > 0 && simBench(st, 1 - s).length && !simOver(st)) simSwitch(st, 1 - s, simPhazeTo(st, 1 - s, rnd), rnd);
@@ -1125,7 +1212,7 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
   if (SIM_PIVOT.has(k) && dealt >= 0 && M.hp > 0 && !simOver(st) && simBench(st, s).length) simSwitch(st, s, pick(st, s), rnd);
 }
 // 回合結束（Showdown onResidualOrder 的順序）：天氣、預知未來、祈願、青草場地、濕潤之軀、蛻皮、吃剩的東西、寄生種子、中毒、灼傷、詛咒、
-// 挑釁／再來一次／定身／哈欠倒數、牆倒數、場地倒數、加速；
+// 綁住類、挑釁／再來一次／定身／哈欠倒數、牆倒數、場地倒數、加速、心情不定；
 // 守住類這回合沒用的連續計數歸零、畏縮清掉（只有這回合有效）。殘血傷害照 Showdown：灼傷 1/16、中毒 1/8、劇毒 n/16（換下場重算、最多 15/16）、寄生種子 1/8、詛咒 1/4，
 // 特性魔法防守不受、毒療改成回 1/8
 function simEnd(ctx, st, rnd) {
@@ -1180,6 +1267,14 @@ function simEnd(ctx, st, rnd) {
   });
   each((M, s) => { if (M.status === 'brn') simHurt(st, s, M, M.max / 16, '受到灼傷的傷害'); });
   each((M, s) => { if (M.v.curse) simHurt(st, s, M, M.max / 4, '受到詛咒'); });
+  // 綁住類（partiallytrapped onResidualOrder 13）：先扣回合數，扣完就解除；用的那隻離場或倒下也解除（不扣血）；不然扣 1/8（緊綁束帶 1/6）
+  each((M, s) => {
+    const b = M.v.bind;
+    if (!b) return;
+    if (!--b.dur) { delete M.v.bind; simLog(st, `${simName(st, s)}從${MOVES[b.k][0]}中解脫了`); }
+    else if (!simBound(st, M)) delete M.v.bind;
+    else simHurt(st, s, M, M.max / b.div, `受到${MOVES[b.k][0]}的傷害`);
+  });
   each((M, s) => {
     if (M.v.taunt && !--M.v.taunt) delete M.v.taunt;
     if (M.v.enc && (!--M.v.enc || !(M.pp[M.v.encK] > 0))) { delete M.v.enc; delete M.v.encK; }
@@ -1191,6 +1286,14 @@ function simEnd(ctx, st, rnd) {
   if (st.ter && !--st.ter.n) { simLog(st, `${FIELD_ZH[st.ter.t]}結束了`); st.ter = null; }
   // 加速（Showdown speedboost onResidual，在回合結束的最後）：這回合開始時已經在場上的（不是這回合才換上來的）速度 +1
   each((M, s) => { if (M.b.ab === 'speed-boost' && M.in < st.turn) simBoost(st, s, M, { spe: 1 }); });
+  // 心情不定（Showdown moody onResidual，同加速在最後）：沒到頂的能力隨機一項 +2，另一項沒到底的 −1（不含命中閃避）；機率性的，期望值模式不算
+  each((M, s) => {
+    if (M.b.ab !== 'moody' || !rnd) return;
+    const ks = Object.keys(M.st), pick = xs => xs[Math.floor(rnd() * xs.length)], up = pick(ks.filter(k => M.st[k] < 6));
+    const down = pick(ks.filter(k => M.st[k] > -6 && k !== up));
+    simLog(st, `${simName(st, s)}的${abilZh('moody')}發動`);
+    simBoost(st, s, M, { ...(up && { [up]: 2 }), ...(down && { [down]: -1 }) });
+  });
   st.sd.forEach(side => side.mons.forEach(m => {
     delete m.v.prot; delete m.v.endure; delete m.v.flinch;
     if (!m.v.protUsed) delete m.v.stall;
