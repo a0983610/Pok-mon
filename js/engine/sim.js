@@ -271,6 +271,15 @@ function simOppScenarios(oppKeys, myKeys, fmt) {
   const keys = op.mems.map(x => x.key), items = simItems(keys, fmt), mems = keys.map((k, j) => ({ key: k, set: defaultSet(k, fmt), item: items[j] }));
   return op.combos.map((c, r) => ({ rank: r + 1, mons: simBring(op, mems, 1, fmt, c, op.leadOf(c).js[0]) }));
 }
+// 熱門隊伍（隊伍分析的整隊模擬打的對手）：fmt 排名前 n 名（不含超級進化）各當核心，加上牠 OP.GG 隊友名單（mates）的前 5 隻，
+// 6 隻一樣的只留核心排名前的那隊、湊不滿 6 隻的不要（OP.GG 只有每隻的隊友名單，沒有整隊統計）。超級進化與否、配招、道具交給 simOppScenarios。
+// 回傳 [{ core 核心 key, keys 6 隻（核心排第一）}]
+const SIM_META_N = 30;
+function simMetaTeams(fmt, n = SIM_META_N) {
+  const seen = new Set();
+  return topMons(fmt, n).map(m => ({ core: m.key, keys: [m.key, ...(useOf(m.key, fmt)?.mates || []).filter(k => MON[k] && k !== m.key).slice(0, 5)] }))
+    .filter(t => { const id = t.keys.slice().sort().join(); return t.keys.length === 6 && !seen.has(id) && seen.add(id); });
+}
 // 一步一步推演的對手（只看得到先發）：oppKeys 每一格當成的型態、配招、道具同 simOppScenarios。回傳 { mems 每一格的 { key, set, item }（沒填的格子 null）,
 // guess(lead) 先發是第 lead 格時猜的帶法 { slots [lead, 後排...], evo 超級進化的格子（沒有是 -1）}（「對手可能帶的」帶法裡會派這隻先發（leadOf）、
 // 排名最高那種；沒有一種會派牠先發就取帶法裡有這隻、排名最高的）}；有一方是空的回傳 null

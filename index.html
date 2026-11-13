@@ -272,6 +272,8 @@ table.matrix { border-collapse: separate; border-spacing: 0; margin: 0 auto; }
 /* ---------- 出戰選角 ---------- */
 .combo { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 8px; border-top: 1px solid var(--border); font-size: 14px; }
 .combo.top { background: var(--good-bg); border-radius: 8px; }
+.ts-up { color: var(--se); font-weight: 700; }
+.ts-dn { color: var(--nve); font-weight: 700; }
 .combo .rank { font-weight: 800; color: var(--muted); min-width: 1.2em; }
 .combo .who { flex-basis: 100%; font-size: 13px; }
 .matrix.vs td { width: 46px; min-width: 46px; font-size: 14px; }
@@ -473,13 +475,14 @@ footer a { color: inherit; }
       <div class="pick sm" id="tPick"></div>
       <div id="tList"></div>
     </div>
-    <nav class="t-jump" id="tJump" aria-label="跳到隊伍分析的各卡片"><button class="mini" data-jump="tTop">隊伍</button><button class="mini" data-jump="tSum">總評</button><button class="mini" data-jump="tRole">角色</button><button class="mini" data-jump="tTrait">特性與場地</button><button class="mini" data-jump="tResult">弱點總表</button><button class="mini" data-jump="tCore">聯防</button><button class="mini" data-jump="tThreat">熱門威脅</button><button class="mini" data-jump="tSpeed">速度線</button></nav>
+    <nav class="t-jump" id="tJump" aria-label="跳到隊伍分析的各卡片"><button class="mini" data-jump="tTop">隊伍</button><button class="mini" data-jump="tSum">總評</button><button class="mini" data-jump="tRole">角色</button><button class="mini" data-jump="tTrait">特性與場地</button><button class="mini" data-jump="tResult">弱點總表</button><button class="mini" data-jump="tCore">聯防</button><button class="mini" data-jump="tThreat">熱門威脅</button><button class="mini" data-jump="tSim">整隊模擬</button><button class="mini" data-jump="tSpeed">速度線</button></nav>
     <div class="card b-card" id="tSum"></div>
     <div class="card b-card" id="tRole"></div>
     <div class="card b-card" id="tTrait"></div>
     <div class="card b-card" id="tResult"></div>
     <div class="card b-card" id="tCore"></div>
     <div class="card b-card" id="tThreat"></div>
+    <div class="card b-card" id="tSim"></div>
     <div class="card b-card" id="tSpeed"></div>
   </section>
 
@@ -661,6 +664,7 @@ footer a { color: inherit; }
 <script src="js/ui/table.js"></script>
 <script src="js/ui/build.js"></script>
 <script src="js/ui/team.js"></script>
+<script src="js/ui/teamsim.js"></script>
 <script src="js/ui/bring.js"></script>
 <script src="js/ui/calc.js"></script>
 <script src="js/ui/battle.js"></script>

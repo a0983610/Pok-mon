@@ -1,5 +1,6 @@
 // 模擬對戰的背景計算（Web Worker）：只載入資料與模擬引擎（不碰 DOM）。兩種工作：
-// ① 打一場（js/ui/sim.js 的 runSim 開）：收到 { i 對手第幾種帶法, sides [我方, 對手]（每方 { mons }）, opt simPlay 的 opt, log 要不要逐回合紀錄 }，
+// ① 打一場（js/ui/sim.js 的 runSim、js/ui/teamsim.js 的整隊模擬開）：收到 { i 第幾場, sides [我方, 對手]（每方 { mons }）, opt simPlay 的 opt, log 要不要逐回合紀錄,
+//   seed 亂數種子（沒給用 Math.random）}，
 //   回傳 { i, res, turns, log, mons [我方, 對手] 每隻的 { key, out, kos, hp } }（simTally 用到的）；
 // ② 一個局面每個選擇的勝率（js/ui/battle.js 的推薦出招開）：收到 { view: { id, st 局面, iters } }，回傳 { id, view: simView 的結果 }；
 // ③ 單打一對一的勝率（js/ui/simbg.js 開）：收到 { duel: { k 對位的 key, args simDuelP 的參數 [fmt, x, yk, left] } }，回傳 { duel: k, p }。
@@ -17,6 +18,9 @@ onmessage = e => {
     postMessage({ duel: k, p: simDuelP(...args) });
     return;
   }
-  const { i, sides, opt, log } = e.data, o = simPlay(simWkCtx, sides, Math.random, log, opt);
+  // seed（隊伍分析的整隊模擬）：照種子的亂數打，同速輪流的 ctx.flip 也歸零，同一場不管這個背景計算之前打過什麼都打得一樣（換人前後用同一組亂數比）
+  const { i, sides, opt, log, seed } = e.data;
+  if (seed != null) simWkCtx.flip = 0;
+  const o = simPlay(simWkCtx, sides, seed != null ? simRng(seed) : Math.random, log, opt);
   postMessage({ i, res: o.res, turns: o.turns, log: o.log, mons: o.mons.map(ms => ms.map(m => ({ key: m.key, out: m.out, kos: m.kos, hp: m.hp }))) });
 };

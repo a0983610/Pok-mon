@@ -546,6 +546,7 @@ function renderTeam() {
       + '弱點總表只算屬性，不含特性；推薦的雙屬性組合不一定有對應寶可夢。推薦寶可夢的角色與搭配依常用招式、特性判斷（見「隊伍角色」「隊伍特性與場地招式」），不看能力值。</p>';
   }
   $('#tSpeed').innerHTML = speedHTML(members);
+  $('#tSim').innerHTML = tSimHTML();
   teamBgStart(miss);
   pBgFlush();
   saveState();
