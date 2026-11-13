@@ -191,8 +191,10 @@ function speedPair(x, y, f) {
 // （投資也可以改給 sp／nat，見 invAt；a 另外可帶 set 給 dmgRows 用登錄的招式）；d.noItem＝確定沒有道具（對戰中標了「沒有道具」：拍落不加成）；
 // 看場上狀況的特性（LIVE_ABILS，沒給就不算）：a.pinch＝攻擊方 HP 剩 1/3 以下（PINCH_AB）、a.fallen＝攻擊方這一方倒下幾隻（大將）、
 // d.disguise＝防守方的畫皮還沒被揭穿（這次的第一下沒有傷害、改扣 1/8，之後連用照常；回傳 disguise 標記）；
+// 對戰模擬另外給：a.types／d.types＝場上現在的屬性（變幻自如、自由者換過；沒給照圖鑑）、a.ptUsed＝攻擊方的變幻自如／自由者這次上場已經發動過
+// （發動過就只有現在的屬性算本系；沒發動過的這招出手前會變成招式的屬性，照樣算本系）；
 // 雙打時 a.field／d.field＝攻擊方／防守方場上還站著幾隻（沒給當 2）：範圍招式實際只打到 1 隻時不減傷（Showdown battle-actions.ts：targets.length > 1 才 spreadHit）；
-// o：{ fmt 's'／'d', weather, crit, terrain, hh 幫助, walls 防守方的牆, burn 攻擊方灼傷, bp 威力（對戰模擬給噴火、噴水這種隨 HP 變的；沒給照資料）,
+// o：{ fmt 's'／'d', weather, crit, terrain, hh 幫助, walls 防守方的牆, burn 攻擊方灼傷, bp 威力（對戰模擬給隨場上狀況變的，見 simVarBp；沒給照資料）,
 //   last 攻擊方比防守方晚出招（特性分析；沒給當先出招）}
 // （必定急所的招式不管 crit 都算急所）。不算的招式回傳 { skip 原因 }；
 // 沒有效果的回傳 eff 0（沒有 hp 以後的欄位；immuneBy＝讓招式無效的防守方特性，blockedBy＝其他原因的說明，如精神場地擋先制）；
@@ -205,7 +207,7 @@ function damageCalc(a, d, mk, o) {
   let power0 = o.bp ?? bp0;
   if (NO_CALC[mk]) return { skip: NO_CALC[mk] };
   if (power0 == null && !WEIGHT_BP[mk]) return { skip: '威力會變動或固定傷害' };
-  const A = MON[a.key], D = MON[d.key], aab = a.ab || '', notes = new Set();
+  const A = MON[a.key], D = MON[d.key], aab = a.ab || '', notes = new Set(), aTy = a.types || A.types, dTy = d.types || D.types;
   const use = k => { notes.add(abilZh(k)); return true; };
   // 破格無視防守方的特性（Smogon 列的可無視特性涵蓋這裡用到的，只有妖精氣場、熟成不在其中）
   const dab = aab === 'mold-breaker' && !['fairy-aura', 'ripen'].includes(d.ab) ? '' : d.ab || '';
@@ -221,7 +223,7 @@ function damageCalc(a, d, mk, o) {
   if (offBy && o.weather) notes.add(`${abilZh(offBy)}讓天氣沒有作用`);
   // 在地面上：不是飛行屬性、沒有飄浮、沒帶氣球（Smogon isGrounded；重力、黑色鐵球不在可選的道具裡，不用看）
   const terr = o.terrain || '', balloon = DMG_ITEMS[d.item]?.balloon;
-  const aGround = !A.types.includes('flying') && aab !== 'levitate' && !DMG_ITEMS[a.item]?.balloon, dGround = !D.types.includes('flying') && dab !== 'levitate' && !balloon;
+  const aGround = !aTy.includes('flying') && aab !== 'levitate' && !DMG_ITEMS[a.item]?.balloon, dGround = !dTy.includes('flying') && dab !== 'levitate' && !balloon;
   // 招式屬性：氣象球隨天氣（超級日光當晴天）、大地波動隨場地、皮膚類把一般招式變屬性（氣象球、大地波動不會）、濕潤之聲把聲音招式變水
   let type = mtype, power = power0, ate = false;
   if (mk === 'weather-ball') {
@@ -238,9 +240,9 @@ function damageCalc(a, d, mk, o) {
   const hitN = (d.field ?? 2) + (MOVES[mk][8] === 'all-other-pokemon' ? (a.field ?? 2) - 1 : 0);
   const spread = o.fmt === 'd' && hitN > 1 && (SPREAD.has(mk) || (mk === 'expanding-force' && terr === 'psychic' && aGround));
   if (aab === 'parental-bond' && hits === 1 && !spread) [hits, hitNote, pb] = [2, use(aab) && `${abilZh(aab)}：第 2 下傷害 ¼`, true];
-  const scrappy = aab === 'scrappy' && (type === 'normal' || type === 'fighting') && D.types.includes('ghost') && use(aab);
+  const scrappy = aab === 'scrappy' && (type === 'normal' || type === 'fighting') && dTy.includes('ghost') && use(aab);
   // 冷凍乾燥對水屬性 ×2（Smogon util.ts getMoveEffectiveness：Freeze-Dry 打 Water 回傳 2）
-  const dTypes = scrappy ? D.types.filter(t => t !== 'ghost') : D.types, dry = mk === 'freeze-dry' && dTypes.includes('water');
+  const dTypes = scrappy ? dTy.filter(t => t !== 'ghost') : dTy, dry = mk === 'freeze-dry' && dTypes.includes('water');
   if (dry) notes.add('冷凍乾燥對水屬性效果絕佳');
   const r = { type, cat, power, hits, hitNote, spread, eff: dry ? eff(type, dTypes.filter(t => t !== 'water')) * 2 : eff(type, dTypes),
     crit: (o.crit || ALWAYS_CRIT.has(mk)) && !(['shell-armor', 'battle-armor'].includes(dab) && use(dab)) };
@@ -251,9 +253,9 @@ function damageCalc(a, d, mk, o) {
   // 鐵滾輪沒有場地時失敗（Smogon champions.ts：Steel Roller && !field.terrain）
   else if (r.eff && mk === 'steel-roller' && !terr) [r.eff, r.blockedBy] = [0, '沒有場地時會失敗'];
   if (!r.eff) return r;
-  // 本系 ×1.5；變幻自如／自由者每招都算本系；適應力本系再 +0.5
-  const own = A.types.includes(type);
-  r.stab = 4096 + (own || (['protean', 'libero'].includes(aab) && use(aab)) ? 2048 : 0) + (aab === 'adaptability' && own && use(aab) ? 2048 : 0);
+  // 本系 ×1.5；變幻自如／自由者每招都算本系（對戰模擬裡這次上場發動過的 a.ptUsed 就只看現在的屬性）；適應力本系再 +0.5
+  const own = aTy.includes(type);
+  r.stab = 4096 + (own || (['protean', 'libero'].includes(aab) && !a.ptUsed && use(aab)) ? 2048 : 0) + (aab === 'adaptability' && own && use(aab) ? 2048 : 0);
   const ai = mk === 'body-press' ? 2 : cat === 'physical' ? 1 : 3, di = cat === 'physical' || HIT_DEF.has(mk) ? 2 : 4;
   // 欺詐：攻擊用防守方的攻擊能力值與攻擊的能力變化（Showdown overrideOffensivePokemon 'target'）；防守方的攻擊投資看 d.sp，沒有再看 d.atkInv，都沒有算 0 點
   const foul = mk === 'foul-play';
@@ -284,7 +286,7 @@ function damageCalc(a, d, mk, o) {
   atk = Math.max(1, pokeRound(atk * chainMods(atMods, 410, 131072) / 4096));
   let def = statOf(D.bs[di], dsp, di, dnat);
   if (dst && !(r.crit && dst > 0) && !(aab === 'unaware' && use(aab))) def = stageStat(def, dst);
-  if (aab !== 'mega-sol' && ((wthr === 'sand' && di === 4 && D.types.includes('rock')) || (wthr === 'snow' && di === 2 && D.types.includes('ice')))) def = pokeRound(def * 3 / 2);
+  if (aab !== 'mega-sol' && ((wthr === 'sand' && di === 4 && dTy.includes('rock')) || (wthr === 'snow' && di === 2 && dTy.includes('ice')))) def = pokeRound(def * 3 / 2);
   // 打防禦時：草之毛皮（青草場地）×1.5、毛皮大衣 ×2
   const dfMod = di !== 2 ? 0 : dab === 'grass-pelt' && terr === 'grassy' ? 6144 : dab === 'fur-coat' ? 8192 : 0;
   if (dfMod && use(dab)) def = Math.max(1, pokeRound(def * dfMod / 4096));
@@ -479,21 +481,22 @@ function intimidateOn(ab) {
   if (['contrary', 'defiant', 'guard-dog'].includes(ab)) return [1, 0];
   return ab === 'simple' ? [-2, 0] : ab === 'competitive' ? [-1, 2] : [-1, 0];
 }
-// battler b 吃了特性是威嚇的 by 出場：照 intimidateOn 改 b 的攻擊／特攻能力變化（by 不是威嚇、或 b 不吃威嚇就原樣回傳；
-// by 是變身來的威嚇不會發動，同對戰模擬）
+// battler b 吃了特性是威嚇的 by 出場：照 intimidateOn 改 b 的攻擊／特攻能力變化（by 不是威嚇、或 b 不吃威嚇就原樣回傳）。
+// 變身者（百變怪）照 Pokémon Showdown（對戰模擬實際打出來的紀錄）：先吃對面的威嚇再變身，能力變化抄成對面的，所以 b 是變身來的不降；
+// 變身抄到的威嚇變完身會發動，所以 by 是變身來的照樣降（同對戰模擬 simImposter）
 function intimidated(b, by) {
-  const e = by.ab === 'intimidate' && !by.tfFrom && intimidateOn(b.ab);
+  const e = by.ab === 'intimidate' && !b.tfFrom && intimidateOn(b.ab);
   if (!e) return b;
   const c = (k, d) => Math.max(-6, Math.min(6, (b.st?.[k] || 0) + d));
   return { ...b, st: { ...b.st, atk: c('atk', e[0]), spa: c('spa', e[1]) } };
 }
-// 對位時出場特性開出來的天氣、場地（WX_AB、TER_AB）：x、y 是 battler（變身來的特性不發動）；雙方同時出場時照速度快的先發動，
+// 對位時出場特性開出來的天氣、場地（WX_AB、TER_AB）：x、y 是 battler（變身抄到的也會發動，同 Showdown 與對戰模擬）；雙方同時出場時照速度快的先發動，
 // 慢的開的蓋掉先開的（Showdown battle-actions.ts runSwitch：fieldEvent('SwitchIn') 照速度排；field.ts setWeather 不同天氣直接蓋掉、同一種失敗），同速當 x 先；
 // sw＝只有 x 剛出場（換上來：牠早就在場上，牠開的先在，x 開的再蓋掉）。回傳 { weather, terrain }（沒有是 ''）
 function entryField(x, y, sw = false) {
   const v = b => speedOf({ key: b.key, inv: b.speInv, sp: b.sp, nat: b.nat, st: 0, item: b.item, ab: b.ab }, { weather: '', terrain: '' }).v;
   const f = { weather: '', terrain: '' }, order = sw ? [y, x] : v(x) >= v(y) ? [x, y] : [y, x];
-  order.filter(b => !b.tfFrom).forEach(b => { if (WX_AB[b.ab]) f.weather = WX_AB[b.ab]; if (TER_AB[b.ab]) f.terrain = TER_AB[b.ab]; });
+  order.forEach(b => { if (WX_AB[b.ab]) f.weather = WX_AB[b.ab]; if (TER_AB[b.ab]) f.terrain = TER_AB[b.ab]; });
   return f;
 }
 // 出戰選角的一對一：x 我方、y 對手（battler；對戰中的換人另外帶 cur 等，同 duel），f 同 duel。回傳

@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "description": "tools/sim_check.js 用的 Pokémon Showdown（對照對戰模擬）；安裝：在 repo 根目錄 npm install --prefix tools --ignore-scripts --no-package-lock",
+  "dependencies": {
+    "pokemon-showdown": "0.11.11"
+  }
+}
