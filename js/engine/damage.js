@@ -484,7 +484,7 @@ function intimidated(b, by) {
 // 出戰選角的一對一：x 我方、y 對手（battler；對戰中的換人另外帶 cur 等，同 duel），f 同 duel。回傳
 //   head：正面對打（雙方全滿，有 cur 的照 cur）先打倒牠；sw：換上來先吃牠最痛的一招（最高傷害），剩下的 HP 對打還先打倒牠（換上來吃過一下，
 //   氣勢披帶、多重鱗片就沒用了，畫皮也被揭穿）；ohko：沒贏、而且牠一下就打得倒我又比我先出手（速度或先制招式）；
-//   first、spd（同 duel）、me／opp（fastestKO 的 n）、left 換上來吃過最痛的一招後剩下的 HP（0 以下＝會倒）、big 那一招（沒有會痛的招式是 ''）給畫面說明用
+//   first、spd（同 duel）、me／opp（fastestKO 的 n）、oppPri（牠的 opp 下有先制招式，單打改用模擬判斷時 duelVs 重算 ohko 用）、left 換上來吃過最痛的一招後剩下的 HP（0 以下＝會倒）、big 那一招（沒有會痛的招式是 ''）給畫面說明用
 // f.intim：算出場特性威嚇（intimidated）。'both'＝正面對打時雙方都剛出場，各自的威嚇打對方（出戰選角、隊伍分析）；
 // 'me'＝只有我方剛出場（對戰中的換人：對手早就在場上，牠的威嚇不會再觸發）；換上來吃一下那段也只有我方剛出場。沒給就不算
 function matchup(x, y, f) {
@@ -495,6 +495,6 @@ function matchup(x, y, f) {
   let sw = false;
   // 吃過一下：畫皮已經被揭穿
   if (head && cur > 0) { const d2 = duel({ ...x, cur, bust: true }, yi, f); sw = winKO(fastestKO(d2.xy), fastestKO(d2.yx), d2.first); }
-  return { head, sw, ohko: !head && b.n === 1 && (b.pri || d.first !== 0), first: d.first, spd: d.spd.map(s => s.v), me: a.n, opp: b.n,
+  return { head, sw, ohko: !head && b.n === 1 && (b.pri || d.first !== 0), first: d.first, spd: d.spd.map(s => s.v), me: a.n, opp: b.n, oppPri: b.pri,
     left: cur, big: ds.yx.ok[0]?.r.max ? ds.yx.ok[0].k : '' };
 }

@@ -1220,12 +1220,13 @@ function simSearch(ctx, st, phase, iters, rnd, stats, uniform) {
     win: opts[0].map(a => opts[1].map(b => { const e = cell(a, b); return e ? e.k / e.n : null; })), p };
   return out;
 }
-// 一場的開頭局面：sides＝[我方, 對手]，每方 { mons 帶出場的（simMon，先發排第一）}（會複製一份）；先發都在場上
-function simStart(sides, log) {
+// 一場的開頭局面：sides＝[我方, 對手]，每方 { mons 帶出場的（simMon，先發排第一）}（會複製一份）；先發都在場上。
+// intim＝哪幾方的威嚇發動（沒給＝雙方；simDuel 的換上來只有我方剛出場）
+function simStart(sides, log, intim = [0, 1]) {
   const st = { sd: sides.map(x => simSide0(x.mons.map(simCloneMon))), turn: 0, fut: [], idle: 0, log: log ? [] : null };
   st.sd.forEach(x => Object.assign(x.mons[0], { in: 0, out: true }));
   // 先發雙方同時出場：各自的威嚇都打對方（同出戰選角的正面對打），變身者再變身
-  [0, 1].forEach(s => simIntimidate(st, s, simAct(st, s)));
+  intim.forEach(s => simIntimidate(st, s, simAct(st, s)));
   [0, 1].forEach(s => simImposter(st, s, simAct(st, s)));
   return st;
 }
@@ -1322,4 +1323,28 @@ function simPlay(ctx, sides, rnd, log, opt = {}) {
   const w = simWinner(st), res = w === 0 ? 1 : w === 1 ? -1 : 0, both = simDead(st, 0) && simDead(st, 1);
   if (st.log) st.log.push((both ? `雙方同時全倒，最後倒下的是${w ? '對手' : '我方'}，` : '') + (res > 0 ? '我方贏' : res < 0 ? '我方輸' : `打滿 ${SIM_MAX_TURN} 回合，平手`));
   return { res, turns: st.turn, mons: st.sd.map(x => x.mons), log: st.log };
+}
+// 單打一對一（隊伍分析、出戰選角的對位 duelVs 用）：x 我方 { key, set 登錄的配招, item（沒給照 battler；超級進化這場不進化、以原型上場的給 ''）}、
+// 對手寶可夢 key yk（配招照 OP.GG 常見，同 battler）。不靠亂數打一場：雙方每回合照 simDecide 取機率最高的選擇，
+// 傷害、命中、追加效果用期望值（同樹搜尋往下推演）；每次重開 simCtx（共用的話 ctx.flip 會讓結果跟著前面算過的變）。
+// left＝換上來吃過牠最痛的一招後剩下的 HP（matchup 的 left）：我方從這個 HP 開打、畫皮已揭穿，只有我方的威嚇發動，
+// 對手早就在場上（不能用擊掌奇襲這類上場第一回合的招式）；沒給＝雙方剛出場、HP 全滿。
+// 同速的回合先照我方先動打一場，有遇到同速再照對手先動打一場，兩場都贏才算贏（同 matchup 同速算我方沒贏）。
+// 回傳 { win, res 我方先動那場的結果（1 贏、−1 輸、0 打滿回合）, turns 那場打了幾回合, tieLose 同速時對手先動就輸 }
+function simDuel(fmt, x, yk, left) {
+  const run = tie => {
+    const ctx = simCtx(fmt), me = simMon(x.key, x.set, x.item, 0, fmt), op = simMon(yk, undefined, undefined, 1, fmt);
+    if (left != null) Object.assign(me, { hp: Math.min(me.max, left), bust: true });
+    const st = simStart([{ mons: [me] }, { mons: [op] }], false, left != null ? [0] : [0, 1]), pick = (c, s) => simGreedyPick(ctx, c, s);
+    if (left != null) simAct(st, 1).in = -1;
+    let tied = false;
+    while (!simOver(st) && st.turn < SIM_MAX_TURN) {
+      tied = simTurn(ctx, st, simDecide(ctx, st, 'turn', null), null, tie, pick) || tied;
+      while (!simOver(st) && (simNeed(st, 0) || simNeed(st, 1))) simReplace(st, simDecide(ctx, st, 'replace', null), null);
+    }
+    const w = simWinner(st);
+    return { res: w === 0 ? 1 : w === 1 ? -1 : 0, turns: st.turn, tied };
+  };
+  const a = run(0), tieLose = a.res > 0 && a.tied && run(1).res <= 0;
+  return { win: a.res > 0 && !tieLose, res: a.res, turns: a.turns, tieLose };
 }
