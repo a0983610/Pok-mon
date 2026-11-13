@@ -3,11 +3,13 @@
 // k 對手每種帶法打幾場、algo 決策方式（這兩個是收合的「賽前：對手每一種帶法的勝率」用）；run 模擬中（{ stop }）、res 上一次的結果、
 // tree 一步一步推演（點對手先發開始，或賽前結果的「看怎麼打」；這三個不存網址）
 const SIM_KS = [10, 30, 100];
-// 決策方式（simPlay 的 opt）：快速＝往前算一回合、標準／精細＝樹搜尋每步 400／800 次；ms＝瀏覽器實測每場約幾毫秒（2026-11-11，估時間用）
+// 決策方式（simPlay 的 opt）：快速＝往前算一回合、標準／精細＝樹搜尋每步 400／800 次。估時間用的實測（2026-11-13，i7-14700、Chromium，
+// 隊伍 6 隻對出戰選角的 6 隻、對手 20 種帶法輪流）：ms＝畫面這邊一場一場打每場約幾毫秒（直接開檔、沒有背景計算時；快速 40 場、標準 28 場、精細 16 場平均），
+// wms＝SIM_WK_MAX 個背景計算一起打時平均每場幾毫秒（整批 200 場、快速另有 600 場，扣掉開背景計算的 SIM_WK_START）
 const SIM_ALGOS = [
-  { id: 'fast', zh: '快速', opt: { algo: 'ply1' }, ms: 50, hint: '每步把雙方各種出法都試算一回合' },
-  { id: 'std', zh: '標準', opt: { algo: 'tree', iters: 400 }, ms: 640, hint: '每步往下打 400 次到分出勝負（樹搜尋）' },
-  { id: 'fine', zh: '精細', opt: { algo: 'tree', iters: 800 }, ms: 1500, hint: '每步往下打 800 次到分出勝負（樹搜尋，最強）' },
+  { id: 'fast', zh: '快速', opt: { algo: 'ply1' }, ms: 50, wms: 12, hint: '每步把雙方各種出法都試算一回合' },
+  { id: 'std', zh: '標準', opt: { algo: 'tree', iters: 400 }, ms: 1270, wms: 160, hint: '每步往下打 400 次到分出勝負（樹搜尋）' },
+  { id: 'fine', zh: '精細', opt: { algo: 'tree', iters: 800 }, ms: 2080, wms: 420, hint: '每步往下打 800 次到分出勝負（樹搜尋，最強）' },
 ];
 // 樹狀圖每一層總共試幾次（每一格平均分到）
 const SIM_TREE_ITERS = 3000;
@@ -65,7 +67,7 @@ function renderSim() {
   seg('sK', SIM_KS, sim.k);
   seg('sAlgo', SIM_ALGOS.map(a => a.id), sim.algo);
   const al = simAlgo(sim.algo), combos = nOpp ? simChoose(nOpp, Math.min(BRING_N.s, nOpp)) : 0, total = combos * sim.k, wk = simWkN();
-  $('#sAlgoHint').textContent = al.hint + (combos ? `；對手 ${combos} 種帶法各 ${sim.k} 場共 ${total} 場，約 ${simEta(al.ms * total / Math.max(1, wk * SIM_WK_EFF))}`
+  $('#sAlgoHint').textContent = al.hint + (combos ? `；對手 ${combos} 種帶法各 ${sim.k} 場共 ${total} 場，約 ${simEta(simEstMs(al, total, wk))}`
     + (wk ? `（${wk} 個背景計算一起打）` : '') : '');
   const ready = mine.length && pk.slots.length === need && nOpp, live = sim.tree?.live ? sim.tree : null;
   $('#sOpp').innerHTML = !nOpp ? '<span class="muted small">先到「出戰選角」選好對手的寶可夢。</span>'
@@ -88,8 +90,11 @@ function renderSim() {
 // 背景計算（js/engine/sim-worker.js）開幾個：電腦的執行緒數減 1（留一個給畫面），最多 SIM_WK_MAX；
 // 直接開檔案（file://）時瀏覽器不准開背景計算，是 0（在畫面這邊一場一場打）。
 // 實測（2026-11-11，i7-14700 28 執行緒、Chromium，標準每場）：1 個 308 毫秒、4 個平均 105、6 個 67、8 個 67、12 個 61、16 個 60，
-// 8 個以上幾乎不會再快，所以最多開 8 個；估時間時當成每個背景計算抵 SIM_WK_EFF 個（8 個約快 4.6 倍）
-const SIM_WK_MAX = 8, SIM_WK_EFF = 0.6;
+// 8 個以上幾乎不會再快，所以最多開 8 個。
+// 估時間（simEstMs）：開背景計算約 SIM_WK_START 毫秒（每個都要載入資料；2026-11-13 快速 200／600 場兩批推回來約 1.6 秒），之後每場照 wms；
+// 不到 SIM_WK_MAX 個時照個數比例放慢（上面的實測放慢得比個數比例少，所以估得偏長）；沒有背景計算照 ms 一場一場加
+const SIM_WK_MAX = 8, SIM_WK_START = 1600;
+const simEstMs = (al, n, wk) => wk ? SIM_WK_START + al.wms * n * SIM_WK_MAX / wk : al.ms * n;
 const simWkN = () => location.protocol === 'file:' || typeof Worker === 'undefined' ? 0 : Math.max(1, Math.min(SIM_WK_MAX, (navigator.hardwareConcurrency || 2) - 1));
 // 跑模擬：場次照對手每種帶法輪流排（中途停止時各帶法的場數也平均）。能開背景計算就分給 simWkN() 個一起打，
 // 開不了、或載入失敗退回來的在畫面這邊打（每跑超過 50 毫秒讓畫面喘口氣）；按「停止」就不再派新的場次，以已打完的出結果
