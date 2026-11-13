@@ -572,6 +572,104 @@ function btResultHTML() {
     + '下方只列這場會出場的：我方列「這場帶的」（預設照出戰選角第 1 名組合，可以點開改），對手出場過的到了帶出場的隻數（單打 3、雙打 4）就不列其他的。'
     + '「對手出場過的」後面的「猜」照「出戰選角」的「對手可能帶的」：還沒有出場的猜帶法和先發，有出場的就從包含出場過的帶法裡挑第一種，只是參考。</p>';
 }
+// ----- 推薦出招：照目前場上狀況跑對戰模擬的樹搜尋（同「模擬對戰」的推演，只做單打） -----
+// 局面：我方＝這場帶的（btBrought，場上那隻排第一）照登錄的配招、剩下的 HP、異常狀態、道具沒了、畫皮破了；
+// 對手＝場上那隻、出場過的照標的（特性、道具、用過的招式、點數性格，同 btUnit），還沒出場的照「猜」（btOppGuess）補滿帶出場的隻數
+// （一場只能超級進化一隻、道具不重複照模擬的 simFixGuessed）；場上那隻的能力變化照位置卡；天氣、場地、牆照標的（剩幾回合不知道，當全新 5 回合）；
+// 雙方都不是剛上場（擊掌奇襲類不能用）。回傳 { st, notes 不算的東西 } 或 { why 不能算的原因（'' 就是不顯示）}
+const BT_REC_ITERS = 3000;
+function btSimState() {
+  if (team.fmt !== 's') return { why: '推薦出招目前只做單打（模擬對戰只有單打）。' };
+  const i0 = battle.me[0], j0 = battle.opp[0];
+  if (i0 < 0 || j0 < 0 || !team.mons[i0] || !bring.opp[j0]) return { why: '' };
+  const N = BRING_N.s, mine = [i0, ...btBrought().filter(i => i !== i0)].slice(0, N);
+  const have = [j0, ...bring.opp.map((k, i) => k && battle.seen[i] && i !== j0 ? i : -1).filter(i => i >= 0)].slice(0, N), g = btOppGuess();
+  const c = g?.combos.find(c => have.every(i => c.idx.some(j => g.at[j] === i)));
+  const opps = [...have, ...(c ? c.idx.map(j => g.at[j]).filter(i => !have.includes(i)) : [])].slice(0, N);
+  const items = btOppItems(), stOf = a => Object.fromEntries(BT_STATS.map(([k], n) => [k, a[n]]));
+  const mk = (side, i, s) => {
+    const key = btKey(side, i), M = side === 'me'
+      ? simMon(key, team.sets[i], battle.noItem[i] || key !== team.mons[i] ? '' : undefined, 0, 's')
+      : simMon(key, btOppSet(i, key), items[i], 1, 's');
+    if (side === 'opp') M.b = { ...M.b, ab: defAbOf(key, 's', battle.ab[i]) };
+    M.hp = side === 'me' ? Math.min(M.max, battle.hp[i] ?? M.max) : Math.ceil(M.max * battle.ohp[i] / 100);
+    return Object.assign(M, { status: battle.status[side][i], bust: battle.bust[side][i], slot: i, in: -1,
+      out: side === 'me' ? i === i0 || M.hp < M.max : have.includes(i) });
+  };
+  const st = { sd: [simSide0(mine.map(i => mk('me', i))), simSide0(opps.map(i => mk('opp', i)))], turn: 1, fut: [], idle: 0, log: null,
+    wx: battle.weather ? { t: battle.weather, n: 5 } : null, ter: battle.terrain ? { t: battle.terrain, n: 5 } : null };
+  BT_SIDES.forEach((side, s) => { st.sd[s].scr = Object.fromEntries(battle.walls[side].map(w => [w, 5])); st.sd[s].mons[0].st = stOf(battle.st[side][0]); });
+  simFixGuessed(st);
+  st.sd.forEach(x => x.mons.forEach(M => { if (M.hp <= 0) { M.hp = 0; simFaint(st, M); } }));
+  // 特性變身者在場上：當成已經變身成對面那隻（同對位的 btFieldMon）
+  [0, 1].forEach(s => { const M = simAct(st, s), T = simAct(st, 1 - s); if (M.b.ab === 'imposter' && M.hp > 0 && T.hp > 0) simTransform(st, s, M, T); });
+  const notes = [battle.tw.length && '順風', battle.tr && '戲法空間'].filter(Boolean);
+  return { st, notes };
+}
+// 推薦出招的狀態：key＝算的那個局面（局面一樣就不重算）、view＝simView 的結果、busy 背景正在算、fail 背景計算不能用（改成按鈕）
+const btRec = { key: null, st: null, why: '', notes: [], view: null, busy: false, fail: false, timer: 0, wk: null, id: 0 };
+const btRecBg = () => !btRec.fail && location.protocol !== 'file:' && typeof Worker !== 'undefined';
+// 場上狀況改了：在對戰中分頁時重建局面，變了就停一下（BT_REC_DELAY）再交給背景計算；不能用背景計算時等按「算推薦」
+const BT_REC_DELAY = 400;
+function btRecUpdate() {
+  if (curTab !== 'battle') return;
+  let r;
+  try { r = btSimState(); } catch (err) { console.error(err); r = { why: '推薦出招這個局面算不出來。' }; }
+  const key = r.st ? JSON.stringify([r.st, r.notes]) : 'why:' + r.why;
+  if (key === btRec.key) return;
+  clearTimeout(btRec.timer);
+  // id 先加一：還在算的舊局面結果回來時對不上 id，不會蓋掉
+  Object.assign(btRec, { key, st: r.st || null, why: r.why || '', notes: r.notes || [], view: null, id: btRec.id + 1 });
+  if (r.st && btRecBg()) btRec.timer = setTimeout(btRecRun, BT_REC_DELAY);
+  btRecRender();
+}
+// 交給背景計算：上一個還在算就整個停掉重開（結果用 id 對，舊的不收）
+function btRecRun() {
+  const id = ++btRec.id, st = btRec.st;
+  if (btRec.busy && btRec.wk) { btRec.wk.terminate(); btRec.wk = null; }
+  try { btRec.wk ||= new Worker('js/engine/sim-worker.js'); } catch { btRec.fail = true; btRecRender(); return; }
+  btRec.wk.onmessage = e => { if (e.data.id !== btRec.id) return; Object.assign(btRec, { busy: false, view: e.data.view }); btRecRender(); };
+  btRec.wk.onerror = () => { Object.assign(btRec, { busy: false, fail: true, wk: null }); btRecRender(); };
+  btRec.busy = true;
+  btRec.wk.postMessage({ view: { id, st, iters: BT_REC_ITERS } });
+  btRecRender();
+}
+// 推薦出招的區塊：我方每個選擇（招式、換誰）照「對手照最穩的出法」時的平均勝率排，★ 是建議出法裡比例最高的（同時出招，比例接近的可以混著出）；
+// 下面一行是對手的建議出法；完整的「我方 × 對手」勝率表收在展開裡
+function btRecRender() {
+  const box = $('#btRec'), r = btRec, v = r.view, pct = x => `${Math.round(x * 100)}%`;
+  if (!r.st) { box.innerHTML = r.why ? `<p class="muted small">${r.why}</p>` : ''; return; }
+  const head = '<div class="res-head">推薦出招<span class="muted small">（照目前場上狀況往下模擬，對手照最穩的出法）</span></div>';
+  const note = '<p class="note">※ 用「模擬對戰」的樹搜尋（往下打約 3000 次）：我方照「隊伍分析」登錄的配招；對手照 OP.GG 常見的配招、上方標的特性道具與用過的招式，'
+    + '還沒出場的照「猜」。勝率是對手照牠最穩的出法時我方的平均勝率（模擬次數有限，差 2～3% 內算差不多）；建議出的照比例排在前面，'
+    + '同時出招，★ 以外比例也高的可以混著出，免得被猜中。'
+    + `天氣、場地、牆當成剛開（5 回合）；撒菱類、對手的 PP 用量不算${r.notes.length ? `；${r.notes.join('、')}模擬不算` : ''}。只是參考。</p>`;
+  if (!v) {
+    box.innerHTML = head + (btRecBg() ? '<p class="muted small">計算中…（約 2～5 秒）</p>'
+      : '<div class="c-f"><button class="btn" data-brec>算推薦</button><span class="muted small">算的時候畫面會停幾秒</span></div>') + note;
+    return;
+  }
+  if (v.phase === 'over') { box.innerHTML = ''; return; }
+  const st = r.st, val = (i, j) => v.win[i][j] ?? v.v[i][j];
+  // 建議出的（比例 > 0）照比例排在前面，其他照勝率排（樹搜尋次數有限，差 2～3% 內的勝率差不多）
+  const rows = v.opts[0].map((o, i) => ({ o, i, w: v.opts[1].reduce((t, _, j) => t + v.p[1][j] * val(i, j), 0), p: v.p[0][i] }))
+    .sort((a, b) => b.p - a.p || b.w - a.w);
+  const top = Math.max(...v.p[0]), opp = v.opts[1].map((o, j) => ({ o, p: v.p[1][j] })).filter(x => x.p > 0).sort((a, b) => b.p - a.p);
+  const list = rows.map(x => `<div class="x-line"><b>${x.p === top ? '★ ' : ''}${simOptZh(x.o, st.sd[0])}</b><span>勝率 ${pct(x.w)}${x.p > 0 && x.p < 1 ? `<span class="meta">（建議比例 ${pct(x.p)}）</span>` : ''}</span></div>`).join('');
+  const cls = x => x == null ? '' : x >= 0.6 ? 'm2' : x <= 0.4 ? 'mh' : 'm1';
+  const table = `<div class="mwrap cover"><table class="matrix vs"><thead><tr><th class="corner">我方 ↓<br>對手 →</th>`
+    + v.opts[1].map((o, j) => `<th>${simOptZh(o, st.sd[1])}<br><span class="meta">${pct(v.p[1][j])}</span></th>`).join('') + '</tr></thead><tbody>'
+    + v.opts[0].map((o, i) => `<tr><th>${simOptZh(o, st.sd[0])} <span class="meta">${pct(v.p[0][i])}</span></th>`
+      + v.opts[1].map((_, j) => `<td class="${cls(v.win[i][j])}">${v.win[i][j] == null ? '—' : pct(v.win[i][j])}</td>`).join('') + '</tr>').join('') + '</tbody></table></div>';
+  box.innerHTML = head + (v.phase === 'replace' ? '<p class="muted small">有人倒下，選換上誰。</p>' : '') + list
+    + `<div class="x-line"><span class="meta">對手可能出</span><span>${opp.map(x => `${simOptZh(x.o, st.sd[1])} ${pct(x.p)}`).join('、') || '—'}</span></div>`
+    + `<details class="b-more"><summary>完整表格（我方每個選擇 × 對手每個選擇的勝率）</summary>${table}</details>` + note;
+}
+$('#btRec').addEventListener('click', e => {
+  if (!e.target.closest('[data-brec]') || !btRec.st) return;
+  $('#btRec').querySelector('[data-brec]').disabled = true;
+  setTimeout(() => { btRec.view = simView(simCtx('s'), btRec.st, BT_REC_ITERS); btRecRender(); });
+});
 function renderBattle() {
   syncBattle();
   BT_SIDES.forEach(side => { $('#bt-' + side).innerHTML = btSideHTML(side); });
@@ -584,6 +682,7 @@ function renderBattle() {
   document.querySelectorAll('[data-btw]').forEach(c => { c.checked = battle.tw.includes(c.dataset.btw); });
   document.querySelectorAll('#btFmt button').forEach(b => b.setAttribute('aria-pressed', b.dataset.fmt === team.fmt));
   $('#btResult').innerHTML = btResultHTML();
+  btRecUpdate();
   saveState();
 }
 // 放上場：放進選中的位置（原本在別的位置就移過來），那個位置的能力變化清掉，再跳到下一個空位置；已在場上就只選中牠的位置。對手放上場就標出場過。
@@ -713,6 +812,7 @@ $('#p-battle').addEventListener('input', e => {
   btHpRow(t, v, false);
   $('#btBench-' + side).innerHTML = btBenchHTML(side);
   $('#btResult').innerHTML = btResultHTML();
+  btRecUpdate();
   saveState();
 });
 // 離開 HP 欄位時只把那一列改回實際存的值（清空或超出範圍時），不整個重畫：打完字直接點按鈕時，按鈕才不會被換掉而沒按到
