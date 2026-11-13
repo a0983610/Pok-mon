@@ -86,6 +86,7 @@ function bringHTML(members, opps) {
       + (r ? '' : `<span class="who">先發：${leads.map(name).join('、')}${pairText}</span>${pairWarn}`) + synText(c) + evoText(c)
       + (c.none ? `<span class="who x-msg">沒解：${c.res.map((x, o) => x.level ? '' : opps[o][0].zh).filter(Boolean).join('、')}</span>` : '')
       + '</div>').join('')
+    + (team.fmt === 's' ? `<div id="bSim">${bSimHTML()}</div>` : '')
     + oppGuessHTML()
     + `<h3>對位表</h3>${pBgNote('對位表')}<div class="mwrap cover"><table class="matrix vs">${t}</tbody></table></div><div id="pCellTip"></div>`
     + '<p class="note">※ ✔＝換上來先吃牠最痛的一招（取最高傷害）、剩下的 HP 對打還打得贏；贏＝正面對打（雙方 HP 全滿）打得贏；'
@@ -120,7 +121,97 @@ function bringHTML(members, opps) {
     + `${ITEMS['air-balloon'] ? `，或帶${ITEMS['air-balloon'][0]}（${T.ground.zh}）` : ''}就不算。</p>`
     + moveTableHTML(members, opps, best, alt, oppMegas);
 }
-// 對手可能帶的（oppBringPlan）：前 3 種帶法，第 1 種附先發；名字照猜的時候當成的型態（超級石過半的當成超級進化；
+// ---------- 用模擬比較帶法（單打 3 對 3）----------
+// 候補：出戰選角（只算挑了寶可夢的隊員，同模擬對戰的 simMyPlan）第 1 名組合換三種先發，加上第 2～BSIM_C 名組合（先發照它的挑法 leadOf）；
+// 對手：「對手可能帶的」前 BSIM_SC 種帶法（simOppScenarios）。每個候補對每種帶法打 BSIM_K 場，雙方用模擬對戰的「快速」；
+// 每場的亂數種子照「對手帶法、第幾場」（simHash），候補之間同一場用同一組亂數，和建議帶法的差值比較準（成對比較，同整隊模擬）。
+// 按「開始比較」才算，結果只放記憶體；隊伍、配招、對手改過標「結果是改之前的」。
+const BSIM_C = 4, BSIM_SC = 5, BSIM_K = 16, BSIM_OPT = { algo: 'ply1' };
+const bSim = { run: null, res: null, draw: 0 };
+const bSimSig = () => JSON.stringify([team.fmt, team.mons, team.sets, bring.opp]);
+// 候補與對手帶法：{ mine, cands [{ slots 帶的格子（先發排第一）, evo 超級進化的格子, rank 組合排第幾, rec 是不是出戰選角的建議 }], scs }；條件不夠回傳 null
+function bSimCands() {
+  const mine = simMine(), opps = bring.opp.filter(k => MON[k]);
+  if (team.fmt !== 's' || mine.length < BRING_N.s || opps.length < BRING_N.s) return null;
+  const plan = bringPlan(mine.map(x => ({ defs: MON[x.key].types, key: x.key, set: x.set })), opps.map(k => MON[k]), 's');
+  const slotsOf = (c, lead) => [lead, ...c.idx.filter(j => j !== lead)].map(j => mine[j].slot), evoOf = c => c.evo == null ? -1 : mine[c.evo].slot;
+  const top = plan.combos[0], lead0 = plan.pick.js[0];
+  const cands = [lead0, ...top.idx.filter(j => j !== lead0)].map((l, n) => ({ slots: slotsOf(top, l), evo: evoOf(top), rank: 1, rec: !n }));
+  plan.combos.slice(1, BSIM_C).forEach((c, r) => cands.push({ slots: slotsOf(c, plan.leadOf(c).js[0]), evo: evoOf(c), rank: r + 2, rec: false }));
+  return { mine, cands, scs: simOppScenarios(bring.opp, mine.map(x => x.key), 's').slice(0, BSIM_SC) };
+}
+// 開始：對位勝率（duelVs）還在背景算的先等算完（選角才和上面一樣），再排場次交給背景計算
+async function bSimStart() {
+  if (bSim.run) return;
+  const run = bSim.run = { sig: bSimSig(), C: null, win: [], done: 0, total: 0, wait: true, t0: performance.now(), ctl: null, stop: false };
+  bSim.res = null;
+  bSimDraw();
+  while (pBgLeft()) { if (run.stop) return; await new Promise(r => setTimeout(r, 300)); }
+  const C = bSimCands();
+  if (!C || run.stop) { bSim.run = null; bSimDraw(); return; }
+  const jobs = [];
+  C.cands.forEach((c, a) => {
+    const my = simMySide(C.mine, c.slots, c.evo, 's');
+    C.scs.forEach((sc, r) => { for (let i = 0; i < BSIM_K; i++) jobs.push({ a, k: r * BSIM_K + i, sides: [{ mons: my }, { mons: sc.mons }], seed: simHash(JSON.stringify(['bring', r, i])) }); });
+  });
+  Object.assign(run, { C, win: C.cands.map(() => ({})), total: jobs.length, wait: false, t0: performance.now() });
+  run.ctl = simBatch(jobs, BSIM_OPT, (i, out) => { const j = jobs[i]; run.win[j.a][j.k] = out.res > 0 ? 1 : 0; run.done++; bSimTick(); },
+    () => { if (bSim.run === run) { bSim.run = null; bSim.res = run; } bSimDraw(); });
+  bSimDraw();
+}
+function bSimStop() {
+  const run = bSim.run;
+  if (!run) return;
+  run.stop = true;
+  if (run.ctl) run.ctl.stop(); else { bSim.run = null; bSim.res = run.C ? run : null; bSimDraw(); }
+}
+// 打的時候每秒最多重畫一次卡片
+function bSimTick() { if (!bSim.draw) bSim.draw = setTimeout(() => { bSim.draw = 0; bSimDraw(); }, 1000); }
+function bSimDraw() { const el = curTab === 'bring' && $('#bSim'); if (el) el.innerHTML = bSimHTML(); }
+function bSimHTML() {
+  const head = '<h3>用模擬比較帶法</h3>';
+  if (team.fmt !== 's') return head + '<p class="muted small b-intro">只做單打（模擬對戰只有單打）。</p>';
+  const mine = simMine(), nOpp = bring.opp.filter(k => MON[k]).length, n = (BRING_N.s + BSIM_C - 1) * BSIM_SC * BSIM_K, wk = simWkN();
+  const ready = mine.length >= BRING_N.s && nOpp >= BRING_N.s, R = bSim.run || bSim.res;
+  const btn = bSim.run ? '<button class="btn" data-bsim="stop">停止</button>'
+    : `<button class="btn primary" data-bsim="run"${ready ? '' : ' disabled'}>${bSim.res ? '重新比較' : '開始比較'}</button>`;
+  const intro = `<p class="muted small b-intro">上面的建議是照 1 對 1 的對位排的；這裡直接用「模擬對戰」打 3 對 3 驗證：第 1 名組合換三種先發，加上第 2～${BSIM_C} 名組合，`
+    + `各對「對手可能帶的」前 ${BSIM_SC} 種帶法打 ${BSIM_K} 場（共 ${n} 場，約 ${simEta(TSIM_MS * n / Math.max(1, wk))}${wk ? `，${wk} 個背景計算一起打` : ''}）。</p>`;
+  const bar = `<div class="c-f">${btn}${ready ? '' : `<span class="muted small">我方要挑好 ${BRING_N.s} 隻以上寶可夢、對手至少填 ${BRING_N.s} 隻。</span>`}</div>`;
+  if (!R) return head + intro + bar;
+  if (R.wait) return head + intro + bar + '<p class="muted small b-intro">⏳ 先等上面的對位勝率算好再排帶法…</p>';
+  const stale = R.sig !== bSimSig() ? '<p class="x-msg">⚠ 隊伍或對手改過了，下面是改之前的結果，按「重新比較」重算。</p>' : '';
+  const prog = bSim.run ? `<p class="muted small b-intro">⏳ 打了 ${R.done}／${R.total} 場${R.done ? `，預估還要 ${simEta((performance.now() - R.t0) / R.done * (R.total - R.done))}` : ''}。</p>`
+    : R.stop ? `<p class="muted small b-intro">已停止，只打了 ${R.done} 場。</p>` : '';
+  const C = R.C, rate = (a, ks) => (ks || Object.keys(R.win[a])).reduce((s, k) => R.win[a][k] == null ? s : { n: s.n + 1, w: s.w + R.win[a][k] }, { n: 0, w: 0 });
+  const nm = slot => MON[team.mons[slot]]?.zh || '';
+  const team3 = c => c.slots.map((s, i) => `${s + 1} ${nm(s)}${i ? '' : '（先發）'}`).join('、');
+  // 和建議的帶法（第 0 個候補）成對比：兩邊都打完的同一場
+  const diff = a => { const ks = Object.keys(R.win[a]).filter(k => R.win[0][k] != null), m = ks.length;
+    if (!a || !m) return null;
+    const ds = ks.map(k => R.win[a][k] - R.win[0][k]), d = ds.reduce((s, x) => s + x, 0) / m, sd = Math.sqrt(ds.reduce((s, x) => s + (x - d) ** 2, 0) / Math.max(1, m - 1));
+    return { d, se: sd / Math.sqrt(m) }; };
+  const rows = C.cands.map((c, a) => ({ c, a, ...rate(a), df: diff(a) })).filter(x => x.n).sort((x, y) => y.w / y.n - x.w / x.n);
+  if (!rows.length) return head + intro + bar + stale + prog;
+  const best = rows[0], sig = x => x.df && Math.abs(x.df.d) > 2 * x.df.se;
+  const row = x => `<div class="combo${x === best ? ' top' : ''}"><b>${team3(x.c)}</b><span class="meta">勝率 ${simPctText(x.w, x.n)}（${x.n} 場）`
+    + (x.df ? `・比建議 <span class="${sig(x) ? (x.df.d > 0 ? 'ts-up' : 'ts-dn') : ''}">${sig(x) ? (x.df.d > 0 ? '▲' : '▼') : ''}${x.df.d > 0 ? '+' : ''}${Math.round(x.df.d * 1000) / 10}</span>（±${Math.round(x.df.se * 1000) / 10}）` : '')
+    + `</span><span class="who">${x.c.rec ? '出戰選角的建議（第 1 名組合與先發）' : `第 ${x.c.rank} 名組合${x.c.rank === 1 ? '、換先發' : ''}`}</span></div>`;
+  const recR = rows.find(x => x.c.rec), sum = best.c.rec ? '<div class="c-sum good">模擬下也是出戰選角建議的帶法最好。</div>'
+    : sig(best) && best.df.d > 0 ? `<div class="c-sum bad">模擬建議改帶 <b>${team3(best.c)}</b>：勝率比建議的高 ${Math.round(best.df.d * 1000) / 10} 個百分點（超過誤差 2 倍）。</div>`
+    : `<div class="c-sum">模擬勝率最高的是 ${team3(best.c)}，但和建議的帶法差在誤差內（${recR ? simPctText(recR.w, recR.n) : '—'} vs ${simPctText(best.w, best.n)}），兩種都可以。</div>`;
+  // 每種對手帶法的勝率（候補 × 對手帶法）
+  const per = r => Array.from({ length: BSIM_K }, (_, i) => String(r * BSIM_K + i));
+  const table = `<div class="mwrap cover"><table class="matrix vs"><thead><tr><th class="corner">我方 ↓<br>對手 →</th>`
+    + C.scs.map((sc, r) => `<th>#${sc.rank}<br><span class="meta">${simTeamText(sc.mons)}</span></th>`).join('') + '</tr></thead><tbody>'
+    + rows.map(x => `<tr><th>${team3(x.c)}</th>` + C.scs.map((_, r) => { const t = rate(x.a, per(r)); const p = t.n ? t.w / t.n : null;
+      return `<td class="${p == null ? '' : p >= 0.6 ? 'm2' : p <= 0.4 ? 'mh' : 'm1'}">${t.n ? simPctText(t.w, t.n) : '—'}</td>`; }).join('') + '</tr>').join('') + '</tbody></table></div>';
+  return head + intro + bar + stale + prog + sum + rows.map(row).join('')
+    + `<details class="b-more"><summary>每種對手帶法的勝率</summary>${table}</details>`
+    + '<p class="note">※ 勝率＝贏的場數／場數（打滿回合的平手不算贏）。「比建議」是和出戰選角建議的帶法在同一批場次（同一組亂數）比的差值，括號是誤差，'
+    + '超過誤差 2 倍的標 ▲／▼，其他的差異可能只是運氣。我方照「隊伍分析」登錄的配招，一場只能超級進化一隻；對手照 OP.GG 最常見的配置、道具同一隊不重複、'
+    + '超級石使用率過半的當成超級進化（同「模擬對戰」）。只算挑了寶可夢的隊員。結果只存在這個頁面。</p>';
+}
 // 一種帶法裡超級進化 2 隻以上時只有 c.evo 那隻進化，其他寫原型）
 function oppGuessHTML() {
   const g = oppBringPlan(bring.opp, team.mons, team.fmt), head = '<h3>對手可能帶的</h3>';
@@ -247,6 +338,8 @@ $('#pList').addEventListener('click', e => {
 // 對位表的格子、出招表的「傷害計算」：攻擊方放我方、防守方放對手，切到傷害計算並捲到最上面。
 // 沒有滑鼠停留（手機）時，點對位表的格子先在表下方顯示誰先動與幾下打倒（格子的 title），再按「傷害計算」過去
 $('#pResult').addEventListener('click', e => {
+  const sb = e.target.closest('[data-bsim]');
+  if (sb) { if (sb.dataset.bsim === 'run') bSimStart(); else bSimStop(); return; }
   const cell = e.target.closest('.vs-go');
   if (cell && !matchMedia('(hover: hover)').matches) {
     const d = cell.dataset;

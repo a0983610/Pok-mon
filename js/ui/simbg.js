@@ -72,6 +72,40 @@ function pBgRedraw() {
   else if (curTab === 'battle') renderBattle();
   else if (curTab === 'sim') renderSim();
 }
+// ---------- 一批 3 對 3 的背景計算（出戰選角的「用模擬比較帶法」用；整隊模擬另有自己的一套）----------
+// jobs[i]＝{ sides [我方, 對手]（每方 { mons }）, seed 亂數種子 }，opt 同 simPlay；每場打完 onRes(i, out)，全部打完或停止時 onEnd()。
+// 開幾個同模擬分頁的 simWkN 背景計算（每場開打前 ctx.flip 歸零、照種子打，同一場在哪裡打都一樣）；開不起來（file://）在畫面這邊一場一場打
+// （每段約 50 毫秒，打完讓畫面喘口氣）。回傳 { stop() }
+function simBatch(jobs, opt, onRes, onEnd) {
+  const B = { q: jobs.map((_, i) => i), wks: [], idle: [], left: jobs.length, end: false, local: false, timer: 0, ctx: null };
+  const fin = () => { if (B.end) return; B.end = true; B.wks.forEach(w => w.terminate()); B.wks = []; clearTimeout(B.timer); onEnd(); };
+  const got = (i, out) => { if (B.end) return; onRes(i, out); if (!--B.left) fin(); };
+  const local = () => {
+    B.timer = 0;
+    B.ctx ||= simCtx('s');
+    const t0 = performance.now();
+    while (B.q.length && !B.end && performance.now() - t0 < 50) { const i = B.q.shift(); B.ctx.flip = 0; got(i, simPlay(B.ctx, jobs[i].sides, simRng(jobs[i].seed), false, opt)); }
+    if (B.q.length && !B.end) B.timer = setTimeout(local, 0);
+  };
+  const fail = () => { B.wks.forEach(w => { if (w.cur >= 0) B.q.unshift(w.cur); w.terminate(); }); Object.assign(B, { wks: [], idle: [], local: true }); pump(); };
+  const pump = () => {
+    if (B.end || !B.q.length) return;
+    const n = B.local ? 0 : simWkN();
+    if (!n) { if (!B.timer) B.timer = setTimeout(local, 0); return; }
+    while (B.wks.length < n) {
+      let w;
+      try { w = new Worker('js/engine/sim-worker.js'); } catch { fail(); return; }
+      w.cur = -1;
+      w.onmessage = e => { w.cur = -1; B.idle.push(w); got(e.data.i, e.data); pump(); };
+      w.onerror = e => { e.preventDefault(); fail(); };
+      B.wks.push(w);
+      B.idle.push(w);
+    }
+    while (B.idle.length && B.q.length) { const w = B.idle.pop(), i = B.q.shift(); w.cur = i; w.postMessage({ i, sides: jobs[i].sides, opt, log: false, seed: jobs[i].seed }); }
+  };
+  if (!jobs.length) fin(); else pump();
+  return { stop: fin };
+}
 document.addEventListener('pointerdown', () => { pBg.down = true; });
 document.addEventListener('pointerup', () => { pBg.down = false; });
 document.addEventListener('pointercancel', () => { pBg.down = false; });

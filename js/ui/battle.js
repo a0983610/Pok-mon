@@ -8,16 +8,21 @@
 // bring：我方這場帶的隊伍格子（null＝照出戰選角第 1 名組合，見 btBrought）；seen：對手各格出場過沒（放上場就標）；
 // used：對手各格用過的招式 key（見 btOppSet）；osp：對手各格改過的能力點數／性格 { sp?, nat? }（沒改的那項照 OP.GG 最常見，null＝都沒改）；
 // keys：記錄時各格的寶可夢 key（隊伍或對手換了寶可夢，那格的紀錄就清掉）；
-// status：雙方各格的異常狀態（'par' 麻痺／'brn' 灼傷，換下場不會好）；walls：雙方的牆（BT_WALLS）；noItem：我方各格的道具用掉了、被拍落（對手看 item 的 '-'）；
+// status：雙方各格的異常狀態（BT_STATUS，換下場不會好）；walls：雙方的牆（BT_WALLS）；haz：雙方場地上的撒菱類（BT_HAZ 各幾層）；
+// noItem：我方各格的道具用掉了、被拍落（對手看 item 的 '-'）；
 // bust：雙方各格謎擬Ｑ的畫皮被揭穿了（換下場不會恢復）
 const BT_SIDES = ['me', 'opp'];
 const BT_STATS = [['atk', '攻擊'], ['def', '防禦'], ['spa', '特攻'], ['spd', '特防'], ['spe', '速度']];
-const BT_STATUS = [['', '沒有'], ['par', '麻痺'], ['brn', '灼傷']], BT_WALLS = ['reflect', 'light-screen', 'aurora-veil'];
+// 異常狀態：麻痺、灼傷影響傷害與速度；中毒、劇毒、睡眠、冰凍只有推薦出招（模擬）算得到，傷害上只影響毅力、神奇鱗片這類看「有沒有異常」的
+const BT_STATUS = [['', '沒有'], ['par', '麻痺'], ['brn', '灼傷'], ['psn', '中毒'], ['tox', '劇毒'], ['slp', '睡眠'], ['frz', '冰凍']], BT_WALLS = ['reflect', 'light-screen', 'aurora-veil'];
+// 撒菱類（這一方場地上的，換上來的會吃到；只有推薦出招算）：[模擬的 key, 最多幾層]，名字照 SIM_HAZ_ZH
+const BT_HAZ = [['sr', 1], ['spikes', 3], ['tspikes', 2], ['web', 1]];
+const btHaz0 = () => ({ sr: 0, spikes: 0, tspikes: 0, web: 0 });
 const btSt0 = () => [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]];
 const battle0 = () => ({ me: [-1, -1], opp: [-1, -1], sel: { me: 0, opp: 0 }, st: { me: btSt0(), opp: btSt0() },
   hp: Array(6).fill(null), ohp: Array(6).fill(100), item: Array(6).fill(''), ab: Array(6).fill(''), form: { me: Array(6).fill(''), opp: Array(6).fill('') },
   weather: '', terrain: '', tr: false, tw: [], bring: null, seen: Array(6).fill(false), used: Array.from({ length: 6 }, () => []), osp: Array(6).fill(null),
-  status: { me: Array(6).fill(''), opp: Array(6).fill('') }, walls: { me: [], opp: [] }, noItem: Array(6).fill(false),
+  status: { me: Array(6).fill(''), opp: Array(6).fill('') }, walls: { me: [], opp: [] }, haz: { me: btHaz0(), opp: btHaz0() }, noItem: Array(6).fill(false),
   bust: { me: Array(6).fill(false), opp: Array(6).fill(false) },
   keys: { me: team.mons.slice(), opp: bring.opp.slice() } });
 const battle = battle0();
@@ -191,14 +196,14 @@ function btPosHTML(side, p) {
   return `<div ${attr}><div class="bt-h">${tag}<b>${m.zh}</b>${chips(m.types)}<button class="mini bt-off" data-bout="${fold}">下場</button></div>`
     + btFormHTML(side, i)
     + `<div class="bt-hp"><span class="c-l">HP</span><input type="range" ${hp}><input type="number" class="sel c-num" inputmode="numeric" ${hp}>`
-    + `<span class="meta bt-hpt">${btHpText(side, v, max)}</span></div>` + btEntryHTML(side, b) + btDisguiseHTML(side, i, b)
+    + `<span class="meta bt-hpt">${btHpText(side, v, max)}</span></div>` + btEntryHTML(side, b, p) + btDisguiseHTML(side, i, b)
     + `<details class="bt-more" data-fold="${fold}"${btIsOpen(fold) ? ' open' : ''}><summary>${sum}</summary>${btStHTML(side, p)}${status}${info}</details></div>`;
 }
 // 出場特性一鍵套用（同傷害計算的提示）：威嚇＝對面場上每隻照 intimidateOn 改攻擊（不吃威嚇的不改、不服輸等反而上升），
 // 開天氣／場地的特性＝改成那種天氣／場地（已經是就不列）
-function btEntryHTML(side, b) {
+function btEntryHTML(side, b, p) {
   const f = FIELD_SET[b.ab], wx = ENTRY_WEATHER.includes(b.ab), tr = ENTRY_TERRAIN.includes(b.ab);
-  const btns = [b.ab === 'intimidate' && `<button class="mini" data-bintim="${side}">${abilZh(b.ab)}：對面攻擊 −1</button>`,
+  const btns = [b.ab === 'intimidate' && `<button class="mini" data-bintim="${side}.${p}">${abilZh(b.ab)}：對面攻擊 −1</button>`,
     wx && battle.weather !== f && `<button class="mini" data-bw="${f}">${abilZh(b.ab)}：改成${FIELD_ZH[f]}</button>`,
     tr && battle.terrain !== f && `<button class="mini" data-bf="${f}">${abilZh(b.ab)}：改成${FIELD_ZH[f]}</button>`].filter(Boolean);
   return btns.length ? `<div class="c-f"><span class="c-l">出場特性</span>${btns.join('')}</div>` : '';
@@ -542,7 +547,8 @@ function btResultHTML() {
     + '不是全滿時氣勢披帶、結實、多重鱗片沒有作用。招式看登錄的，沒登錄的（含對手）看 OP.GG 使用率前 4 招（對手用過的先算，再照使用率補滿 4 招）裡的攻擊招式，依傷害由高到低排。'
     + '先動看實際速度（能力變化、順風 ×2、戲法空間、講究圍巾、天氣／場地加速特性、麻痺 ×½）；同速各 50%，先制招式不看速度。能力變化換下場就清掉，異常狀態不會。'
     + '雙打的範圍招式打到兩隻以上時 ×0.75，對面場上只剩一隻（地震這類連隊友一起打的，隊友也不在）時不減；噴火／噴水以 HP 全滿計。'
-    + '灼傷、麻痺在位置卡的「異常狀態」標，牆在下方「我方／對手的牆」標；出場特性（威嚇、開天氣／場地）在位置卡按一下套用；不含幫助與其他隊友效果。'
+    + '異常狀態在位置卡標（麻痺、灼傷影響這裡的傷害與速度；中毒、劇毒、睡眠、冰凍只有上方的「推薦出招」算得到），牆在下方「我方／對手的牆」標，'
+    + '撒菱類在下方「我方／對手場地」標（只有推薦出招算）；出場特性（威嚇、開天氣／場地）在位置卡按一下套用（對面是鏡甲時反彈回來）；不含幫助與其他隊友效果。'
     + '看場上狀況的特性（「傷害計算」分頁不算，這裡算）：猛火、激流、茂盛、蟲之預感在 HP 剩 1/3 以下時該屬性招式 ×1.5；'
     + '大將照這一方目前倒下幾隻（HP 0 的），每隻威力 +10%（最多 5 隻）；謎擬Ｑ的畫皮還在時第一下沒有傷害、改扣 1/8（位置卡可以標「破了」，'
     + '按「打中」「實際」打到牠也會自動標成破了，之後照一般傷害算）。加速、持久力這類回合中的能力變化請在位置卡自己調。'
@@ -575,7 +581,7 @@ function btResultHTML() {
 // ----- 推薦出招：照目前場上狀況跑對戰模擬的樹搜尋（同「模擬對戰」的推演，只做單打） -----
 // 局面：我方＝這場帶的（btBrought，場上那隻排第一）照登錄的配招、剩下的 HP、異常狀態、道具沒了、畫皮破了；
 // 對手＝場上那隻、出場過的照標的（特性、道具、用過的招式、點數性格，同 btUnit），還沒出場的照「猜」（btOppGuess）補滿帶出場的隻數
-// （一場只能超級進化一隻、道具不重複照模擬的 simFixGuessed）；場上那隻的能力變化照位置卡；天氣、場地、牆照標的（剩幾回合不知道，當全新 5 回合）；
+// （一場只能超級進化一隻、道具不重複照模擬的 simFixGuessed）；場上那隻的能力變化照位置卡；天氣、場地、牆、戲法空間、順風照標的（剩幾回合不知道，當全新的）；
 // 雙方都不是剛上場（擊掌奇襲類不能用）。回傳 { st, notes 不算的東西 } 或 { why 不能算的原因（'' 就是不顯示）}
 const BT_REC_ITERS = 3000;
 function btSimState() {
@@ -593,18 +599,25 @@ function btSimState() {
       : simMon(key, btOppSet(i, key), items[i], 1, 's');
     if (side === 'opp') M.b = { ...M.b, ab: defAbOf(key, 's', battle.ab[i]) };
     M.hp = side === 'me' ? Math.min(M.max, battle.hp[i] ?? M.max) : Math.ceil(M.max * battle.ohp[i] / 100);
-    return Object.assign(M, { status: battle.status[side][i], bust: battle.bust[side][i], slot: i, in: -1,
+    // 睡眠、冰凍還剩幾次不知道：睡眠當 2 次（冠軍版 2～3 次）、冰凍當 3 次（最多），劇毒當剛中（1/16 起算）
+    const sta = battle.status[side][i];
+    return Object.assign(M, { status: sta, slp: sta === 'slp' ? 2 : 0, frz: sta === 'frz' ? 3 : 0, tox: 0, bust: battle.bust[side][i], slot: i, in: -1,
       out: side === 'me' ? i === i0 || M.hp < M.max : have.includes(i) });
   };
+  // 戲法空間當成剛開（5 回合），順風當成剛開（4 回合），剩幾回合不知道（同天氣場地）
   const st = { sd: [simSide0(mine.map(i => mk('me', i))), simSide0(opps.map(i => mk('opp', i)))], turn: 1, fut: [], idle: 0, log: null,
-    wx: battle.weather ? { t: battle.weather, n: 5 } : null, ter: battle.terrain ? { t: battle.terrain, n: 5 } : null };
-  BT_SIDES.forEach((side, s) => { st.sd[s].scr = Object.fromEntries(battle.walls[side].map(w => [w, 5])); st.sd[s].mons[0].st = stOf(battle.st[side][0]); });
+    wx: battle.weather ? { t: battle.weather, n: 5 } : null, ter: battle.terrain ? { t: battle.terrain, n: 5 } : null, troom: battle.tr ? { n: 5 } : null };
+  BT_SIDES.forEach((side, s) => {
+    st.sd[s].scr = Object.fromEntries(battle.walls[side].map(w => [w, 5]));
+    st.sd[s].mons[0].st = stOf(battle.st[side][0]);
+    st.sd[s].haz = { ...battle.haz[side] };
+    if (battle.tw.includes(side)) st.sd[s].tw = 4;
+  });
   simFixGuessed(st);
   st.sd.forEach(x => x.mons.forEach(M => { if (M.hp <= 0) { M.hp = 0; simFaint(st, M); } }));
   // 特性變身者在場上：當成已經變身成對面那隻（同對位的 btFieldMon）
   [0, 1].forEach(s => { const M = simAct(st, s), T = simAct(st, 1 - s); if (M.b.ab === 'imposter' && M.hp > 0 && T.hp > 0) simTransform(st, s, M, T); });
-  const notes = [battle.tw.length && '順風', battle.tr && '戲法空間'].filter(Boolean);
-  return { st, notes };
+  return { st, notes: [] };
 }
 // 推薦出招的狀態：key＝算的那個局面（局面一樣就不重算）、view＝simView 的結果、busy 背景正在算、fail 背景計算不能用（改成按鈕）
 const btRec = { key: null, st: null, why: '', notes: [], view: null, busy: false, fail: false, timer: 0, wk: null, id: 0 };
@@ -643,7 +656,8 @@ function btRecRender() {
   const note = '<p class="note">※ 用「模擬對戰」的樹搜尋（往下打約 3000 次）：我方照「隊伍分析」登錄的配招；對手照 OP.GG 常見的配招、上方標的特性道具與用過的招式，'
     + '還沒出場的照「猜」。勝率是對手照牠最穩的出法時我方的平均勝率（模擬次數有限，差 2～3% 內算差不多）；建議出的照比例排在前面，'
     + '同時出招，★ 以外比例也高的可以混著出，免得被猜中。'
-    + `天氣、場地、牆當成剛開（5 回合）；撒菱類、對手的 PP 用量不算${r.notes.length ? `；${r.notes.join('、')}模擬不算` : ''}。只是參考。</p>`;
+    + `天氣、場地、牆、戲法空間當成剛開（5 回合），順風當成剛開（4 回合）；撒菱類照上方標的；睡眠當還要睡 2 次、冰凍最多 3 次、劇毒當剛中；`
+    + `對手的 PP 用量不算${r.notes.length ? `；${r.notes.join('、')}模擬不算` : ''}。只是參考。</p>`;
   if (!v) {
     box.innerHTML = head + (btRecBg() ? '<p class="muted small">計算中…（約 2～5 秒）</p>'
       : '<div class="c-f"><button class="btn" data-brec>算推薦</button><span class="muted small">算的時候畫面會停幾秒</span></div>') + note;
@@ -678,6 +692,9 @@ function renderBattle() {
   $('#btT').innerHTML = [['', '無場地'], ...TERRAINS.map(t => [t, FIELD_ZH[t]])].map(([t, zh]) => `<button data-bf="${t}" aria-pressed="${battle.terrain === t}">${zh}</button>`).join('');
   BT_SIDES.forEach(side => { $(side === 'me' ? '#btWallMe' : '#btWallOpp').innerHTML = `<span class="meta seg-l">${side === 'me' ? '我方' : '對手'}的牆</span>`
     + BT_WALLS.map(w => `<button data-bwall="${side}" data-k="${w}" aria-pressed="${battle.walls[side].includes(w)}">${MOVES[w]?.[0] || w}</button>`).join(''); });
+  // 撒菱類：點一下加一層，到最多層再點變回沒有
+  BT_SIDES.forEach(side => { $(side === 'me' ? '#btHazMe' : '#btHazOpp').innerHTML = `<span class="meta seg-l">${side === 'me' ? '我方' : '對手'}場地</span>`
+    + BT_HAZ.map(([k, max]) => { const n = battle.haz[side][k]; return `<button data-bhaz="${side}" data-k="${k}" aria-pressed="${n > 0}">${SIM_HAZ_ZH[k]}${max > 1 && n ? ` ${n}` : ''}</button>`; }).join(''); });
   $('#btTR').checked = battle.tr;
   document.querySelectorAll('[data-btw]').forEach(c => { c.checked = battle.tw.includes(c.dataset.btw); });
   document.querySelectorAll('#btFmt button').forEach(b => b.setAttribute('aria-pressed', b.dataset.fmt === team.fmt));
@@ -723,11 +740,14 @@ $('#p-battle').addEventListener('click', e => {
   else if (d.bnoitem != null) battle.noItem[+d.bnoitem] = !battle.noItem[+d.bnoitem];
   else if (d.bbust) { const [side, i] = d.bbust.split('.'); battle.bust[side][+i] = !battle.bust[side][+i]; }
   else if (d.bwall) { const w = battle.walls[d.bwall]; battle.walls[d.bwall] = w.includes(d.k) ? w.filter(x => x !== d.k) : [...w, d.k]; }
-  // 威嚇：對面場上每隻照特性改攻擊（intimidateOn；不吃威嚇的不改）
+  else if (d.bhaz) { const h = battle.haz[d.bhaz], max = BT_HAZ.find(([k]) => k === d.k)[1]; h[d.k] = (h[d.k] + 1) % (max + 1); }
+  // 威嚇：對面場上每隻照特性改攻擊（intimidateOn；不吃威嚇的不改）；鏡甲反彈回威嚇的那隻（攻擊 −1，同模擬）
   else if (d.bintim) {
-    const foe = d.bintim === 'me' ? 'opp' : 'me';
+    const [side, q] = d.bintim.split('.'), foe = side === 'me' ? 'opp' : 'me';
     for (let p = 0; p < btN(); p++) {
-      const F = btMon(foe, p), e = F && intimidateOn(F.ab), s = battle.st[foe][p];
+      const F = btMon(foe, p);
+      if (F?.ab === 'mirror-armor') { const s = battle.st[side][+q]; s[0] = Math.max(-6, s[0] - 1); continue; }
+      const e = F && intimidateOn(F.ab), s = battle.st[foe][p];
       if (e) [s[0], s[2]] = [Math.max(-6, Math.min(6, s[0] + e[0])), Math.max(-6, Math.min(6, s[2] + e[1]))];
     }
   }

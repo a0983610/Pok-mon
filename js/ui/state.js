@@ -71,6 +71,8 @@ function stateQuery() {
     ['bk', battle.bring ? battle.bring.join('.') || '-' : ''], ['bv', battle.seen.map((v, i) => v ? i : -1).filter(i => i >= 0).join('.')],
     ['bu', joinTrim(battle.used.map(u => u.join('+')))], ['bz', joinTrim(battle.osp.map(o => o ? `${o.sp ? o.sp.join('+') : ''}.${o.nat ? o.nat.join('+') : ''}` : ''))],
     ['bc', joinTrim([...battle.status.me, ...battle.status.opp])], ['bl', BT_SIDES.some(s => battle.walls[s].length) ? BT_SIDES.map(s => battle.walls[s].join('+')).join('.') : ''],
+    // 撒菱類：雙方各 4 位數（BT_HAZ 的順序，各幾層）
+    ['bj', BT_SIDES.some(s => BT_HAZ.some(([k]) => battle.haz[s][k])) ? BT_SIDES.map(s => BT_HAZ.map(([k]) => battle.haz[s][k]).join('')).join('.') : ''],
     ['bn', battle.noItem.map((v, i) => v ? i : -1).filter(i => i >= 0).join('.')],
     ['bd', BT_SIDES.some(s => battle.bust[s].some(Boolean)) ? BT_SIDES.map(s => battle.bust[s].map((v, i) => v ? i : -1).filter(i => i >= 0).join('+')).join('.') : '']]
     .forEach(([k, v]) => { if (v) q.push(k + '=' + v); });
@@ -180,7 +182,10 @@ function loadState(q) {
   battle.seen = [0, 1, 2, 3, 4, 5].map(i => !!bring.opp[i] && slots(kv.bv).includes(i));
   // 對手用過的招式：資料裡有的招式、不重複、最多 4 招；改過的能力點數（6 項 0～32、合計不超過 66）／性格（↑↓ 1～5 不同，或 0+0 不加減）
   battle.used = cells(kv.bu).map((s, i) => bring.opp[i] ? [...new Set(s.split('+').filter(k => Object.hasOwn(MOVES, k)))].slice(0, 4) : []);
-  // 異常狀態只收 par／brn、有寶可夢的格子；牆只收 BT_WALLS 的、不重複；我方道具沒了只收挑了寶可夢的格子
+  // 撒菱類：每位數不超過那種的最多層數
+  const bj = (kv.bj || '').split('.');
+  BT_SIDES.forEach((s, n) => { battle.haz[s] = Object.fromEntries(BT_HAZ.map(([k, max], j) => { const v = +(bj[n] || '')[j] || 0; return [k, v <= max ? v : 0]; })); });
+  // 異常狀態只收 BT_STATUS 的、有寶可夢的格子；牆只收 BT_WALLS 的、不重複；我方道具沒了只收挑了寶可夢的格子
   const bc = (kv.bc || '').split(','), stOk = (k, list, i) => list[i] && BT_STATUS.some(([v]) => v && v === k) ? k : '';
   battle.status = { me: [0, 1, 2, 3, 4, 5].map(i => stOk(bc[i], team.mons, i)), opp: [0, 1, 2, 3, 4, 5].map(i => stOk(bc[6 + i], bring.opp, i)) };
   const bl = (kv.bl || '').split('.');

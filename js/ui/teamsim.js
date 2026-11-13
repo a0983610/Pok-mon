@@ -19,15 +19,21 @@ function tSimStart() {
   if (tSim.run || team.fmt !== 's' || mine.length < BRING_N.s) return;
   // 換人的候補照按下時的隊伍算（評估中改隊伍不影響這次）
   const snap = { slots: team.slots.map(s => s.slice()), mons: team.mons.slice(), sets: team.sets.slice() }, teams = simMetaTeams('s');
-  tSim.run = { sig: tSimSig(), teams, vs: [], jobs: [], q: [], wks: [], idle: [], done: 0, total: 0, expect: (1 + mine.length * TSIM_ALT) * teams.length * TSIM_SC * TSIM_K,
+  const adds = snap.slots.some(s => !s.length) ? TSIM_ALT : 0;
+  tSim.run = { sig: tSimSig(), teams, vs: [], jobs: [], q: [], wks: [], idle: [], done: 0, total: 0, expect: (1 + adds + mine.length * TSIM_ALT) * teams.length * TSIM_SC * TSIM_K,
     planned: false, stop: false, local: false, timer: 0, draw: 0, wait: false, t0: performance.now(), ctx: null };
   tSim.res = null;
   tSimDraw();
   tSimPlanAll(tSim.run, mine, snap);
 }
-// 先排原本的隊伍，再一格一格算換人的候補、排換上去的隊伍
+// 先排原本的隊伍；隊伍還沒滿 6 隻時，第一個空格（沒選屬性的，同隊伍總評的「下一隻建議」）補上推薦的前 TSIM_ALT 名；再一格一格算換人的候補、排換上去的隊伍
 async function tSimPlanAll(run, mine, snap) {
   await tSimAdd(run, mine, null);
+  const empty = snap.slots.findIndex(s => !s.length);
+  if (empty >= 0) for (const k of tSimCands(snap, empty)) {
+    if (run.stop) return;
+    await tSimAdd(run, [...mine, { key: k, set: defaultSet(k, 's'), slot: empty }].sort((a, b) => a.slot - b.slot), { slot: empty, from: '', to: k });
+  }
   for (const x of mine) {
     if (run.stop) return;
     const cands = tSimCands(snap, x.slot);
@@ -40,11 +46,11 @@ async function tSimPlanAll(run, mine, snap) {
   run.planned = true;
   tSimCheck(run);
 }
-// 第 slot 格拿掉後的推薦前 TSIM_ALT 名（recommendMon，其他格照 snap；不含被換掉那隻的同家族、單打沒排名或沒有預設配招的）
+// 第 slot 格拿掉（空格就是補上）後的推薦前 TSIM_ALT 名（recommendMon，其他格照 snap；不含被換掉那隻的同家族、單打沒排名或沒有預設配招的）
 function tSimCands(snap, slot) {
   const members = snap.slots.map((s, i) => [s, i]).filter(([s, i]) => s.length && i !== slot);
   const unit = ([s, i]) => ({ defs: s, atk: attacksOf(snap.mons[i], s, 's', snap.sets[i]), key: snap.mons[i], set: snap.sets[i] });
-  const named = members.filter(([, i]) => snap.mons[i]), fam = family(MON[snap.mons[slot]]);
+  const named = members.filter(([, i]) => snap.mons[i]), fam = snap.mons[slot] ? family(MON[snap.mons[slot]]) : null;
   const sets = Object.fromEntries(named.filter(([, i]) => snap.sets[i]).map(([, i]) => [snap.mons[i], snap.sets[i]]));
   return recommendMon(members.map(([s]) => s), [], 's', named.map(([, i]) => snap.mons[i]), members.map(unit), sets)
     .filter(r => family(r.mon) !== fam && r.mon.rank.s && defaultSet(r.mon.key, 's')).slice(0, TSIM_ALT).map(r => r.mon.key);
@@ -173,10 +179,11 @@ function tSimHTML() {
   const head = '<div class="res-head">整隊模擬<span class="muted small">（單打 3 對 3，打熱門隊伍）</span></div>';
   if (team.fmt !== 's') return head + '<p class="empty">整隊模擬只做單打（對手隊伍照單打的排名與隊友名單組），切到單打再評估。</p>';
   const mine = simMine(), R = tSim.run || tSim.res, n = simMetaTeams('s').length, per = n * TSIM_SC * TSIM_K;
-  const all = (1 + mine.length * TSIM_ALT) * per, wk = simWkN();
+  const empty = team.slots.findIndex(s => !s.length), all = (1 + (empty >= 0 ? TSIM_ALT : 0) + mine.length * TSIM_ALT) * per, wk = simWkN();
   const btn = tSim.run ? '<button class="btn" data-tsim="stop">停止</button>'
     : `<button class="btn primary" data-tsim="run"${mine.length < BRING_N.s ? ' disabled' : ''}>${tSim.res ? '重新評估' : '開始評估'}</button>`;
   const intro = `<p class="muted small b-intro">拿這隊打 ${n} 隊熱門隊伍（每隊照「出戰選角」選 3 隻，對手的前 ${TSIM_SC} 種帶法各打 ${TSIM_K} 場，共 ${per} 場），`
+    + `${empty >= 0 ? `隊伍還沒滿：第 ${empty + 1} 格補上推薦的前 ${TSIM_ALT} 名各打一次，看補誰最好；` : ''}`
     + `再把每一格換成推薦的前 ${TSIM_ALT} 名各打一次，看換誰勝率最會升；全部約 ${all} 場，`
     + `約 ${simEta(TSIM_MS * all / Math.max(1, wk))}${wk ? `（${wk} 個背景計算一起打）` : ''}。</p>`;
   const bar = `<div class="c-f">${btn}${mine.length < BRING_N.s ? `<span class="muted small">至少要挑 ${BRING_N.s} 隻寶可夢（只選屬性的沒有能力值，不算）。</span>` : ''}</div>`;
@@ -198,22 +205,26 @@ function tSimHTML() {
   // 對手每隻：平均打倒我方幾隻（多的在前），出場太少的（不到 TSIM_K 場）不列
   const opp = Object.entries(base.opp).filter(([, t]) => t.n >= TSIM_K).sort((x, y) => y[1].kos / y[1].n - x[1].kos / x[1].n).slice(0, 5)
     .map(([k, t]) => `<div class="x-line"><b>${nm(k)}</b><span class="meta">平均打倒我方 ${Math.round(t.kos / t.n * 100) / 100} 隻・對手帶牠時我方勝率 ${simPctText(t.win, t.n)}（${t.n} 場）</span></div>`).join('');
-  // 換人：差值大的在前；超過 2 倍誤差的標 ▲／▼
-  const sw = R.vs.slice(1).map(V => ({ V, r: tSimDiff(base, V) })).filter(x => x.r).sort((x, y) => y.r.d - x.r.d);
+  // 換人、補位：差值大的在前；超過 2 倍誤差的標 ▲／▼（補位 from 是空的）
+  const vs = R.vs.slice(1).map(V => ({ V, r: tSimDiff(base, V) })).filter(x => x.r).sort((x, y) => y.r.d - x.r.d);
+  const sw = vs.filter(x => x.V.swap.from), add = vs.filter(x => !x.V.swap.from);
   const swRow = ({ V, r }) => { const sig = Math.abs(r.d) > 2 * r.se, d = Math.round(r.d * 1000) / 10;
-    return `<div class="x-line"><b>${V.swap.slot + 1} ${nm(V.swap.from)} → ${nm(V.swap.to)}</b><span class="meta">${tSimPct(r.from)} → ${tSimPct(r.to)}`
+    return `<div class="x-line"><b>${V.swap.slot + 1} ${V.swap.from ? `${nm(V.swap.from)} → ` : '補上 '}${nm(V.swap.to)}</b><span class="meta">${tSimPct(r.from)} → ${tSimPct(r.to)}`
       + `（<span class="${sig ? (r.d > 0 ? 'ts-up' : 'ts-dn') : ''}">${sig ? (r.d > 0 ? '▲' : '▼') : ''}${d > 0 ? '+' : ''}${d}</span>，±${Math.round(r.se * 1000) / 10}；${r.n} 場）</span></div>`; };
+  const addSec = add.length ? `<h3>補上哪一隻（第 ${add[0].V.swap.slot + 1} 格）</h3><p class="muted small b-intro">「現在 → 補上以後」的勝率（同一批場次），排序同下面的換人；`
+    + `補上的照預設配招（OP.GG 最常見），點隊伍總評的「下一隻建議」放進去。</p>${add.map(swRow).join('')}` : '';
   return head + intro + bar + stale + prog
     + `<div class="c-sum ${all0.w / all0.n >= 0.5 ? 'good' : 'bad'}"><b>整隊勝率 ${simPctText(all0.w, all0.n)}</b>（${all0.n} 場，誤差約 ±${Math.round(50 / Math.sqrt(all0.n) * 10) / 10}%）</div>`
     + `<h3>最難打的隊伍</h3>${rows.slice(0, 5).map(row).join('')}`
     + (rows.length > 5 ? `<details class="b-more"><summary>其他 ${rows.length - 5} 隊</summary>${rows.slice(5).map(row).join('')}</details>` : '')
-    + `<h3>最常打倒我方的</h3>${opp || '<p class="muted small">還沒有資料。</p>'}`
+    + `<h3>最常打倒我方的</h3>${opp || '<p class="muted small">還沒有資料。</p>'}` + addSec
     + `<h3>換掉哪一隻</h3>${sw.length ? `<p class="muted small b-intro">「原本 → 換了以後」的勝率（兩邊都打完的同一批場次），括號裡是差幾個百分點與誤差；超過誤差 2 倍的標 ▲／▼，其他的差異可能只是運氣。</p>${sw.map(swRow).join('')}`
       : `<p class="muted small">${tSim.run ? '原本的隊伍打完後開始比。' : '沒有比到。'}</p>`}`
     + '<p class="note">※ 對手隊伍：單打排名前 ' + SIM_META_N + ' 名各當核心，加上 OP.GG 隊友名單的前 5 隻（6 隻一樣的只留一隊；OP.GG 只有每隻的隊友名單，沒有整隊統計），'
     + '配招照 OP.GG 最常見、道具同一隊不重複、超級石使用率過半的當成超級進化（同「模擬對戰」的對手）。帶法：我方照「出戰選角」第 1 名的組合與先發（一場只能超級進化一隻）；'
     + `對手照「出戰選角」的「對手可能帶的」前 ${TSIM_SC} 種（對手看不到我方的配招）。出招：雙方都用「模擬對戰」的「快速」（每步把雙方各種出法都試算一回合，照算出來的比例抽）；`
     + '勝率＝贏的場數／場數（打滿回合的平手不算贏）。換人：每一格拿掉後，隊伍分析推薦的前 ' + TSIM_ALT + ' 名（不含被換掉那隻的同家族）換上，配招用預設（OP.GG 最常見），'
-    + '換上去後重新選角，打同一批對手；同一場用同一組亂數，所以差值比兩邊各自的勝率準。「最常打倒我方的」只算原本的隊伍、出場 ' + TSIM_K + ' 場以上的。'
+    + '換上去後重新選角，打同一批對手；同一場用同一組亂數，所以差值比兩邊各自的勝率準。'
+    + '補位：隊伍還沒滿 6 隻時，第一個沒選屬性的空格補上隊伍總評「下一隻建議」的前 ' + TSIM_ALT + ' 名（配招用預設），同樣重新選角、打同一批對手。「最常打倒我方的」只算原本的隊伍、出場 ' + TSIM_K + ' 場以上的。'
     + '模擬的規則（算到哪些效果）見「模擬對戰」分頁的說明；結果只存在這個頁面，重新整理就沒了。</p>';
 }
