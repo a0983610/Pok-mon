@@ -113,7 +113,7 @@ const DEF_ABILS = new Set([...Object.keys(ABIL_IMMUNE), 'bulletproof', 'soundpro
   'water-bubble', 'purifying-salt', 'fur-coat', 'multiscale', 'filter', 'solid-rock', 'fluffy', 'aura-guard', 'punk-rock', 'shell-armor',
   'battle-armor', 'sturdy', 'unaware', 'ripen', 'fairy-aura', ...WEATHER_OFF, 'drought', 'drizzle', 'sand-stream', 'snow-warning', 'intimidate',
   'grass-pelt', 'electric-surge', 'grassy-surge', 'misty-surge', 'psychic-surge', 'sticky-hold', 'heavy-metal', 'light-metal']);
-// 看場上狀況的特性（傷害計算分頁不算，對戰中、對戰模擬才算，見 damageCalc 的 a.pinch／a.fallen／d.disguise）：
+// 看場上狀況的特性（傷害計算分頁不算，對戰中、對戰模擬才算；畫皮在出戰選角、隊伍分析的對位也算，見 damageCalc 的 a.pinch／a.fallen／d.disguise 與 duel 的 live）：
 // PINCH_AB 猛火、激流、茂盛、蟲之預感＝HP 剩 1/3 以下時這個屬性的招式攻擊／特攻 ×1.5（Showdown blaze 等 onModifyAtk）；
 // 大將＝出場時這一方倒下幾隻（最多 5），威力 ×1.1／1.2／1.3／1.4／1.5（Showdown supremeoverlord）；畫皮＝謎擬Ｑ還沒被揭穿時擋下一下攻擊、改扣最大 HP 的 1/8
 const PINCH_AB = { blaze: 'fire', torrent: 'water', overgrow: 'grass', swarm: 'bug' };
@@ -404,14 +404,15 @@ function koText(ko) {
 }
 // 攻擊方 a 打防守方 d（damageCalc 的格式）：a 在 o.fmt 的常用攻擊招式（a.set 有登錄招式就用登錄的，見 useOf；再加 extra）逐招算，
 // o.top＝沒登錄招式時只算 OP.GG 使用率前幾招（含變化招式一起排，同預填的配招 defaultSet；對位 duel 給 4，傷害計算分頁不給＝全部常用招式）；
-// ok 依最大傷害排序、why 是不算的招式依原因分組；kos 會被一擊打倒的招式、top 最痛的一招
+// ok 依最大傷害排序（同分再比之後連用的最大傷害：畫皮讓單發招式第一下都是 1/8）、why 是不算的招式依原因分組；kos 會被一擊打倒的招式、top 最痛的一招
 function dmgRows(a, d, o, extra) {
   const use = useOf(a.key, o.fmt, a.set)?.moves || [];
   const pool = o.top && !a.set?.moves?.some(Boolean) ? byUse(use).slice(0, o.top) : use;
   const list = pool.filter(([k]) => MOVES[k][2] !== 'status');
   if (extra && !list.some(([k]) => k === extra)) list.push([extra, 0]);
   const rows = list.map(([k, p]) => ({ k, p, r: damageCalc(a, d, k, o) }));
-  const ok = rows.filter(x => !x.r.skip).sort((x, y) => (y.r.max || 0) - (x.r.max || 0)), why = {};
+  const laterMax = x => (x.r.later || []).reduce((s, rs) => s + rs[15], 0);
+  const ok = rows.filter(x => !x.r.skip).sort((x, y) => (y.r.max || 0) - (x.r.max || 0) || laterMax(y) - laterMax(x)), why = {};
   rows.filter(x => x.r.skip).forEach(x => (why[x.r.skip] ||= []).push(MOVES[x.k][0]));
   return { use, ok, why, kos: ok.filter(x => x.r.ko?.[0] > 1e-9), top: ok.find(x => x.r.ko) };
 }
@@ -438,8 +439,8 @@ function imposterVs(x, y, keepSt = false) {
 // noItem 確定沒有道具、field 這一方場上還站著幾隻（見 damageCalc）、status 異常狀態（'brn' 灼傷：物理招式減半，毅力不減反而攻擊 ×1.5；
 // 'par' 麻痺：速度 ×½，飛毛腿不減反而 ×1.5）、walls 這一方的牆（反射壁、光牆、極光幕）；沒登錄招式的一方只算 OP.GG 使用率前 4 招（dmgRows 的 o.top，同預填的配招）；
 // f：{ fmt, weather, terrain, tr, crit 雙方都急所（對戰中反推傷害用）, hh 幫助（兩個方向都 ×1.5，對戰中的對手組合用）}（沒給的當沒有）；開場特性不算。
-// live＝對戰中：算看場上狀況的特性（LIVE_ABILS：猛火類看 cur、大將看 fallen 這一方倒下幾隻、畫皮看 bust 被揭穿了沒；變身來的畫皮不算），
-// 沒給的（出戰選角、隊伍分析）不算。道具兩個方向都帶著（damageCalc 只讀這個方向用得到的效果，如攻擊方不看樹果）。
+// live＝對戰中：算看場上狀況的特性（LIVE_ABILS：猛火類看 cur、大將看 fallen 這一方倒下幾隻），沒給的（出戰選角、隊伍分析）不算；
+// 畫皮不看 live：bust＝被揭穿了（對戰中照位置卡標的；沒給的雙方都剛出場，畫皮一定還在，換上來吃過一下的 matchup 會給 bust），變身來的畫皮不算。道具兩個方向都帶著（damageCalc 只讀這個方向用得到的效果，如攻擊方不看樹果）。
 // 回傳 xy＝x 打 y、yx＝y 打 x（dmgRows 的結果）、spd／first（speedPair：first 0＝x 先動、1＝y 先動、-1＝同速）
 function duel(x, y, f) {
   const o = { fmt: f.fmt, weather: f.weather || '', crit: !!f.crit, terrain: f.terrain || '', hh: !!f.hh, top: 4 };
@@ -447,7 +448,7 @@ function duel(x, y, f) {
   const atk = b => ({ key: b.key, inv: b.atkInv, sp: b.sp, nat: b.nat, st: { atk: st(b, 'atk'), spa: st(b, 'spa'), def: st(b, 'def') }, item: b.item, ab: b.ab, set: b.set, field: b.field,
     pinch: !!b.live && (b.cur ?? hpOf(b)) <= hpOf(b) / 3, fallen: b.live ? b.fallen || 0 : 0 });
   const def = b => ({ key: b.key, hp: b.hp, inv: b.defInv, sp: b.sp, nat: b.nat, st: { def: st(b, 'def'), spd: st(b, 'spd'), atk: st(b, 'atk') }, item: b.item, ab: b.ab, cur: b.cur,
-    noItem: b.noItem, field: b.field, atkInv: b.atkInv, maxHp: b.maxHp, disguise: !!b.live && !b.bust && !b.tfFrom });
+    noItem: b.noItem, field: b.field, atkInv: b.atkInv, maxHp: b.maxHp, disguise: !b.bust && !b.tfFrom });
   const spe = b => ({ key: b.key, inv: b.speInv, sp: b.sp, nat: b.nat, st: st(b, 'spe'), item: b.item, ab: b.ab, tw: !!b.tw, par: b.status === 'par', status: !!b.status });
   // a 打 d 這個方向：d 那一方的牆、a 灼傷（毅力有異常狀態就照灼傷的算法：攻擊 ×1.5、不減半，同對戰模擬）
   const dir = (a, d) => ({ ...o, walls: d.walls || [], burn: a.status === 'brn' || (a.ab === 'guts' && !!a.status) });
@@ -482,7 +483,7 @@ function intimidated(b, by) {
 }
 // 出戰選角的一對一：x 我方、y 對手（battler；對戰中的換人另外帶 cur 等，同 duel），f 同 duel。回傳
 //   head：正面對打（雙方全滿，有 cur 的照 cur）先打倒牠；sw：換上來先吃牠最痛的一招（最高傷害），剩下的 HP 對打還先打倒牠（換上來吃過一下，
-//   氣勢披帶、多重鱗片就沒用了）；ohko：沒贏、而且牠一下就打得倒我又比我先出手（速度或先制招式）；
+//   氣勢披帶、多重鱗片就沒用了，畫皮也被揭穿）；ohko：沒贏、而且牠一下就打得倒我又比我先出手（速度或先制招式）；
 //   first、spd（同 duel）、me／opp（fastestKO 的 n）、left 換上來吃過最痛的一招後剩下的 HP（0 以下＝會倒）、big 那一招（沒有會痛的招式是 ''）給畫面說明用
 // f.intim：算出場特性威嚇（intimidated）。'both'＝正面對打時雙方都剛出場，各自的威嚇打對方（出戰選角、隊伍分析）；
 // 'me'＝只有我方剛出場（對戰中的換人：對手早就在場上，牠的威嚇不會再觸發）；換上來吃一下那段也只有我方剛出場。沒給就不算
@@ -492,7 +493,7 @@ function matchup(x, y, f) {
   // 換上來：吃牠最痛的一招（這時只有我方的威嚇有作用）；剩下的 HP 比全滿少，正面都打不贏的換上來也當打不贏，不用再算
   const ds = xi === x ? d : duel(x, yi, f), cur = (x.cur ?? hpOf(x)) - Math.max(0, ...ds.yx.ok.map(r => r.r.max || 0));
   let sw = false;
-  // 吃過一下：畫皮已經被揭穿（對戰中才算畫皮）
+  // 吃過一下：畫皮已經被揭穿
   if (head && cur > 0) { const d2 = duel({ ...x, cur, bust: true }, yi, f); sw = winKO(fastestKO(d2.xy), fastestKO(d2.yx), d2.first); }
   return { head, sw, ohko: !head && b.n === 1 && (b.pri || d.first !== 0), first: d.first, spd: d.spd.map(s => s.v), me: a.n, opp: b.n,
     left: cur, big: ds.yx.ok[0]?.r.max ? ds.yx.ok[0].k : '' };

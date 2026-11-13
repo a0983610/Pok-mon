@@ -92,6 +92,7 @@ function bringHTML(members, opps) {
     + '其他以原型計（帶著超級石，等於沒道具），取結果最好的並標出進化哪隻（對位表的每一列仍是進化後的樣子）。'
     + '出場特性只算威嚇和變身者：正面對打時雙方都剛出場，各自的威嚇都打對方；換上來吃一下時只有我方剛出場，只算我方的（不吃威嚇的特性如精神力、恆淨之軀不降，不服輸、好勝反而上升）。'
     + '特性是變身者的（百變怪）出場就變成對面那隻：屬性、HP 以外的能力、特性、招式照對面的，HP、道具照自己的（兩隻百變怪互相變身時，後變的失敗，兩邊都只有變身這招）。'
+    + '謎擬Ｑ的畫皮有算：雙方剛出場畫皮還在，第一下沒有傷害、改扣 1/8（換上來吃的那一下也被畫皮擋下）。'
     + '對位表不含天氣、場地、其他出場特性與雙打的隊友配合（隊友配合另外看上方組合與先發的「搭配」）；雙打的範圍招式以打到兩隻（×0.75）計。'
     + `「搭配」的招式看${FMT_ZH[team.fmt]}常用（使用率 ${ROLE_PCT}% 以上，登錄的照登錄），慢速打手＝隊伍角色不是輔助、又不比熱門前 ${THREAT_N} 的一半快；`
     + `會打到隊友的範圍招式：${ALLY_HIT.filter(k => MOVES[k]).map(k => MOVES[k][0]).join('、')}，隊友是那個屬性免疫、或特性是`
@@ -115,7 +116,8 @@ function oppGuessHTML() {
 function moveTableHTML(members, opps, best, alt, oppMegas) {
   const fmt = team.fmt;
   const keyIn = j => { const k = team.mons[members[j][1]]; return k && alt[j] && best.evo != null && j !== best.evo ? MON[k].base : k; };
-  const hit = rows => rows.top ? `${mvName(rows.top.k)} ${hpPct(rows.top.r.min, rows.top.r.hp)}～${hpPct(rows.top.r.max, rows.top.r.hp)}%（${koText(rows.top.r.ko).text}）`
+  const hit = rows => rows.top ? `${mvName(rows.top.k)} ${hpPct(rows.top.r.min, rows.top.r.hp)}～${hpPct(rows.top.r.max, rows.top.r.hp)}%（${koText(rows.top.r.ko).text}`
+    + `${rows.top.r.disguise ? `・${abilZh('disguise')}擋下第一下` : ''}）`
     : rows.ok.length ? '招式都沒有效果' : rows.use.length ? '沒有能算傷害的攻擊招式' : '沒有招式資料';
   const forms = opps.flatMap(([m, i], o) => [[m, i, false], ...oppMegas[o].map(x => [x, i, true])]);
   return `<h3>出招表</h3><p class="muted small b-intro">第 1 名組合的每隻對上每隻對手：誰先動、我方最痛的一招、對手打回來最痛的一招（% 是佔對方 HP 的比例）。</p>`
@@ -142,7 +144,7 @@ function moveTableHTML(members, opps, best, alt, oppMegas) {
     + '能力點數與性格用 OP.GG 最常見的（沒有統計的攻擊／特攻 32＋性格、速度 32＋性格、HP／防禦／特防 0）、'
     + '道具帶 OP.GG 最常帶的（超級進化帶超級石）、特性用 OP.GG 最常見的（超級進化用固定特性）。'
     + '招式看登錄的，沒登錄的（含對手）看 OP.GG 使用率前 4 招（同挑寶可夢時預填的）裡的攻擊招式，列傷害最高的一招；幾擊＝連續用同一招幾次打倒。'
-    + '先動看實際速度（括號是我方／對手的速度；同速各 50%，先制招式不看速度）。雙方的威嚇都算（同對位表的正面對打）；不含天氣、場地、其他能力變化與出場特性（如日照）。'
+    + '先動看實際速度（括號是我方／對手的速度；同速各 50%，先制招式不看速度）。雙方的威嚇都算（同對位表的正面對打）；謎擬Ｑ的畫皮也算（第一下改扣 1/8，標「畫皮擋下第一下」）；不含天氣、場地、其他能力變化與出場特性（如日照）。'
     + '對手常帶超級石的另列「超級進化後」；一場只能超級進化一隻，第 1 名組合裡不進化的隊員以原型計。按「傷害計算」看每一招的細節。</p>';
 }
 // 對手情報：每隻對手的角色、種族值、帶講究圍巾的比例、常帶攻擊招式（對位表看的就是這些）、常用特性與道具，
