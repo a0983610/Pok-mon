@@ -131,19 +131,20 @@ function calcHTML() {
   const spA = X.sp ? { sp: X.sp, nat: X.nat } : {}, spD = Y.sp ? { sp: Y.sp, nat: Y.nat } : {};
   const a = { key: X.key, inv: calc.ai, ...spA, st: { atk: calc.st[0], spa: calc.st[1] }, item: aItem, ab: X.ab, set: X.set };
   const d = { key: Y.key, hp: calc.hi, inv: calc.di, ...spD, st: { def: calc.st[2], spd: calc.st[3] }, item: dItem, ab: Y.ab, maxHp: Y.maxHp };
+  const sps = [spA, spD], XY = [X, Y];
+  // 速度：變身的照對面那隻的速度投資（X／Y 的 speInv），道具照自己的
+  const { spd, first } = speedPair(...SIDES.map((s, i) => ({ key: XY[i].key, inv: XY[i].speInv, ...sps[i], st: calc.st[4 + i], item: [aItem, dItem][i],
+    ab: XY[i].ab, tw: calc.tw.includes(s), par: calc.par.includes(s), status: calc.par.includes(s) || (!i && calc.burn) })), { weather: calc.weather, terrain: calc.terrain, tr: calc.tr });
   const hh = calc.hh && team.fmt === 'd';
+  // last：特性分析看誰晚出招（同 duel：照上面的先後，同速兩邊都算）
   const o = { fmt: team.fmt, weather: calc.weather, crit: calc.crit, terrain: calc.terrain, hh, walls: calc.walls, burn: calc.burn };
-  const fw = dmgRows(a, d, o, calc.extra), { use, ok, why } = fw;
+  const fw = dmgRows(a, d, { ...o, last: first !== 0 }, calc.extra), { use, ok, why } = fw;
   // 反擊＝防守方打攻擊方，和按「⇄ 對調」看到的一樣：特性跟著寶可夢、投資檔位不動（攻擊投資套在防守方、HP／防禦投資套在攻擊方），
   // 道具照對調後的（swapItem：原本的道具換邊後還有作用就留著，不然用那一邊的預設），能力變化、加算招式、灼傷、幫助、牆不算；天氣、場地、急所照舊。
   // 套用登錄配招的一方道具照登錄的；能力點數與性格是登錄的或 OP.GG 最常見的（calcSpread）時跟著寶可夢走（那隻自己的，反過來打也一樣）
   const bk = dmgRows({ key: Y.key, inv: calc.ai, ...spD, st: { atk: 0, spa: 0 }, item: itemFor('a', sd, calc.def, swapItem('a', calc.def, calc.dItem)), ab: Y.ab, set: Y.set },
     { key: X.key, hp: calc.hi, inv: calc.di, ...spA, st: { def: 0, spd: 0 }, item: itemFor('d', sa, calc.atk, swapItem('d', calc.atk, calc.aItem)), ab: X.ab, maxHp: X.maxHp },
-    { ...o, hh: false, walls: [], burn: false }, '');
-  const sps = [spA, spD], XY = [X, Y];
-  // 速度：變身的照對面那隻的速度投資（X／Y 的 speInv），道具照自己的
-  const { spd, first } = speedPair(...SIDES.map((s, i) => ({ key: XY[i].key, inv: XY[i].speInv, ...sps[i], st: calc.st[4 + i], item: [aItem, dItem][i],
-    ab: XY[i].ab, tw: calc.tw.includes(s), par: calc.par.includes(s), status: calc.par.includes(s) || (!i && calc.burn) })), { weather: calc.weather, terrain: calc.terrain, tr: calc.tr });
+    { ...o, hh: false, walls: [], burn: false, last: first !== 1 }, '');
   const spdText = (m, i) => `${m.zh} <b>${spd[i].v}</b><span class="meta">（${[sps[i].sp ? `${XY[i].tfFrom ? '對面的' : spName(SIDES[i])} 點數 ${sps[i].sp[5]}${NAT_ZH[natOf(sps[i].nat, 5)]}`
     : `投資 ${invName(SPE_INV, XY[i].speInv)}`, calc.st[4 + i] && `速度 ${stgText(calc.st[4 + i])}`, ...spd[i].notes].filter(Boolean).join('・')}）</span>`;
   // 上方的能力值（套用登錄配招時照登錄的點數與性格；變身的照對面那隻的種族值，HP 照自己的）

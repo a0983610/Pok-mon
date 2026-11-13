@@ -187,7 +187,8 @@ function speedPair(x, y, f) {
 // 看場上狀況的特性（LIVE_ABILS，沒給就不算）：a.pinch＝攻擊方 HP 剩 1/3 以下（PINCH_AB）、a.fallen＝攻擊方這一方倒下幾隻（大將）、
 // d.disguise＝防守方的畫皮還沒被揭穿（這次的第一下沒有傷害、改扣 1/8，之後連用照常；回傳 disguise 標記）；
 // 雙打時 a.field／d.field＝攻擊方／防守方場上還站著幾隻（沒給當 2）：範圍招式實際只打到 1 隻時不減傷（Showdown battle-actions.ts：targets.length > 1 才 spreadHit）；
-// o：{ fmt 's'／'d', weather, crit, terrain, hh 幫助, walls 防守方的牆, burn 攻擊方灼傷, bp 威力（對戰模擬給噴火、噴水這種隨 HP 變的；沒給照資料）}
+// o：{ fmt 's'／'d', weather, crit, terrain, hh 幫助, walls 防守方的牆, burn 攻擊方灼傷, bp 威力（對戰模擬給噴火、噴水這種隨 HP 變的；沒給照資料）,
+//   last 攻擊方比防守方晚出招（特性分析；沒給當先出招）}
 // （必定急所的招式不管 crit 都算急所）。不算的招式回傳 { skip 原因 }；
 // 沒有效果的回傳 eff 0（沒有 hp 以後的欄位；immuneBy＝讓招式無效的防守方特性，blockedBy＝其他原因的說明，如精神場地擋先制）；
 // 其餘回傳 hp 防守方最大 HP、min／max 用一次的傷害（多段攻擊是各下加總）、ko[n] 連用 n＋1 次打掉剩下 HP 的機率（n＝0～3）、stab 本系倍率（4096 制）、
@@ -233,12 +234,17 @@ function damageCalc(a, d, mk, o) {
   const spread = o.fmt === 'd' && hitN > 1 && (SPREAD.has(mk) || (mk === 'expanding-force' && terr === 'psychic' && aGround));
   if (aab === 'parental-bond' && hits === 1 && !spread) [hits, hitNote, pb] = [2, use(aab) && `${abilZh(aab)}：第 2 下傷害 ¼`, true];
   const scrappy = aab === 'scrappy' && (type === 'normal' || type === 'fighting') && D.types.includes('ghost') && use(aab);
-  const r = { type, cat, power, hits, hitNote, spread, eff: eff(type, scrappy ? D.types.filter(t => t !== 'ghost') : D.types),
+  // 冷凍乾燥對水屬性 ×2（Smogon util.ts getMoveEffectiveness：Freeze-Dry 打 Water 回傳 2）
+  const dTypes = scrappy ? D.types.filter(t => t !== 'ghost') : D.types, dry = mk === 'freeze-dry' && dTypes.includes('water');
+  if (dry) notes.add('冷凍乾燥對水屬性效果絕佳');
+  const r = { type, cat, power, hits, hitNote, spread, eff: dry ? eff(type, dTypes.filter(t => t !== 'water')) * 2 : eff(type, dTypes),
     crit: (o.crit || ALWAYS_CRIT.has(mk)) && !(['shell-armor', 'battle-armor'].includes(dab) && use(dab)) };
   if (ABIL_IMMUNE[dab] === type || (dab === 'bulletproof' && FLAG.bullet.has(mk)) || (dab === 'soundproof' && FLAG.sound.has(mk))
     || (['queenly-majesty', 'armor-tail'].includes(dab) && FLAG.priority.has(mk))) [r.eff, r.immuneBy] = [0, dab];
   else if (r.eff && balloon && type === 'ground') [r.eff, r.blockedBy] = [0, `${ITEMS[d.item][0]}浮在空中`];
   else if (r.eff && terr === 'psychic' && dGround && FLAG.priority.has(mk)) [r.eff, r.blockedBy] = [0, `${FIELD_ZH.psychic}擋先制招式`];
+  // 鐵滾輪沒有場地時失敗（Smogon champions.ts：Steel Roller && !field.terrain）
+  else if (r.eff && mk === 'steel-roller' && !terr) [r.eff, r.blockedBy] = [0, '沒有場地時會失敗'];
   if (!r.eff) return r;
   // 本系 ×1.5；變幻自如／自由者每招都算本系；適應力本系再 +0.5
   const own = A.types.includes(type);
@@ -300,8 +306,9 @@ function damageCalc(a, d, mk, o) {
     if ((aab === 'technician' && p <= 60) || (aab === 'mega-launcher' && FLAG.pulse.has(mk)) || (aab === 'strong-jaw' && FLAG.bite.has(mk))
       || (aab === 'steely-spirit' && type === 'steel') || (aab === 'sharpness' && FLAG.slicing.has(mk))) m.push(use(aab) && 6144);
     if (type === 'fairy' && (aab === 'fairy-aura' || dab === 'fairy-aura')) m.push(use('fairy-aura') && 5448);
+    // 分析：比對方晚出招 ×1.3（o.last；Showdown 是這回合場上其他寶可夢都出過招，Smogon champions.ts 同組 5325）
     if ((aab === 'sheer-force' && (FLAG.secondary.has(mk) || mk === 'electro-shot')) || (aab === 'sand-force' && wthr === 'sand' && ['rock', 'ground', 'steel'].includes(type))
-      || (aab === 'tough-claws' && contact) || (aab === 'punk-rock' && FLAG.sound.has(mk))) m.push(use(aab) && 5325);
+      || (aab === 'tough-claws' && contact) || (aab === 'punk-rock' && FLAG.sound.has(mk)) || (aab === 'analytic' && o.last)) m.push(use(aab) && 5325);
     if (aab === 'supreme-overlord' && a.fallen > 0) m.push(use(aab) && [4096, 4506, 4915, 5325, 5734, 6144][Math.min(5, a.fallen)]);
     if (ate) m.push(4915);
     if ((aab === 'reckless' && FLAG.recoil.has(mk)) || (aab === 'iron-fist' && FLAG.punch.has(mk))) m.push(use(aab) && 4915);
@@ -444,7 +451,9 @@ function duel(x, y, f) {
   const spe = b => ({ key: b.key, inv: b.speInv, sp: b.sp, nat: b.nat, st: st(b, 'spe'), item: b.item, ab: b.ab, tw: !!b.tw, par: b.status === 'par', status: !!b.status });
   // a 打 d 這個方向：d 那一方的牆、a 灼傷（毅力有異常狀態就照灼傷的算法：攻擊 ×1.5、不減半，同對戰模擬）
   const dir = (a, d) => ({ ...o, walls: d.walls || [], burn: a.status === 'brn' || (a.ab === 'guts' && !!a.status) });
-  return { xy: dmgRows(atk(x), def(y), dir(x, y)), yx: dmgRows(atk(y), def(x), dir(y, x)), ...speedPair(spe(x), spe(y), { weather: o.weather, terrain: o.terrain, tr: !!f.tr }) };
+  // 分析看誰晚出招（damageCalc 的 o.last）：照 speedPair 的先後（含戲法空間），同速兩邊都算晚出招（同 Smogon 速度不比對方快就算），先制招式不看
+  const sp = speedPair(spe(x), spe(y), { weather: o.weather, terrain: o.terrain, tr: !!f.tr });
+  return { xy: dmgRows(atk(x), def(y), { ...dir(x, y), last: sp.first !== 0 }), yx: dmgRows(atk(y), def(x), { ...dir(y, x), last: sp.first !== 1 }), ...sp };
 }
 // dmgRows 的結果裡最快打倒對方的：n＝連用同一招幾下打倒（每招取打倒機率一半以上的次數，取最少的；四擊打不倒是 9）、
 // pri＝有沒有先制招式也是 n 下打倒。擊掌奇襲、迎頭一擊只有上場後第一回合能用（FIRST_TURN），只算一下打倒的

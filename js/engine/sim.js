@@ -298,8 +298,9 @@ function simAcc(M, T, k, moved) {
 
 // A 打 D 用招式 k 的 damageCalc（crit 急所）；結果依會影響傷害的狀態快取（D 剩下的 HP 只看滿不滿：氣勢披帶、結實、多重鱗片）。
 // D 那一方的牆、A 灼傷（特性毅力有異常狀態就照 damageCalc 的灼傷算，攻擊 ×1.5、不減半）、充電（電屬性威力 ×2）也算進去；
-// 看場上狀況的特性：猛火類（PINCH_AB）看 A 剩下的 HP、大將看 A.v.fallen（見 simSwitch）；畫皮不在這裡算（見 simMove）
-function simCalc(ctx, st, A, D, k, crit) {
+// 看場上狀況的特性：猛火類（PINCH_AB）看 A 剩下的 HP、大將看 A.v.fallen（見 simSwitch）；畫皮不在這裡算（見 simMove）；
+// last＝D 這回合已經出過招（特性分析 ×1.3；同對焦鏡，算期望值時不知道順序不給）
+function simCalc(ctx, st, A, D, k, crit, last = false) {
   const pw = MOVES[k][3], dSide = st.sd[+D.id[0]];
   const bp = SIM_HPBP.has(k) ? Math.max(1, Math.floor(pw * A.hp / A.max)) : A.v.charge && MOVES[k][1] === 'electric' ? pw * 2 : undefined;
   // 電光束蓄力時已經特攻 +1，damageCalc 又會在出招前 +1，所以先扣回來
@@ -307,14 +308,14 @@ function simCalc(ctx, st, A, D, k, crit) {
   const burn = A.status === 'brn' || (A.b.ab === 'guts' && !!A.status), walls = Object.keys(dSide.scr);
   const pinch = !!PINCH_AB[A.b.ab] && A.hp <= A.max / 3, fallen = A.v.fallen || 0;
   // 撲擊看自己的防禦變化、欺詐看對手的攻擊變化，都要進快取的鍵
-  const key = [A.id, A.item, A.st.atk, spa, A.st.def, burn, D.id, D.item, D.st.def, D.st.spd, D.st.atk, full, walls.join('.'), k, crit, bp, pinch, fallen].join('|');
+  const key = [A.id, A.item, A.st.atk, spa, A.st.def, burn, D.id, D.item, D.st.def, D.st.spd, D.st.atk, full, walls.join('.'), k, crit, bp, pinch, fallen, last].join('|');
   let r = ctx.memo.get(key);
   if (!r) {
     const a = A.b, d = D.b;
     r = damageCalc({ key: A.key, inv: a.atkInv, sp: a.sp, nat: a.nat, st: { atk: A.st.atk, spa, def: A.st.def }, item: A.item, ab: a.ab, pinch, fallen },
       { key: D.key, hp: d.hp, inv: d.defInv, sp: d.sp, nat: d.nat, st: { def: D.st.def, spd: D.st.spd, atk: D.st.atk }, item: D.item, ab: d.ab,
         cur: full ? undefined : D.hp, atkInv: d.atkInv },
-      k, { fmt: ctx.fmt, weather: '', crit, terrain: '', hh: false, walls, burn, bp });
+      k, { fmt: ctx.fmt, weather: '', crit, terrain: '', hh: false, walls, burn, bp, last });
     r = r.skip || !r.eff ? { eff: 0 } : { eff: r.eff, type: r.type, crit: r.crit, rolls: r.rolls, later: r.later, endured: r.endured, berry: r.berry };
     ctx.memo.set(key, r);
   }
@@ -347,7 +348,7 @@ function simFixed(ctx, st, A, D, k, exp) {
   return { eff: 1, crit: false, rolls, later: rolls, endured, berry: false, fixed: true, acc };
 }
 // 這一招打 D 的計算：固定傷害、反擊類、一擊必殺用 simFixed，其他用 simCalc
-const simHit = (ctx, st, A, D, k, crit, exp) => SIM_FIXED[k] || SIM_REACT[k] || SIM_OHKO.has(k) ? simFixed(ctx, st, A, D, k, exp) : simCalc(ctx, st, A, D, k, crit);
+const simHit = (ctx, st, A, D, k, crit, exp, last) => SIM_FIXED[k] || SIM_REACT[k] || SIM_OHKO.has(k) ? simFixed(ctx, st, A, D, k, exp) : simCalc(ctx, st, A, D, k, crit, last);
 // 打中時的期望傷害（各下的 16 個亂數取平均加總；每下判定命中的招式第二下起乘上命中的機率；氣勢披帶、結實撐住時最多打到剩 1；
 // 畫皮還在時第一下改算揭穿的 1/8）；輔助招是 0
 function simExpHit(ctx, st, A, D, k) {
@@ -889,14 +890,14 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
   } else {
     if (T.v.prot) { delete T.v.prot; simLog(st, `${me}的${mz}打破了守住`); }
     // 一擊必殺：期望值模式（沒有 rnd）直接算期望傷害；照亂數打時先抽中不中
-    let r = simHit(ctx, st, M, T, k, false, !rnd && SIM_OHKO.has(k));
+    let r = simHit(ctx, st, M, T, k, false, !rnd && SIM_OHKO.has(k), !oWill);
     // 命中率：一擊必殺用 simFixed 的，其他看 simAcc（對手這回合已經行動過時對焦鏡有作用）
     const acc = SIM_OHKO.has(k) ? r.acc : simAcc(M, T, k, !oWill);
     if (!r.eff) { r.fail ? fail(r.fail) : simLog(st, `${me}用${mz}，對${tn}沒有效果`); crash(); }
     else if (acc < 100 && rnd && rnd() * 100 >= acc) { simLog(st, `${me}用${mz}，沒有命中（命中率 ${acc}%）`); crash(); }
     else {
       const rank = SIM_HICRIT.has(k) + (M.b.ab === 'super-luck') + (M.item === 'scope-lens') + (M.v.focus ? 2 : 0);
-      if (!r.fixed && !r.crit && rnd && rnd() < SIM_CRIT_P[Math.min(3, rank)]) r = simCalc(ctx, st, M, T, k, true);
+      if (!r.fixed && !r.crit && rnd && rnd() < SIM_CRIT_P[Math.min(3, rank)]) r = simCalc(ctx, st, M, T, k, true, !oWill);
       // 寶石：這招屬性的寶石打出去就用掉（只加成一次）
       const gem = DMG_ITEMS[M.item]?.gem && DMG_ITEMS[M.item].type === r.type ? M.item : '';
       // 替身：聲音招式、特性穿透打得穿；打在替身上的不會有接觸懲罰、拍落、強制換人
