@@ -87,8 +87,8 @@ const SIM_MULTIACC = new Set(['population-bomb', 'triple-axel']);
 // 沒打中（沒命中、被守住、沒有效果、對手在地底等）自己扣最大 HP 的一半（Showdown hasCrashDamage／onMoveFail；特性魔法防守不受）
 const SIM_CRASH = new Set(['high-jump-kick', 'supercell-slam']);
 // 使用限制（Showdown）：擊掌奇襲、迎頭一擊只有上場後第一回合能用（onTry）；大爆炸、自爆、薄霧炸裂用了就倒下（selfdestruct always）；
-// 破壞光線等打中後下一回合不能動（recharge）；日光束、日光刃（要晴天）、電光束（要下雨）、挖洞、潛靈奇襲先蓄力一回合（charge；
-// 模擬沒有天氣，所以都要蓄力；挖洞、潛靈奇襲蓄力時打不到；電光束蓄力時特攻 +1）；預知未來兩回合後才打中；急速折返等打完換人（selfSwitch）；
+// 破壞光線等打中後下一回合不能動（recharge）；日光束、日光刃、電光束、挖洞、潛靈奇襲先蓄力一回合（charge；
+// 日光束、日光刃晴天、電光束下雨時不用蓄力，見 SIM_CHARGE_WX；挖洞、潛靈奇襲蓄力時打不到；電光束特攻 +1）；預知未來兩回合後才打中；急速折返等打完換人（selfSwitch）；
 // 龍尾、巴投打中後強制對手換人（forceSwitch）；高速旋轉、晶光轉轉打中後清掉自己這邊的撒菱類（onAfterHit）
 const SIM_FIRST = new Set(['fake-out', 'first-impression']);
 const SIM_BOOM = new Set(['explosion', 'self-destruct', 'misty-explosion']);
@@ -103,14 +103,15 @@ const SIM_HPBP = new Set(['eruption', 'water-spout']);
 // 輔助招（Showdown data/moves.ts，冠軍版有改的照 mods/champions）：kind 效果種類；p 先制等級；tgt＝目標是對手場上那隻；
 // f＝會被守住擋（protect 旗標；王者盾牌不擋輔助招）；r＝會被魔法鏡反彈（reflectable）；sub＝穿透替身（bypasssub 或聲音）；pw＝粉末（草屬性、防塵免疫）
 //   boost 自己的能力變化 b｜prot 守住類（how：protect／kings 王者盾牌：接觸的攻擊 −1｜spiky 尖刺防守：接觸的扣 1/8｜bunker 碉堡：接觸的中毒｜endure 挺住）
-//   heal 回復一半（沒有天氣，光合作用等也是一半）｜wish 祈願：下回合結束回復使用者最大 HP 一半｜split 分擔痛楚｜rest 睡覺：全滿、睡 2 回合
+//   heal 回復一半（光合作用、晨光、月光照天氣，見 SIM_SUNHEAL）｜wish 祈願：下回合結束回復使用者最大 HP 一半｜split 分擔痛楚｜rest 睡覺：全滿、睡 2 回合
 //   sap 吸取力量：回復對手的攻擊值、對手攻擊 −1｜seed 寄生種子：每回合吸 1/8｜hwish 治癒之願：自己倒下，換上來的回滿、治好異常
 //   status 異常狀態 x（toxic-thread 另外速度 −2，冠軍版）｜yawn 哈欠：下回合結束睡著｜hazard 撒菱類 h（層數上限 max）
 //   defog 清除濃霧：清掉雙方撒菱類、對手的牆｜tidy 大掃除：清掉雙方撒菱類與替身、攻擊速度 +1
 //   encore 再來一次 3 回合（冠軍版：對手這回合還沒出招就立刻改成那招，已經出過就多 1 回合）｜taunt 挑釁 3 回合（對手已出招多 1 回合）
 //   subst 替身：扣 1/4、替身 HP 1/4｜screen 牆 5 回合（光之黏土 8；極光幕要下雪，見 simFutile）｜phaze 吼叫、吹飛：強制對手換人（隨機）
 //   haze 黑霧：雙方能力變化歸零｜debuff 降對手能力 d｜shot 拋下狠話：降對手能力後換人｜memento 臨別禮物：降對手能力後自己倒下
-//   transform 變身：變成對手的樣子（見 simTransform）
+//   transform 變身：變成對手的樣子（見 simTransform）｜field 開天氣或場地 w（見 simSetField；pivot＝開完自己換下場：冷笑話，
+//   已經下雪時天氣不變、照樣換下場：Showdown runMoveEffects 的 selfSwitch 能換人就算成功）
 //   drum 腹鼓：扣一半、攻擊 +6｜soul 魂舞烈音爆：扣 33%、全能力 +1｜retreat 背水一戰：全能力 +1、不能換人｜curse 詛咒（非幽靈：攻防 +1 速度 −1；
 //   幽靈：扣一半、對手每回合扣 1/4）｜focus 聚氣：急所 +2｜charge 充電：特防 +1、下一招電屬性威力 ×2
 const SIM_ALL1 = { atk: 1, def: 1, spa: 1, spd: 1, spe: 1 };
@@ -144,7 +145,15 @@ const SIM_SUP = {
   'baby-doll-eyes': { kind: 'debuff', d: { atk: -1 }, p: 1, ...SIM_FOE }, 'string-shot': { kind: 'debuff', d: { spe: -2 }, ...SIM_FOE },
   'parting-shot': { kind: 'shot', d: { atk: -1, spa: -1 }, sub: 1, ...SIM_FOE }, memento: { kind: 'memento', d: { atk: -2, spa: -2 }, tgt: 1, f: 1 },
   transform: { kind: 'transform', tgt: 1 },
+  'sunny-day': { kind: 'field', w: 'sun' }, 'rain-dance': { kind: 'field', w: 'rain' }, sandstorm: { kind: 'field', w: 'sand' }, snowscape: { kind: 'field', w: 'snow' },
+  'chilly-reception': { kind: 'field', w: 'snow', pivot: 1 }, 'electric-terrain': { kind: 'field', w: 'electric' }, 'grassy-terrain': { kind: 'field', w: 'grassy' },
+  'misty-terrain': { kind: 'field', w: 'misty' }, 'psychic-terrain': { kind: 'field', w: 'psychic' },
 };
+// 回復量照天氣的（Showdown synthesis／morningsun／moonlight onHit：pokemon.effectiveWeather 晴天 0.667、下雨／沙暴／下雪 0.25、其他 0.5，this.modify(maxhp, factor)）
+const SIM_SUNHEAL = new Set(['synthesis', 'morning-sun', 'moonlight']);
+const SIM_SUNHEAL_F = { sun: 0.667, rain: 0.25, sand: 0.25, snow: 0.25 };
+// 晴天不用蓄力的日光束、日光刃，下雨不用蓄力的電光束（Showdown solarbeam／solarblade／electroshot onTryMove 看 attacker.effectiveWeather）
+const SIM_CHARGE_WX = { 'solar-beam': 'sun', 'solar-blade': 'sun', 'electro-shot': 'rain' };
 const SIM_STATUS_ZH = { brn: '灼傷', par: '麻痺', psn: '中毒', tox: '劇毒', slp: '睡眠', frz: '冰凍' };
 const SIM_HAZ_ZH = { sr: '隱形岩', spikes: '撒菱', tspikes: '毒菱', web: '黏黏網' };
 // 一場最多幾回合（到了算平手）、往前算的時候簡單規則最多再打幾回合
@@ -273,20 +282,52 @@ const simLog = (st, t) => { if (st.log) st.log.push('　' + t); };
 const simSide0 = mons => ({ act: 0, mons, haz: { sr: 0, spikes: 0, tspikes: 0, web: 0 }, scr: {}, wish: null, hwish: false });
 const simCloneMon = m => ({ ...m, st: { ...m.st }, v: { ...m.v }, pp: { ...m.pp } });
 const simClone = st => ({ sd: st.sd.map(x => ({ ...x, mons: x.mons.map(simCloneMon), haz: { ...x.haz }, scr: { ...x.scr }, wish: x.wish && { ...x.wish } })),
-  turn: st.turn, fut: st.fut.map(f => ({ ...f })), idle: st.idle, seq: st.seq, log: null });
+  turn: st.turn, fut: st.fut.map(f => ({ ...f })), idle: st.idle, seq: st.seq, wx: st.wx && { ...st.wx }, ter: st.ter && { ...st.ter }, log: null });
 const simTypes = M => MON[M.key].types;
 // 在地面上（撒菱、毒菱、黏黏網用）：不是飛行屬性、沒有飄浮、沒帶氣球（Showdown isGrounded）
 const simGround = M => !simTypes(M).includes('flying') && M.b.ab !== 'levitate' && M.item !== 'air-balloon';
-// 這一招的先制等級：SIM_PRI 或輔助招的 p；特性惡作劇之心讓輔助招 +1（Showdown prankster）
-const simPri = (M, k) => (SIM_PRI[k] ?? SIM_SUP[k]?.p ?? 0) + (SIM_SUP[k] && M.b.ab === 'prankster' ? 1 : 0);
+// ---------- 天氣與場地 ----------
+// st.wx／st.ter＝{ t 哪一種, n 還剩幾回合 }（沒有是 null）。規則照 Pokémon Showdown（冠軍版 mod 沒改）：開了 5 回合，開的那隻帶對應的岩石
+// （SIM_WX_ROCK）或場地延長器 8 回合（conditions.ts／moves.ts durationCallback）；已經是同一種時失敗、回合數不重算（field.ts setWeather／setTerrain）；
+// 回合結束先扣回合數、扣到 0 就結束（battle.ts fieldEvent Residual；天氣在回合結束最前面、場地在牆之後，見 simEnd），所以開的那回合也算一回合
+const SIM_WX_ROCK = { sun: 'heat-rock', rain: 'damp-rock', sand: 'smooth-rock', snow: 'icy-rock' };
+// 有作用的天氣：場上有特性無關天氣（WEATHER_OFF）的就沒有作用，回合數照扣（field.ts suppressingWeather）；場地
+const simWx = st => st.wx && ![0, 1].some(s => { const M = simAct(st, s); return M.hp > 0 && WEATHER_OFF.includes(M.b.ab); }) ? st.wx.t : '';
+const simTer = st => st.ter?.t || '';
+// M 開天氣或場地 t：成功回傳持續幾回合，已經是同一種回傳 0
+function simSetField(st, M, t) {
+  const wx = t in SIM_WX_ROCK, k = wx ? 'wx' : 'ter';
+  if (st[k]?.t === t) return 0;
+  st[k] = { t, n: M.item === (wx ? SIM_WX_ROCK[t] : 'terrain-extender') ? 8 : 5 };
+  return st[k].n;
+}
+// 特性開天氣或場地 t：出場的（WX_AB、TER_AB）要還站著；被打中的（吐沙、播種，hit）被打倒也照樣發動
+// （Showdown spreadMoveHit 的 DamagingHit 在倒下結算之前，沒有看倒下）
+function simFieldAb(st, s, M, t, hit = false) {
+  const n = t && (hit || M.hp > 0) ? simSetField(st, M, t) : 0;
+  if (n) simLog(st, `${simName(st, s, M)}的${abilZh(M.b.ab)}：變成${FIELD_ZH[t]}（${n} 回合）`);
+}
+const simEntryField = (st, s, M) => simFieldAb(st, s, M, WX_AB[M.b.ab] || TER_AB[M.b.ab]);
+// 這一招現在要不要先蓄力（SIM_CHARGE；晴天的日光束、日光刃、下雨的電光束不用，SIM_CHARGE_WX）
+const simMustCharge = (st, M, k) => SIM_CHARGE.has(k) && M.chg !== k && simWx(st) !== SIM_CHARGE_WX[k];
+// 這一招的先制等級：SIM_PRI 或輔助招的 p；特性惡作劇之心讓輔助招 +1（Showdown prankster）；青草滑梯在青草場地、自己在地面上時 +1（grassyglide onModifyPriority）
+const simPri = (st, M, k) => (SIM_PRI[k] ?? SIM_SUP[k]?.p ?? 0) + (SIM_SUP[k] && M.b.ab === 'prankster' ? 1 : 0)
+  + (k === 'grassy-glide' && simTer(st) === 'grassy' && simGround(M) ? 1 : 0);
+// 精神場地擋先制（Showdown psychicterrain onTryHit：先制等級 > 0 打對手的招式、對手在地面上又沒在蓄力躲起來）；攻擊招式 damageCalc 已經擋了，這裡給打對手的輔助招用
+const simPsyBlock = (st, M, T, k) => simTer(st) === 'psychic' && simGround(T) && !T.hide && simPri(st, M, k) > 0;
 // M 用招式 k 打 T 的命中率 %（Showdown battle-actions.ts hitStepAccuracy 與 ModifyAccuracy／Accuracy 事件）：招式的命中率（OP.GG 冠軍版，
 // 和 Showdown 冠軍版 mod 改過的一致；null＝必中）依序乘特性複眼 ×1.3、活力的物理招式 ×0.8、對手特性蹣跚在混亂時 ×0.5（破格無視）、
 // 道具廣角鏡 ×1.1、對焦鏡在對手這回合已經行動過時（moved）×1.2、對手道具光粉 ×0.9（4096 制連乘再四捨五入）；
-// 雙方任一隻特性無防守、毒屬性用劇毒時必中。回傳 100 以下（100＝必中）；一擊必殺不在這裡算（固定 30，見 simFixed），回傳 100
-function simAcc(M, T, k, moved) {
-  const a0 = MOVES[k]?.[6];
-  if (a0 == null || SIM_OHKO.has(k) || M.b.ab === 'no-guard' || T.b.ab === 'no-guard' || (k === 'toxic' && simTypes(M).includes('poison'))) return 100;
+// 雙方任一隻特性無防守、毒屬性用劇毒時必中。回傳 100 以下（100＝必中）；一擊必殺不在這裡算（固定 30，見 simFixed），回傳 100。
+// 天氣（simWx）：打雷、暴風下雨時必中、晴天命中 50（thunder／hurricane onModifyMove）；暴風雪下雪時必中（blizzard）；
+// 對手特性沙隱在沙暴、雪隱在下雪時命中 ×0.8（sandveil／snowcloak onModifyAccuracy 3277/4096）
+function simAcc(st, M, T, k, moved) {
+  const wx = simWx(st), tw = k === 'thunder' || k === 'hurricane';
+  const a0 = tw && wx === 'sun' ? 50 : MOVES[k]?.[6];
+  if (a0 == null || SIM_OHKO.has(k) || M.b.ab === 'no-guard' || T.b.ab === 'no-guard' || (k === 'toxic' && simTypes(M).includes('poison'))
+    || (tw && wx === 'rain') || (k === 'blizzard' && wx === 'snow')) return 100;
   const mods = [];
+  if ((T.b.ab === 'sand-veil' && wx === 'sand') || (T.b.ab === 'snow-cloak' && wx === 'snow')) mods.push(3277);
   if (M.b.ab === 'compound-eyes') mods.push(5325);
   if (M.b.ab === 'hustle' && simCat(k) === 'physical') mods.push(3277);
   if (T.b.ab === 'tangled-feet' && T.v.conf && M.b.ab !== 'mold-breaker') mods.push(2048);
@@ -308,14 +349,16 @@ function simCalc(ctx, st, A, D, k, crit, last = false) {
   const burn = A.status === 'brn' || (A.b.ab === 'guts' && !!A.status), walls = Object.keys(dSide.scr);
   const pinch = !!PINCH_AB[A.b.ab] && A.hp <= A.max / 3, fallen = A.v.fallen || 0;
   // 撲擊看自己的防禦變化、欺詐看對手的攻擊變化，都要進快取的鍵
-  const key = [A.id, A.item, A.st.atk, spa, A.st.def, burn, D.id, D.item, D.st.def, D.st.spd, D.st.atk, full, walls.join('.'), k, crit, bp, pinch, fallen, last].join('|');
+  // 天氣、場地（simWx、simTer）照 damageCalc 算：晴雨強化減弱、沙暴岩石特防、下雪冰防禦、氣象球、場地強化與減弱、精神場地擋先制、鐵滾輪沒場地失敗…
+  const wx = simWx(st), ter = simTer(st);
+  const key = [A.id, A.item, A.st.atk, spa, A.st.def, burn, D.id, D.item, D.st.def, D.st.spd, D.st.atk, full, walls.join('.'), k, crit, bp, pinch, fallen, last, wx, ter].join('|');
   let r = ctx.memo.get(key);
   if (!r) {
     const a = A.b, d = D.b;
     r = damageCalc({ key: A.key, inv: a.atkInv, sp: a.sp, nat: a.nat, st: { atk: A.st.atk, spa, def: A.st.def }, item: A.item, ab: a.ab, pinch, fallen },
       { key: D.key, hp: d.hp, inv: d.defInv, sp: d.sp, nat: d.nat, st: { def: D.st.def, spd: D.st.spd, atk: D.st.atk }, item: D.item, ab: d.ab,
         cur: full ? undefined : D.hp, atkInv: d.atkInv },
-      k, { fmt: ctx.fmt, weather: '', crit, terrain: '', hh: false, walls, burn, bp, last });
+      k, { fmt: ctx.fmt, weather: wx, crit, terrain: ter, hh: false, walls, burn, bp, last });
     r = r.skip || !r.eff ? { eff: 0 } : { eff: r.eff, type: r.type, crit: r.crit, rolls: r.rolls, later: r.later, endured: r.endured, berry: r.berry };
     ctx.memo.set(key, r);
   }
@@ -357,21 +400,22 @@ function simExpHit(ctx, st, A, D, k) {
   if (k === SIM_STRUGGLE) return disg ? D.max / 8 : simStruggleDmg(st, A, D, null);
   const r = simHit(ctx, st, A, D, k, false, true);
   if (!r.eff) return 0;
-  const pm = SIM_MULTIACC.has(k) && A.b.ab !== 'skill-link' ? simAcc(A, D, k, false) / 100 : 1;
+  const pm = SIM_MULTIACC.has(k) && A.b.ab !== 'skill-link' ? simAcc(st, A, D, k, false) / 100 : 1;
   const e = simRolls(r, D, k).reduce((t, xs, h) => t + (h || !disg ? pm ** h * xs.reduce((a, x) => a + x, 0) / 16 : D.max / 8), 0);
   return r.endured && D.hp >= D.max ? Math.min(e, D.hp - 1) : e;
 }
 // 期望傷害＝打中時的期望傷害 × 命中率（simAcc；這裡不知道出招順序，對焦鏡不算）
-const simExp = (ctx, st, A, D, k) => simExpHit(ctx, st, A, D, k) * simAcc(A, D, k, false) / 100;
-function simSpeed(ctx, M) {
-  const key = [M.id, M.item, M.st.spe, M.status].join('|');
-  if (!ctx.spd.has(key)) {
-    const b = M.b;
-    ctx.spd.set(key, speedOf({ key: M.key, inv: b.speInv, sp: b.sp, nat: b.nat, st: M.st.spe, item: M.item, ab: b.ab, tw: false,
-      par: M.status === 'par', status: !!M.status }, { weather: '', terrain: '' }).v);
-  }
+const simExp = (ctx, st, A, D, k) => simExpHit(ctx, st, A, D, k) * simAcc(st, A, D, k, false) / 100;
+// 速度（speedOf：能力變化、天氣場地加速特性、講究圍巾、麻痺；不含順風）；simSpeed 是有快取的
+const simSpe = (st, M) => speedOf({ key: M.key, inv: M.b.speInv, sp: M.b.sp, nat: M.b.nat, st: M.st.spe, item: M.item, ab: M.b.ab, tw: false,
+  par: M.status === 'par', status: !!M.status }, { weather: simWx(st), terrain: simTer(st) }).v;
+function simSpeed(ctx, st, M) {
+  const key = [M.id, M.item, M.st.spe, M.status, simWx(st), simTer(st)].join('|');
+  if (!ctx.spd.has(key)) ctx.spd.set(key, simSpe(st, M));
   return ctx.spd.get(key);
 }
+// 出場特性、回合結束的天氣效果照速度快的先（Showdown runSwitch／eachEvent 的 speedSort）：回傳 [先的一方, 後的一方]，同速當我方先
+const simOrder = st => simSpe(st, simAct(st, 1)) > simSpe(st, simAct(st, 0)) ? [1, 0] : [0, 1];
 // 扣血、回血（間接的：反作用力、撒菱、殘血…；magic＝特性魔法防守能擋；Showdown damage／heal 取整、至少 1）；扣完看文柚果
 function simHurt(st, s, M, v, why, magic = true) {
   if (M.hp <= 0 || v <= 0 || (magic && M.b.ab === 'magic-guard')) return 0;
@@ -429,10 +473,13 @@ function simBoost(st, s, M, d, foe) {
   }
   return done.length > 0;
 }
-// M 會不會陷入異常狀態 x（屬性、特性免疫；src＝造成的寶可夢，特性腐蝕能讓毒、鋼屬性中毒）
-function simCanStatus(M, x, src) {
-  const ty = simTypes(M), ab = M.b.ab;
+// M 會不會陷入異常狀態 x（屬性、特性免疫；src＝造成的寶可夢，特性腐蝕能讓毒、鋼屬性中毒）。
+// 天氣場地（Showdown）：晴天不會冰凍（sunnyday onImmunity frz）、晴天時特性葉片防守不會陷入異常（leafguard）；
+// 在地面上（沒在蓄力躲起來）時電氣場地不會睡著、薄霧場地不會陷入任何異常（electricterrain／mistyterrain onSetStatus）
+function simCanStatus(st, M, x, src) {
+  const ty = simTypes(M), ab = M.b.ab, wx = simWx(st), ter = simTer(st), gr = simGround(M) && !M.hide;
   if (M.hp <= 0 || M.status || ab === 'purifying-salt') return false;
+  if ((x === 'frz' && wx === 'sun') || (ab === 'leaf-guard' && wx === 'sun') || (gr && (ter === 'misty' || (ter === 'electric' && x === 'slp')))) return false;
   if (x === 'brn') return !ty.includes('fire') && !['water-veil', 'water-bubble', 'thermal-exchange'].includes(ab);
   if (x === 'par') return !ty.includes('electric') && ab !== 'limber';
   if (x === 'slp') return !['insomnia', 'vital-spirit', 'sweet-veil'].includes(ab);
@@ -442,7 +489,7 @@ function simCanStatus(M, x, src) {
 // 陷入異常狀態：睡眠照冠軍版 2～3 回合（mods/champions/conditions.ts：[2, 3, 3] 抽一個，期望值模式取 3）；冰凍照冠軍版最多 3 次出招機會（見 simMove）；
 // 木子果（任何異常）、零餘果（睡眠）馬上治好；特性同步把灼傷、麻痺、中毒傳回給對手（睡眠、冰凍不傳）。回傳成功與否
 function simStatus(st, s, M, x, rnd, src) {
-  if (!simCanStatus(M, x, src)) return false;
+  if (!simCanStatus(st, M, x, src)) return false;
   Object.assign(M, { status: x, tox: 0, slp: x === 'slp' ? (rnd ? [2, 3, 3][Math.floor(rnd() * 3)] : 3) : 0, frz: x === 'frz' ? 3 : 0 });
   simLog(st, `${simName(st, s, M)}陷入${SIM_STATUS_ZH[x]}狀態`);
   if (M.item === 'lum-berry' || (x === 'slp' && M.item === 'chesto-berry')) {
@@ -482,7 +529,7 @@ function simSwitch(st, s, i, rnd, late = false) {
     else if (!ty.includes('steel')) simStatus(st, s, M, h.tspikes > 1 ? 'tox' : 'psn', rnd, null);
   }
   if (h.web && ground && M.hp > 0) simBoost(st, s, M, { spe: -1 }, 1 - s);
-  if (!late) { simIntimidate(st, s, M); simImposter(st, s, M); }
+  if (!late) { simIntimidate(st, s, M); simEntryField(st, s, M); simImposter(st, s, M); }
 }
 // 變身（招式變身、特性變身者）：M 變成對手 T 的樣子（Showdown pokemon.ts transformInto，冠軍版 mod 沒改）：寶可夢（屬性、種族值、體重）、
 // HP 以外的能力（能力點數、性格也照 T 的）、能力變化、特性、招式（每招 PP＝min(5, 原本的 PP)）、暫時狀態只抄集氣；HP、異常狀態、道具照自己的。
@@ -529,7 +576,7 @@ function simFutile(st, s, k) {
   if (!x) return false;
   const side = st.sd[s], M = simAct(st, s), T = simAct(st, 1 - s), tSide = st.sd[1 - s], tb = T.b.ab;
   const capped = (P, d) => Object.entries(d).every(([st_, v]) => ((P.b.ab === 'contrary' ? -v : v) > 0 ? P.st[st_] >= 6 : P.st[st_] <= -6));
-  if (x.tgt && (T.hp <= 0 || tb === 'good-as-gold' || (T.v.sub && !x.sub) || (M.b.ab === 'prankster' && simTypes(T).includes('dark')))) return true;
+  if (x.tgt && (T.hp <= 0 || tb === 'good-as-gold' || (T.v.sub && !x.sub) || (M.b.ab === 'prankster' && simTypes(T).includes('dark')) || simPsyBlock(st, M, T, k))) return true;
   if (x.r && tb === 'magic-bounce') return true;
   const bare = !Object.values(side.haz).some(Boolean) && !Object.values(tSide.haz).some(Boolean);
   switch (x.kind) {
@@ -542,7 +589,8 @@ function simFutile(st, s, k) {
     case 'charge': return !!M.v.charge;
     case 'heal': return M.hp >= M.max;
     case 'wish': return !!side.wish;
-    case 'rest': return M.status === 'slp' || M.hp >= M.max || ['insomnia', 'vital-spirit'].includes(M.b.ab);
+    // 睡覺照陷入睡眠的規則（Showdown rest onHit：target.setStatus('slp')，不眠、幹勁、甜幕、潔淨之鹽、葉片防守、場地都擋得住；原本有的異常會被換掉，所以先當沒有異常看）
+    case 'rest': return M.status === 'slp' || M.hp >= M.max || !simCanStatus(st, { ...M, status: '' }, 'slp', M);
     case 'hwish': return !simBench(st, s).length;
     case 'split': return M.hp >= T.hp;
     case 'sap': return T.st.atk <= -6;
@@ -550,14 +598,16 @@ function simFutile(st, s, k) {
     case 'status':
       if (x.pw && (simTypes(T).includes('grass') || tb === 'overcoat')) return true;
       if (k === 'thunder-wave' && eff('electric', simTypes(T)) === 0) return true;
-      return !simCanStatus(T, x.x, M) && (!x.d || capped(T, x.d));
-    case 'yawn': return !simCanStatus(T, 'slp', M) || !!T.v.yawn;
+      return !simCanStatus(st, T, x.x, M) && (!x.d || capped(T, x.d));
+    case 'yawn': return !simCanStatus(st, T, 'slp', M) || !!T.v.yawn;
     case 'hazard': return tSide.haz[x.h] >= x.max;
     case 'defog': return bare && !Object.keys(tSide.scr).length;
     case 'encore': return !T.last || !!T.v.enc || T.last === 'encore' || !T.moves.includes(T.last) || !(T.pp[T.last] > 0);
     case 'taunt': return !!T.v.taunt || tb === 'oblivious';
     case 'subst': return !!M.v.sub || M.hp <= M.max / 4;
-    case 'screen': return !!side.scr[k] || (k === 'aurora-veil' && M.b.ab !== 'snow-warning');
+    // 極光幕要下雪（Showdown auroraveil onTry：field.isWeather snowscape）
+    case 'screen': return !!side.scr[k] || (k === 'aurora-veil' && simWx(st) !== 'snow');
+    case 'field': return (x.w in SIM_WX_ROCK ? st.wx : st.ter)?.t === x.w && !(x.pivot && simBench(st, s).length);
     case 'phaze': return !simBench(st, 1 - s).length;
     case 'haze': return [M, T].every(P => Object.values(P.st).every(v => !v));
     case 'debuff': return capped(T, x.d) || tb === 'clear-body';
@@ -598,13 +648,15 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
   const say = t => simLog(st, `${me}用${mz}${t}`), fail = why => say(`，但失敗了（${why}）`);
   if (x.tgt && T.hp <= 0) return fail('沒有目標');
   if (x.tgt && T.hide) return fail(`${tn}${T.chg === 'dig' ? '在地底' : '消失了'}`);
+  // 精神場地（onTryHitPriority 4）在守住（3）之前
+  if (x.tgt && simPsyBlock(st, M, T, k)) return fail(`${FIELD_ZH.psychic}擋下先制招式`);
   if (x.f && T.v.prot && T.v.prot !== 'kings') return say(`，被${tn}擋下`);
   if (x.r && !bounced && T.b.ab === 'magic-bounce') { say(`，被${tn}的魔法鏡反彈`); return simSupport(st, 1 - s, k, null, false, rnd, pick, true); }
   if (x.tgt && T.b.ab === 'good-as-gold') return fail(`${tn}的黃金之軀`);
   if (x.tgt && !bounced && M.b.ab === 'prankster' && simTypes(T).includes('dark')) return fail('惡屬性不受惡作劇之心的招式影響');
   if (x.tgt && T.v.sub && !x.sub) return fail(`${tn}有替身`);
   // 命中率（simAcc；打自己、撒在場上的輔助招是必中）：照亂數抽，期望值模式當命中
-  const acc = simAcc(M, T, k, !oWill);
+  const acc = simAcc(st, M, T, k, !oWill);
   if (acc < 100 && rnd && rnd() * 100 >= acc) return say(`，但沒有命中（命中率 ${acc}%）`);
   const herb = () => { if (T.item === 'mental-herb') { delete T.v.taunt; delete T.v.enc; delete T.v.encK; T.item = ''; simLog(st, `${tn}用心靈香草解除了`); } };
   switch (x.kind) {
@@ -643,11 +695,14 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
       if (x.how === 'endure') M.v.endure = true; else M.v.prot = x.how;
       return say('');
     }
-    case 'heal':
+    case 'heal': {
       if (M.hp >= M.max) return fail('HP 已經全滿');
       say('');
-      simHeal(st, s, M, Math.round(M.max / 2), '回復');
+      // 光合作用、晨光、月光照天氣（SIM_SUNHEAL；this.modify 取整同 pokeRound），其他一半
+      const f = SIM_SUNHEAL.has(k) && (SIM_SUNHEAL_F[simWx(st)] || 0.5);
+      simHeal(st, s, M, f ? pokeRound(M.max * Math.floor(f * 4096) / 4096) : Math.round(M.max / 2), '回復');
       return;
+    }
     case 'wish':
       if (side.wish) return fail('已經在祈願');
       side.wish = { t: 2, hp: Math.floor(M.max / 2) };
@@ -693,7 +748,7 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
       if (x.d) simBoost(st, 1 - s, T, x.d, s);
       return;
     case 'yawn':
-      if (!simCanStatus(T, 'slp', M) || T.v.yawn) return fail('沒有效果');
+      if (!simCanStatus(st, T, 'slp', M) || T.v.yawn) return fail('沒有效果');
       T.v.yawn = 2;
       return say(`：${tn}打起瞌睡，下一回合結束會睡著`);
     case 'hazard':
@@ -756,6 +811,13 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
       say('');
       simTransform(st, s, M, T);
       return;
+    case 'field': {
+      const n = simSetField(st, M, x.w), out = x.pivot && M.hp > 0 && simBench(st, s).length && !simOver(st);
+      if (!n && !out) return fail(`已經是${FIELD_ZH[x.w]}`);
+      say(n ? `：變成${FIELD_ZH[x.w]}（${n} 回合）` : `：已經是${FIELD_ZH[x.w]}`);
+      if (out) simSwitch(st, s, pick(st, s), rnd);
+      return;
+    }
   }
 }
 // s 這方的 M 用攻擊招式 k 打中 T 之後的追加效果（SIM_SEC；Showdown battle-actions.ts secondaries）：照機率抽（期望值模式只算機率 100% 的）；
@@ -772,7 +834,8 @@ function simSecondary(st, s, M, T, k, oWill, rnd, subbed) {
     if (x.s) simStatus(st, 1 - s, T, Array.isArray(x.s) ? x.s[Math.floor(rnd() * x.s.length)] : x.s, rnd, M);
     else if (x.fl) { if (oWill && T.b.ab !== 'inner-focus') T.v.flinch = true; }
     else if (x.cf) {
-      if (T.v.conf || T.b.ab === 'own-tempo') continue;
+      // 薄霧場地：在地面上的不會混亂（mistyterrain onTryAddVolatile）
+      if (T.v.conf || T.b.ab === 'own-tempo' || (simTer(st) === 'misty' && simGround(T) && !T.hide)) continue;
       // 混亂 2～5 次出招機會（Showdown random(2, 6)；期望值模式不會打到自己，次數取 3）
       T.v.conf = rnd ? 2 + Math.floor(rnd() * 4) : 3;
       simLog(st, `${simName(st, 1 - s)}混亂了`);
@@ -861,16 +924,18 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
   }
   if (M.item === 'choice-scarf' && !M.lock) M.lock = k;
   if (SIM_SUP[k]) return simSupport(st, s, k, oa, oWill, rnd, pick, false);
-  if (SIM_CHARGE.has(k) && M.chg !== k) {
+  if (simMustCharge(st, M, k)) {
     Object.assign(M, { chg: k, hide: SIM_HIDE.has(k) });
     simLog(st, `${me}用${mz}：蓄力，下一回合才攻擊`);
     if (k === 'electro-shot') simBoost(st, s, M, { spa: 1 });
     return;
   }
+  // 天氣讓蓄力招式直接打（電光束照樣先特攻 +1）
+  if (SIM_CHARGE.has(k) && M.chg !== k) { simLog(st, `${FIELD_ZH[simWx(st)]}，${mz}不用蓄力`); if (k === 'electro-shot') simBoost(st, s, M, { spa: 1 }); }
   Object.assign(M, { chg: '', hide: false });
   const fail = why => simLog(st, `${me}用${mz}，但失敗了（${why}）`);
   if (k === 'sucker-punch' && (!oWill || simCat(oa.k) === 'status')) return fail('對手沒有要出攻擊招式');
-  if (k === 'upper-hand' && (!oWill || simCat(oa.k) === 'status' || simPri(T, oa.k) <= 0)) return fail('對手沒有要出先制招式');
+  if (k === 'upper-hand' && (!oWill || simCat(oa.k) === 'status' || simPri(st, T, oa.k) <= 0)) return fail('對手沒有要出先制招式');
   if (k === 'future-sight') {
     if (st.fut.some(f => f.s === 1 - s)) return fail('已經在預知未來');
     st.fut.push({ s: 1 - s, t: 3, src: simCloneMon(M) });
@@ -895,7 +960,7 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
     // 一擊必殺：期望值模式（沒有 rnd）直接算期望傷害；照亂數打時先抽中不中
     let r = simHit(ctx, st, M, T, k, false, !rnd && SIM_OHKO.has(k), !oWill);
     // 命中率：一擊必殺用 simFixed 的，其他看 simAcc（對手這回合已經行動過時對焦鏡有作用）
-    const acc = SIM_OHKO.has(k) ? r.acc : simAcc(M, T, k, !oWill);
+    const acc = SIM_OHKO.has(k) ? r.acc : simAcc(st, M, T, k, !oWill);
     if (!r.eff) { r.fail ? fail(r.fail) : simLog(st, `${me}用${mz}，對${tn}沒有效果`); crash(); }
     else if (acc < 100 && rnd && rnd() * 100 >= acc) { simLog(st, `${me}用${mz}，沒有命中（命中率 ${acc}%）`); crash(); }
     else {
@@ -941,7 +1006,11 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
           + (held ? `，靠${held}撐住` : '') + (pop ? '，氣球破了' : '') + (T.hp <= 0 ? `，${tn}倒下` : ''));
         if (disg) simBust(st, 1 - s, T, said);
         if (T.hp <= 0) M.kos++;
+        // 被攻擊打中就開天氣場地的特性（Showdown sandspit／seedsower onDamagingHit）：吐沙開沙暴、播種開青草場地（被打倒也發動）
+        if (dealt > 0) simFieldAb(st, 1 - s, T, { 'sand-spit': 'sand', 'seed-sower': 'grassy' }[T.b.ab], true);
       }
+      // 鐵滾輪打中（含打在替身上）就清掉場地（Showdown steelroller onHit／onAfterSubDamage；沒有場地時 damageCalc 已經當失敗）
+      if (k === 'steel-roller' && st.ter) { simLog(st, `${FIELD_ZH[st.ter.t]}消失了`); st.ter = null; }
       if (gem) { M.item = ''; simLog(st, `${me}的${ITEMS[gem][0]}用掉了`); }
       // 搏命：打完自己倒下
       if (k === 'final-gambit' && M.hp > 0) { M.hp = 0; simFaint(st, M); simLog(st, `${me}倒下`); }
@@ -979,10 +1048,23 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
   if (M.hp <= 0 && SIM_BOOM.has(k)) { M.hp = 0; simLog(st, `${me}倒下`); }
   if (SIM_PIVOT.has(k) && dealt >= 0 && M.hp > 0 && !simOver(st) && simBench(st, s).length) simSwitch(st, s, pick(st, s), rnd);
 }
-// 回合結束（Showdown onResidualOrder 的順序）：預知未來、祈願、蛻皮、吃剩的東西、寄生種子、中毒、灼傷、詛咒、挑釁／再來一次／哈欠倒數、牆倒數、加速；
+// 回合結束（Showdown onResidualOrder 的順序）：天氣、預知未來、祈願、青草場地、濕潤之軀、蛻皮、吃剩的東西、寄生種子、中毒、灼傷、詛咒、
+// 挑釁／再來一次／哈欠倒數、牆倒數、場地倒數、加速；
 // 守住類這回合沒用的連續計數歸零、畏縮清掉（只有這回合有效）。殘血傷害照 Showdown：灼傷 1/16、中毒 1/8、劇毒 n/16（換下場重算、最多 15/16）、寄生種子 1/8、詛咒 1/4，
 // 特性魔法防守不受、毒療改成回 1/8
 function simEnd(ctx, st, rnd) {
+  // 天氣（Showdown onFieldResidualOrder 1，回合結束最先）：先扣回合數，扣到 0 就結束；還在、又有作用（simWx）時照速度快的先（eachEvent('Weather')）：
+  // 沙暴扣最大 HP 1/16（岩石、地面、鋼屬性不受：typechart sandstorm 3；特性沙隱、撥沙、沙之力、防塵、魔法防守不受）；
+  // 特性乾燥皮膚下雨回 1/8、晴天扣 1/8，太陽之力晴天扣 1/8，雨盤下雨回 1/16，冰凍之軀下雪回 1/16（abilities.ts onWeather）
+  if (st.wx && !--st.wx.n) { simLog(st, `${FIELD_ZH[st.wx.t]}結束了`); st.wx = null; }
+  const wx = simWx(st);
+  if (wx) simOrder(st).forEach(s => {
+    const M = simAct(st, s), ab = M.b.ab;
+    if (M.hp <= 0 || simOver(st)) return;
+    if (wx === 'sand' && !simTypes(M).some(t => ['rock', 'ground', 'steel'].includes(t)) && !['sand-veil', 'sand-rush', 'sand-force', 'overcoat'].includes(ab)) simHurt(st, s, M, M.max / 16, '受到沙暴的傷害');
+    if ((ab === 'dry-skin' && wx === 'rain') || (ab === 'rain-dish' && wx === 'rain') || (ab === 'ice-body' && wx === 'snow')) simHeal(st, s, M, M.max / (ab === 'dry-skin' ? 8 : 16), `的${abilZh(ab)}`);
+    if ((ab === 'dry-skin' || ab === 'solar-power') && wx === 'sun') simHurt(st, s, M, M.max / 8, `的${abilZh(ab)}`);
+  });
   st.fut.forEach(f => {
     if (--f.t || simOver(st)) return;
     const T = simAct(st, f.s);
@@ -1003,6 +1085,9 @@ function simEnd(ctx, st, rnd) {
     side.wish = null;
   });
   const each = f => [0, 1].forEach(s => { const M = simAct(st, s); if (M.hp > 0 && !simOver(st)) f(M, s); });
+  // 青草場地（grassyterrain onResidual 5.2，在吃剩的東西 5.4 之前）：在地面上、沒在蓄力躲起來的回 1/16；濕潤之軀（hydration 5.3）下雨時治好異常
+  if (simTer(st) === 'grassy') each((M, s) => { if (simGround(M) && !M.hide) simHeal(st, s, M, M.max / 16, '受到青草場地回復'); });
+  each((M, s) => { if (M.b.ab === 'hydration' && M.status && simWx(st) === 'rain') { M.status = ''; simLog(st, `${simName(st, s)}靠${abilZh('hydration')}治好了`); } });
   each((M, s) => { if (M.b.ab === 'shed-skin' && M.status && rnd && rnd() < 0.33) { M.status = ''; simLog(st, `${simName(st, s)}靠蛻皮治好了`); } });
   each((M, s) => { if (M.item === 'leftovers') simHeal(st, s, M, M.max / 16, '吃剩的東西'); });
   each((M, s) => {
@@ -1025,6 +1110,8 @@ function simEnd(ctx, st, rnd) {
     if (M.v.yawn && !--M.v.yawn) { delete M.v.yawn; simStatus(st, s, M, 'slp', rnd, null); }
   });
   st.sd.forEach(side => Object.keys(side.scr).forEach(w => { if (!--side.scr[w]) delete side.scr[w]; }));
+  // 場地（onFieldResidualOrder 27：牆之後、加速之前）：扣回合數，扣到 0 就結束
+  if (st.ter && !--st.ter.n) { simLog(st, `${FIELD_ZH[st.ter.t]}結束了`); st.ter = null; }
   // 加速（Showdown speedboost onResidual，在回合結束的最後）：這回合開始時已經在場上的（不是這回合才換上來的）速度 +1
   each((M, s) => { if (M.b.ab === 'speed-boost' && M.in < st.turn) simBoost(st, s, M, { spe: 1 }); });
   st.sd.forEach(side => side.mons.forEach(m => {
@@ -1049,7 +1136,7 @@ function simTurn(ctx, st, acts0, rnd, tie, pick) {
   const start = st.sd.map(x => x.act), mv = [0, 1].filter(s => acts[s].t === 'mv' && simAct(st, s).hp > 0);
   let order = mv, tied = false;
   if (mv.length === 2) {
-    const pri = mv.map(s => simPri(simAct(st, s), acts[s].k)), spd = mv.map(s => simSpeed(ctx, simAct(st, s)));
+    const pri = mv.map(s => simPri(st, simAct(st, s), acts[s].k)), spd = mv.map(s => simSpeed(ctx, st, simAct(st, s)));
     const first = pri[0] !== pri[1] ? (pri[0] > pri[1] ? 0 : 1) : spd[0] !== spd[1] ? (spd[0] > spd[1] ? 0 : 1)
       : (tied = true, rnd ? (rnd() < 0.5 ? 0 : 1) : tie);
     order = [first, 1 - first];
@@ -1085,12 +1172,12 @@ function simGreedyAct(ctx, st, s) {
   mv.forEach(o => {
     const k = o.k;
     let v;
-    const p = simAcc(M, T, k, false) / 100;
+    const p = simAcc(st, M, T, k, false) / 100;
     if (SIM_SUP[k]) v = p * simGreedySup(st, s, M, T, k, dt, dm);
     else {
       const e = k === 'upper-hand' ? 0 : simExpHit(ctx, st, M, T, k), sub = T.v.sub > 0 && !FLAG.sound.has(k) && M.b.ab !== 'infiltrator', ko = !sub && e >= T.hp;
-      v = p * (sub ? Math.min(e, T.v.sub) / T.max / 2 : Math.min(e, T.hp) / T.max + (ko ? 1 + (simPri(M, k) > 0 ? 0.5 : 0) : 0));
-      if (!ko && ((SIM_CHARGE.has(k) && M.chg !== k) || SIM_RECHARGE.has(k))) v /= 2;
+      v = p * (sub ? Math.min(e, T.v.sub) / T.max / 2 : Math.min(e, T.hp) / T.max + (ko ? 1 + (simPri(st, M, k) > 0 ? 0.5 : 0) : 0));
+      if (!ko && (simMustCharge(st, M, k) || SIM_RECHARGE.has(k))) v /= 2;
       if (SIM_BOOM.has(k)) v -= M.hp / M.max + (ko ? 0 : 1);
     }
     if (v > bv) { bv = v; best = o; }
@@ -1132,17 +1219,19 @@ function simGreedyPick(ctx, st, s) {
     const imp = M.b.ab === 'imposter' && !T.tf && !T.v.sub, src = imp ? T : M;
     const dm = Math.max(0, ...src.moves.map(k => simExp(ctx, st, src, T, k))), dt = Math.max(0, ...T.moves.map(k => simExp(ctx, st, T, src, k)));
     const n1 = dm ? Math.ceil(T.hp / dm) : Infinity, n2 = dt ? Math.ceil(M.hp / dt) : Infinity;
-    const fast = simSpeed(ctx, imp ? { ...T, item: M.item, status: M.status } : M) > simSpeed(ctx, T);
+    const fast = simSpeed(ctx, st, imp ? { ...T, item: M.item, status: M.status } : M) > simSpeed(ctx, st, T);
     if (n1 < n2 || (n1 === n2 && fast && n1 < Infinity)) return 2 + Math.max(0, M.hp - dt * (fast ? n1 - 1 : n1)) / M.max;
     return Math.min(1, dm * (n2 === Infinity ? 9 : n2) / T.hp);
   };
   return bench.map(i => [i, score(i)]).sort((x, y) => y[1] - x[1])[0][0];
 }
-// 倒下的補位（兩方都倒時都換）：picks[s] 是 { t: 'sw', i } 或 { t: 'pass' }；雙方都換上來後才發動威嚇（兩邊同時補位時互相都吃得到）
+// 倒下的補位（兩方都倒時都換）：picks[s] 是 { t: 'sw', i } 或 { t: 'pass' }；雙方都換上來後才發動威嚇（兩邊同時補位時互相都吃得到）、
+// 開天氣場地的特性（照速度快的先，慢的蓋掉，見 simOrder）
 function simReplace(st, picks, rnd) {
   const sw = [0, 1].filter(s => picks[s].t === 'sw');
   sw.forEach(s => simSwitch(st, s, picks[s].i, rnd, true));
   sw.forEach(s => simIntimidate(st, s, simAct(st, s)));
+  simOrder(st).filter(s => sw.includes(s)).forEach(s => simEntryField(st, s, simAct(st, s)));
   sw.forEach(s => simImposter(st, s, simAct(st, s)));
 }
 // 從局面 st 用簡單規則雙方打下去（最多再 SIM_LOOK 回合），回傳 simValue；rnd＝照亂數打（樹搜尋用），沒給用期望值。
@@ -1223,10 +1312,11 @@ function simSearch(ctx, st, phase, iters, rnd, stats, uniform) {
 // 一場的開頭局面：sides＝[我方, 對手]，每方 { mons 帶出場的（simMon，先發排第一）}（會複製一份）；先發都在場上。
 // intim＝哪幾方的威嚇發動（沒給＝雙方；simDuel 的換上來只有我方剛出場）
 function simStart(sides, log, intim = [0, 1]) {
-  const st = { sd: sides.map(x => simSide0(x.mons.map(simCloneMon))), turn: 0, fut: [], idle: 0, log: log ? [] : null };
+  const st = { sd: sides.map(x => simSide0(x.mons.map(simCloneMon))), turn: 0, fut: [], idle: 0, wx: null, ter: null, log: log ? [] : null };
   st.sd.forEach(x => Object.assign(x.mons[0], { in: 0, out: true }));
-  // 先發雙方同時出場：各自的威嚇都打對方（同出戰選角的正面對打），變身者再變身
+  // 先發雙方同時出場：各自的威嚇都打對方（同出戰選角的正面對打），開天氣場地的照速度快的先、慢的蓋掉（simOrder），變身者再變身
   intim.forEach(s => simIntimidate(st, s, simAct(st, s)));
+  simOrder(st).forEach(s => simEntryField(st, s, simAct(st, s)));
   [0, 1].forEach(s => simImposter(st, s, simAct(st, s)));
   return st;
 }

@@ -121,6 +121,11 @@ const LIVE_ABILS = [...Object.keys(PINCH_AB), 'supreme-overlord', 'disguise'];
 // 場地（算法在 damageCalc，照 Smogon 冠軍版）：在地面上（不是飛行屬性、沒有飄浮）的攻擊方用該屬性招式威力 ×1.3；
 // 打在地面上的防守方時，薄霧場地龍招式、青草場地地震／重踏威力 ×½，精神場地擋先制招式；大地波動有場地時變成對應屬性、威力 ×2
 const TERRAIN_TYPE = { electric: 'electric', grassy: 'grass', misty: 'fairy', psychic: 'psychic' };
+// 天氣、場地的中文名（各分頁與對戰模擬的紀錄共用；模擬的背景計算只載入引擎，所以放這裡）
+const FIELD_ZH = { sun: '晴天', rain: '下雨', sand: '沙暴', snow: '下雪', electric: '電氣場地', grassy: '青草場地', misty: '薄霧場地', psychic: '精神場地' };
+// 出場時開天氣／場地的特性（Showdown abilities.ts onStart → field.setWeather／setTerrain；對位見 entryField，對戰模擬見 simFieldAb）
+const WX_AB = { drought: 'sun', drizzle: 'rain', 'sand-stream': 'sand', 'snow-warning': 'snow' };
+const TER_AB = { 'electric-surge': 'electric', 'grassy-surge': 'grassy', 'misty-surge': 'misty', 'psychic-surge': 'psychic' };
 // 會先打破反射壁／光牆／極光幕再算傷害的招式（Smogon champions.ts）
 const WALL_BREAK = new Set(['brick-break', 'psychic-fangs', 'raging-bull']);
 // 天氣（算法在 damageCalc）：晴天火 ×1.5、水 ×½；下雨水 ×1.5、火 ×½；沙暴岩石屬性特防 ×1.5；下雪冰屬性防禦 ×1.5；
@@ -438,7 +443,8 @@ function imposterVs(x, y, keepSt = false) {
 // 一對一對位：x、y 是 battler，對戰中另外帶 st { atk, def, spa, spd, spe } 能力變化、cur 目前剩下的 HP、tw 順風（沒給的當沒有、全滿）、
 // noItem 確定沒有道具、field 這一方場上還站著幾隻（見 damageCalc）、status 異常狀態（'brn' 灼傷：物理招式減半，毅力不減反而攻擊 ×1.5；
 // 'par' 麻痺：速度 ×½，飛毛腿不減反而 ×1.5）、walls 這一方的牆（反射壁、光牆、極光幕）；沒登錄招式的一方只算 OP.GG 使用率前 4 招（dmgRows 的 o.top，同預填的配招）；
-// f：{ fmt, weather, terrain, tr, crit 雙方都急所（對戰中反推傷害用）, hh 幫助（兩個方向都 ×1.5，對戰中的對手組合用）}（沒給的當沒有）；開場特性不算。
+// f：{ fmt, weather, terrain, tr, crit 雙方都急所（對戰中反推傷害用）, hh 幫助（兩個方向都 ×1.5，對戰中的對手組合用）}（沒給的當沒有）；
+// 開場特性不在這裡算（出場開的天氣場地由呼叫端用 entryField 放進 f）。
 // live＝對戰中：算看場上狀況的特性（LIVE_ABILS：猛火類看 cur、大將看 fallen 這一方倒下幾隻），沒給的（出戰選角、隊伍分析）不算；
 // 畫皮不看 live：bust＝被揭穿了（對戰中照位置卡標的；沒給的雙方都剛出場，畫皮一定還在，換上來吃過一下的 matchup 會給 bust），變身來的畫皮不算。道具兩個方向都帶著（damageCalc 只讀這個方向用得到的效果，如攻擊方不看樹果）。
 // 回傳 xy＝x 打 y、yx＝y 打 x（dmgRows 的結果）、spd／first（speedPair：first 0＝x 先動、1＝y 先動、-1＝同速）
@@ -481,20 +487,30 @@ function intimidated(b, by) {
   const c = (k, d) => Math.max(-6, Math.min(6, (b.st?.[k] || 0) + d));
   return { ...b, st: { ...b.st, atk: c('atk', e[0]), spa: c('spa', e[1]) } };
 }
+// 對位時出場特性開出來的天氣、場地（WX_AB、TER_AB）：x、y 是 battler（變身來的特性不發動）；雙方同時出場時照速度快的先發動，
+// 慢的開的蓋掉先開的（Showdown battle-actions.ts runSwitch：fieldEvent('SwitchIn') 照速度排；field.ts setWeather 不同天氣直接蓋掉、同一種失敗），同速當 x 先；
+// sw＝只有 x 剛出場（換上來：牠早就在場上，牠開的先在，x 開的再蓋掉）。回傳 { weather, terrain }（沒有是 ''）
+function entryField(x, y, sw = false) {
+  const v = b => speedOf({ key: b.key, inv: b.speInv, sp: b.sp, nat: b.nat, st: 0, item: b.item, ab: b.ab }, { weather: '', terrain: '' }).v;
+  const f = { weather: '', terrain: '' }, order = sw ? [y, x] : v(x) >= v(y) ? [x, y] : [y, x];
+  order.filter(b => !b.tfFrom).forEach(b => { if (WX_AB[b.ab]) f.weather = WX_AB[b.ab]; if (TER_AB[b.ab]) f.terrain = TER_AB[b.ab]; });
+  return f;
+}
 // 出戰選角的一對一：x 我方、y 對手（battler；對戰中的換人另外帶 cur 等，同 duel），f 同 duel。回傳
 //   head：正面對打（雙方全滿，有 cur 的照 cur）先打倒牠；sw：換上來先吃牠最痛的一招（最高傷害），剩下的 HP 對打還先打倒牠（換上來吃過一下，
 //   氣勢披帶、多重鱗片就沒用了，畫皮也被揭穿）；ohko：沒贏、而且牠一下就打得倒我又比我先出手（速度或先制招式）；
 //   first、spd（同 duel）、me／opp（fastestKO 的 n）、oppPri（牠的 opp 下有先制招式，單打改用模擬判斷時 duelVs 重算 ohko 用）、left 換上來吃過最痛的一招後剩下的 HP（0 以下＝會倒）、big 那一招（沒有會痛的招式是 ''）給畫面說明用
 // f.intim：算出場特性威嚇（intimidated）。'both'＝正面對打時雙方都剛出場，各自的威嚇打對方（出戰選角、隊伍分析）；
-// 'me'＝只有我方剛出場（對戰中的換人：對手早就在場上，牠的威嚇不會再觸發）；換上來吃一下那段也只有我方剛出場。沒給就不算
+// 'me'＝只有我方剛出場（對戰中的換人：對手早就在場上，牠的威嚇不會再觸發）；換上來吃一下那段也只有我方剛出場。沒給就不算。
+// f.sw＝換上來那段的天氣、場地（entryField 的 sw；沒給同 f）
 function matchup(x, y, f) {
-  const yi = f.intim ? intimidated(y, x) : y, xi = f.intim === 'both' ? intimidated(x, y) : x;
+  const yi = f.intim ? intimidated(y, x) : y, xi = f.intim === 'both' ? intimidated(x, y) : x, fs = f.sw ? { ...f, ...f.sw } : f;
   const d = duel(xi, yi, f), a = fastestKO(d.xy), b = fastestKO(d.yx), head = winKO(a, b, d.first);
   // 換上來：吃牠最痛的一招（這時只有我方的威嚇有作用）；剩下的 HP 比全滿少，正面都打不贏的換上來也當打不贏，不用再算
-  const ds = xi === x ? d : duel(x, yi, f), cur = (x.cur ?? hpOf(x)) - Math.max(0, ...ds.yx.ok.map(r => r.r.max || 0));
+  const ds = xi === x && fs === f ? d : duel(x, yi, fs), cur = (x.cur ?? hpOf(x)) - Math.max(0, ...ds.yx.ok.map(r => r.r.max || 0));
   let sw = false;
   // 吃過一下：畫皮已經被揭穿
-  if (head && cur > 0) { const d2 = duel({ ...x, cur, bust: true }, yi, f); sw = winKO(fastestKO(d2.xy), fastestKO(d2.yx), d2.first); }
+  if (head && cur > 0) { const d2 = duel({ ...x, cur, bust: true }, yi, fs); sw = winKO(fastestKO(d2.xy), fastestKO(d2.yx), d2.first); }
   return { head, sw, ohko: !head && b.n === 1 && (b.pri || d.first !== 0), first: d.first, spd: d.spd.map(s => s.v), me: a.n, opp: b.n, oppPri: b.pri,
     left: cur, big: ds.yx.ok[0]?.r.max ? ds.yx.ok[0].k : '' };
 }

@@ -223,7 +223,7 @@ function answerOf(members, opp) {
 // 一對一結果的快取（matchup 要算兩次對位；出戰選角、隊伍分析每次重畫都會用到）：fmt、我方 key、base、配招、對手 key → duelVs 的結果
 const MATCH_MEMO = new Map();
 // 我方寶可夢 key（配招 set；base＝超級進化這場不進化、以原型 key 上場，帶著超級石等於沒道具）對上對手寶可夢 m：
-// 看速度與傷害（matchup，同出招表的算法；雙方出場的威嚇都算，見 matchup 的 intim），對手常帶超級石的進化前後每種型態都要成立（ohko 任一種成立就算），
+// 看速度與傷害（matchup，同出招表的算法；雙方出場的威嚇、開的天氣場地都算，見 matchup 的 intim、entryField），對手常帶超級石的進化前後每種型態都要成立（ohko 任一種成立就算），
 // 單打的正面打得贏、換上能扛改用對戰模擬 1 對 1 打一場判斷（simDuel：變化招式、反作用力、道具回復、換招補刀都算），ohko 照模擬的勝負重算，
 // 幾下打倒、速度等照 matchup（forms 的 sim＝{ head, sw } 兩場 simDuel 的結果，沒打換上來那場是 null）；雙打照 matchup。
 // 回傳 { sw 換上能扛, head 正面打得贏, ohko 會被牠先手一擊, forms 各型態的 matchup }；有一方沒有招式資料回傳 null（呼叫端改看屬性）。
@@ -236,7 +236,9 @@ function duelVs(key, set, fmt, m, base = false, miss) {
     // 特性變身者（百變怪）照變成對面那隻算（imposterVs；我方先變，對手再變的話對面已經是變身來的就失敗）
     const me = { ...battler(key, fmt, set), ...(base && { item: '' }) };
     const rs = [m, ...megaInfo(m, fmt).filter(x => x.counted).map(x => x.mon)].map(f => {
-      const op = battler(f.key, fmt), a = imposterVs(me, op), r = matchup(a, imposterVs(op, a), { fmt, intim: 'both' });
+      // 出場特性開的天氣場地（entryField：正面對打雙方同時出場、換上來那段只有我方剛出場）
+      const op = battler(f.key, fmt), a = imposterVs(me, op), b = imposterVs(op, a);
+      const r = matchup(a, b, { fmt, intim: 'both', ...entryField(a, b), sw: entryField(a, b, true) });
       if (fmt !== 's') return r;
       // 換上來剩下的 HP 比全滿少，正面都打不贏的換上來也當打不贏（同 matchup）
       const x = { key, set, item: base ? '' : undefined }, h = simDuel(fmt, x, f.key), s = h.win && r.left > 0 ? simDuel(fmt, x, f.key, r.left) : null;
