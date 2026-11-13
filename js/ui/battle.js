@@ -411,7 +411,7 @@ const btBench = () => { const on = battle.me.slice(0, btN()); return btBrought()
 function btTakeHTML(M, O, f, threat, meFirst) {
   const mm = btTfName(M), names = threat.map(x => MOVES[x.k][0]).join('、');
   const rows = btBench().map(i => {
-    const B = btUnit('me', i, [0, 0, 0, 0, 0]), Bt = imposterVs(B, O), d = duel(Bt, intimidated(O, Bt), f);
+    const B = btUnit('me', i, [0, 0, 0, 0, 0]), Bt = imposterVs(B, O), d = duel(intimReflect(Bt, O), intimidated(O, Bt), f);
     const rs = threat.map(x => [x.k, d.yx.ok.find(y => y.k === x.k)?.r]).filter(([, r]) => r);
     if (!rs.length) return null;
     const worst = Math.max(...rs.map(([, r]) => r.eff ? r.max / r.hp : 0)), ko = rs.some(([, r]) => r.eff && r.ko[0] > 1e-9);

@@ -151,7 +151,8 @@ function moveTableHTML(members, opps, best, alt, oppMegas) {
           // 特性變身者（百變怪）照變成對面那隻算（imposterVs，同對位表）；出場特性開的天氣場地（entryField，同對位表的正面對打）
           const me0 = { ...battler(k, fmt, team.sets[slot]), ...(k !== team.mons[slot] && { item: '' }) };
           const me = imposterVs(me0, opp), op = imposterVs(opp, me);
-          const d = duel(intimidated(me, op), intimidated(op, me), { fmt, ...entryField(me, op) });
+          // 鏡甲把威嚇反彈回威嚇方（intimReflect）
+          const d = duel(intimidated(intimReflect(me, op), op), intimidated(intimReflect(op, me), me), { fmt, ...entryField(me, op) });
           const order = d.first < 0 ? '同速' : d.first ? '後動' : '先動';
           const tf = [me, op].filter(x => x.tfFrom).map(x => `${MON[x.tfFrom].zh}變身成${MON[x.key].zh}`).join('、');
           // 帶到傷害計算（不進化而以原型上場的不帶：傷害計算只會對隊上的型態套用登錄配招）

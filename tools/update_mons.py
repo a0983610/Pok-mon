@@ -189,10 +189,12 @@ def weights(keys):
     # 寶可夢 key → 體重 kg（Showdown pokedex.json 的 weightkg）。依序試：DEX_FIX、dex_id、
     # Showdown 沒分開的（只差外觀的母的、Showdown 原型的 baseForme 就是這個型態，如 gourgeist-average、toxtricity-amped）用原型的；
     # 都對不上的不收（網頁上看體重的招式就不算），並印出來
+    # 同時取性別：母的比例（gender 'N' 無性別記 -1、'M' 只有公 0、'F' 只有母 1，其他看 genderRatio 的 F，沒寫是 0.5；
+    # 迷人之軀、鬥爭心用，Showdown 沒指定性別的隊伍照這個比例隨機給）
     req = urllib.request.Request(DEX_URL, headers=HEADERS)
     with urllib.request.urlopen(req, timeout=60) as r:
         dex = json.loads(r.read().decode('utf-8'))
-    out, miss = {}, []
+    out, fem, miss = {}, {}, []
     for key in keys:
         parts, sid = [p for p in key.split('-') if p != 'plumage'], dex_id(key)
         base = re.sub(r'[^a-z0-9]', '', parts[0])
@@ -201,21 +203,27 @@ def weights(keys):
         s = next((c for c in cands if c and dex.get(c, {}).get('weightkg')), None)
         if s:
             out[key] = dex[s]['weightkg']
+            e = dex[s]
+            g = e.get('gender')
+            fem[key] = -1 if g == 'N' else 0 if g == 'M' else 1 if g == 'F' else (e.get('genderRatio') or {}).get('F', 0.5)
         else:
             miss.append(key)
     if miss:
         print('這些寶可夢在 Showdown 找不到體重（看體重的招式不算）：%r' % miss)
-    return out
+    return out, fem
 
 
-def stats_js(stats, wts):
+def stats_js(stats, wts, fem):
     dump = lambda o: json.dumps(o, ensure_ascii=False, separators=(',', ':'))
     return ('// 種族值：擷取自 OP.GG 寶可夢冠軍圖鑑（含超級進化）；這個檔由 tools/update_mons.py 產生，勿手改\n'
             '// 寶可夢 key → [HP, 攻擊, 防禦, 特攻, 特防, 速度]\n'
             'const BASE_STATS = {\n%s\n};\n'
             '// 體重 kg（打草結、踢倒、重磅衝撞、高溫重壓用）：OP.GG 沒有，取自 Pokémon Showdown 的 pokedex.json（weightkg）；找不到的不收\n'
-            'const WEIGHT_KG = {\n%s\n};\n') % ('\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in stats.items()),
-                                              '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in wts.items()))
+            'const WEIGHT_KG = {\n%s\n};\n'
+            '// 母的比例（迷人之軀、鬥爭心用；-1＝無性別）：OP.GG 沒有，取自 Pokémon Showdown 的 pokedex.json（gender／genderRatio）；找不到的不收\n'
+            'const FEMALE = {\n%s\n};\n') % ('\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in stats.items()),
+                                           '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in wts.items()),
+                                           '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in fem.items()))
 
 
 def section(txt, name):
@@ -272,7 +280,7 @@ def remind(old_txt, js_dir, mv_out, ab_out, mega_a):
 
 def write_stats(out, stats):
     # 重寫 base-stats.js（種族值＋體重）；換行沿用既有的檔（Windows 上 git 取出來是 CRLF），還不存在就用 LF
-    p, s = os.path.join(out, 'base-stats.js'), stats_js(stats, weights(list(stats)))
+    p, s = os.path.join(out, 'base-stats.js'), stats_js(stats, *weights(list(stats)))
     if os.path.exists(p):
         with open(p, encoding='utf-8', newline='') as f:
             if f.readline().endswith('\r\n'):
@@ -310,7 +318,7 @@ def main(path, only_stats=False):
     out = os.path.dirname(os.path.abspath(path))
     if only_stats:
         s = write_stats(out, stats)
-        print('只重寫 base-stats.js：種族值 %d 隻、體重 %d 隻' % (len(stats), s.count('\n', s.index('const WEIGHT_KG')) - 2))
+        print('只重寫 base-stats.js：種族值 %d 隻、體重 %d 隻' % (len(stats), s.count('\n', s.index('const WEIGHT_KG'), s.index('// 母的比例')) - 2))
         print(SIM_MATRIX_TIP)
         return
 
