@@ -392,9 +392,12 @@ function simHeal(st, s, M, v, why) {
 // 畫皮（Showdown disguise）：謎擬Ｑ還沒被揭穿（bust）時，攻擊招式（含掙扎、預知未來、混亂打到自己）的這一下沒有傷害，揭穿後扣最大 HP 的 1/8；
 // 揭穿了就一直是揭穿的樣子（換下場也不會恢復）。攻擊方 A 的特性破格無視；變身來的不算
 const simDisguised = (T, A) => T.key === 'mimikyu' && T.b.ab === 'disguise' && !T.bust && !T.tf && A?.b.ab !== 'mold-breaker';
-function simBust(st, s, T) {
+// 畫皮還在、只因為攻擊方 A 破格才沒擋：紀錄寫出來（接在傷害後面），免得看起來像沒算
+const simMbNote = (T, A) => simDisguised(T, null) && !simDisguised(T, A) ? `，${abilZh(A.b.ab)}無視${abilZh('disguise')}` : '';
+// said＝攻擊那行已經寫了擋下第一下（連續攻擊招式）
+function simBust(st, s, T, said) {
   T.bust = true;
-  simLog(st, `${simName(st, s, T)}的${abilZh('disguise')}擋下了這一下`);
+  if (!said) simLog(st, `${simName(st, s, T)}的${abilZh('disguise')}擋下了這一下`);
   simHurt(st, s, T, T.max / 8, `的${abilZh('disguise')}被揭穿了`);
 }
 // 文柚果：HP 一半以下時回復 1/4（Showdown sitrusberry）
@@ -803,7 +806,7 @@ function simStruggle(st, s, M, T, rnd) {
     if (dd > 0) T.v.got = { turn: st.turn, cat: 'physical', dmg: dd };
     const pop = T.item === 'air-balloon' && d > 0;
     if (pop) T.item = '';
-    simLog(st, `${me}用掙扎 → ${tn} −${simPct(d, T.max)}%（剩 ${simPct(T.hp, T.max)}%）${held ? `，靠${held}撐住` : ''}${pop ? '，氣球破了' : ''}${T.hp <= 0 ? `，${tn}倒下` : ''}`);
+    simLog(st, `${me}用掙扎 → ${tn} −${simPct(d, T.max)}%（剩 ${simPct(T.hp, T.max)}%）${simMbNote(T, M)}${held ? `，靠${held}撐住` : ''}${pop ? '，氣球破了' : ''}${T.hp <= 0 ? `，${tn}倒下` : ''}`);
     if (disg) simBust(st, 1 - s, T);
     if (T.hp <= 0) M.kos++;
     if (T.item === 'rocky-helmet') simHurt(st, s, M, M.max / 6, '被凸凸頭盔刺傷');
@@ -931,9 +934,12 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick) {
         if (r.berry) T.item = '';
         const pop = T.item === 'air-balloon' && dealt > 0;
         if (pop || (k === 'knock-off' && T.item && !MON[T.key].base && T.b.ab !== 'sticky-hold' && M.hp > 0)) T.item = '';
+        // 連續攻擊招式被畫皮擋下第一下：扣的是後面幾下，寫在同一行（不然先看到扣血、下一行才擋下，像沒算）
+        const said = disg && dealt > 0;
         simLog(st, `${me}用${mz}${r.crit ? '（急所）' : ''} → ${tn} −${simPct(dealt, T.max)}%（剩 ${simPct(T.hp, T.max)}%）`
+          + (said ? `，第一下被${abilZh('disguise')}擋下` : simMbNote(T, M))
           + (held ? `，靠${held}撐住` : '') + (pop ? '，氣球破了' : '') + (T.hp <= 0 ? `，${tn}倒下` : ''));
-        if (disg) simBust(st, 1 - s, T);
+        if (disg) simBust(st, 1 - s, T, said);
         if (T.hp <= 0) M.kos++;
       }
       if (gem) { M.item = ''; simLog(st, `${me}的${ITEMS[gem][0]}用掉了`); }
@@ -987,7 +993,7 @@ function simEnd(ctx, st, rnd) {
     const d = Math.min(T.hp, r.rolls.reduce((t, xs) => t + (rnd ? xs[Math.floor(rnd() * 16)] : xs.reduce((a, x) => a + x, 0) / 16), 0));
     T.hp -= d;
     simFaint(st, T);
-    simLog(st, `預知未來打中${simName(st, f.s)} −${simPct(d, T.max)}%（剩 ${simPct(T.hp, T.max)}%）${T.hp <= 0 ? '，倒下' : ''}`);
+    simLog(st, `預知未來打中${simName(st, f.s)} −${simPct(d, T.max)}%（剩 ${simPct(T.hp, T.max)}%）${simMbNote(T, f.src)}${T.hp <= 0 ? '，倒下' : ''}`);
     simSitrus(st, f.s, T);
   });
   st.fut = st.fut.filter(f => f.t > 0);
