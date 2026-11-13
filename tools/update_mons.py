@@ -311,6 +311,7 @@ def main(path, only_stats=False):
     if only_stats:
         s = write_stats(out, stats)
         print('只重寫 base-stats.js：種族值 %d 隻、體重 %d 隻' % (len(stats), s.count('\n', s.index('const WEIGHT_KG')) - 2))
+        print(SIM_MATRIX_TIP)
         return
 
     # 常用招式／特性：只抓有排名的非超級進化寶可夢
@@ -414,6 +415,11 @@ def main(path, only_stats=False):
     print('可學招式表 %d 隻；可學但沒人常用的招式 %d 種、特性 %d 種' % (len(learn_out), len(lm_out), len(la_out)))
     print('前 3 筆：', rows[:3])
     remind(old_txt, os.path.join(out, 'js'), mv_out, ab_out, mega_a)
+    print(SIM_MATRIX_TIP)
+
+
+# 單打對位的勝率表（sim-matrix.js）照資料算：資料換了要重跑（mons-data.js 的日期變了網頁就不用舊表、改在背景算；只換 base-stats.js 時日期不變，舊表照用）
+SIM_MATRIX_TIP = '\n【提醒】資料換了，在 repo 根目錄重跑 node tools/sim_matrix.js 重算單打對位的勝率表 sim-matrix.js（28 執行緒約 15 分鐘）'
 
 
 if __name__ == '__main__':

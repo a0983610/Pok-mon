@@ -683,6 +683,7 @@ function renderBattle() {
   document.querySelectorAll('#btFmt button').forEach(b => b.setAttribute('aria-pressed', b.dataset.fmt === team.fmt));
   $('#btResult').innerHTML = btResultHTML();
   btRecUpdate();
+  pBgFlush();
   saveState();
 }
 // 放上場：放進選中的位置（原本在別的位置就移過來），那個位置的能力變化清掉，再跳到下一個空位置；已在場上就只選中牠的位置。對手放上場就標出場過。

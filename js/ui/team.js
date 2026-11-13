@@ -404,23 +404,25 @@ function threatHTML(members) {
   const who = idx => idx.length ? idx.map(j => `${members[j][1] + 1} ${slotName(members[j][1])}`).join('、') : '（無）';
   const LV = ['✘ 沒解', '△ 半解', '✔ 有解'], cnt = [0, 1, 2].map(l => list.filter(t => t.level === l).length);
   const named = members.filter(([, i]) => team.mons[i]).map(([, i]) => i);
-  // 換上能扛的、只有正面打得贏的（換上能扛的一定也打得贏，不重複列）、會被牠先手一擊的
+  // 換上能扛的、只有正面打得贏的（換上能扛的一定也打得贏，不重複列）、會被牠先手一擊的；
+  // 單打名字後面寫勝率（teamVs 的 p：換上能扛寫換上來那場、正面打得贏寫正面對打的；還在背景算的不寫）
+  const whoP = (t, idx, k) => idx.length ? idx.map(j => `${members[j][1] + 1} ${slotName(members[j][1])}${t.p[j]?.[k] != null ? ` ${Math.round(t.p[j][k] * 100)}%` : ''}`).join('、') : '（無）';
   const row = t => {
     const mg = megaInfo(t.mon, team.fmt).filter(x => x.counted);
     return `<div class="threat lv${t.level}"><span class="lv">${LV[t.level]}</span><span class="meta">#${t.mon.rank[team.fmt]}</span>`
       + `<b>${t.mon.zh}</b>${chips(t.mon.types)}${mg.length ? `<span class="who">可能超級進化：${megaText(mg)}</span>` : ''}`
       + (top4Text(t.mon.key) ? `<span class="who">牠前 4 招的攻擊：${top4Text(t.mon.key)}</span>` : `<span class="who">牠的攻擊：${oppAtkText(monUnit(t.mon, team.fmt))}</span>`)
-      + `<span class="who">換上能扛：${who(t.safe)}・正面打得贏：${who(t.hit.filter(j => !t.safe.includes(j)))}</span>`
+      + `<span class="who">換上能扛：${whoP(t, t.safe, 'sw')}・正面打得贏：${whoP(t, t.hit.filter(j => !t.safe.includes(j)), 'head')}</span>`
       + (t.ohko.length ? `<span class="who x-msg">⚠ 會被牠先手一擊：${who(t.ohko)}</span>` : '') + `${realHTML(t.mon, named)}</div>`;
   };
   const ok = list.filter(t => t.level === 2);
   return `<div class="res-head">熱門威脅檢查<span class="muted small">（${FMT_ZH[team.fmt]}排名前 ${THREAT_N}）</span></div>`
     + `<p class="b-sum">沒解 <b>${cnt[0]}</b> 隻、半解 <b>${cnt[1]}</b> 隻、有解 <b>${cnt[2]}</b> 隻。</p>`
-    + list.filter(t => t.level < 2).map(row).join('')
+    + pBgNote('熱門威脅') + list.filter(t => t.level < 2).map(row).join('')
     + (ok.length ? tFoldHTML('threat', `有解的 ${ok.length} 隻（點開看）`, ok.map(row).join('')) : '')
     + '<p class="note">※ 算法同「出戰選角」的對位表：「換上能扛」＝換上來先吃牠最痛的一招（取最高傷害），剩下的 HP 對打還打得贏；'
-    + '「正面打得贏」＝雙方 HP 全滿正面對打先打倒牠：單打用「模擬對戰」的引擎 1 對 1 打一場判斷（不靠亂數，變化招式、強化、反作用力、道具回復、換招補刀都算，同速兩種先後都贏才算；'
-    + '換上能扛也是從吃過一下剩下的 HP 再打一場），雙打照速度和連用同一招幾下打倒（取打倒機率一半以上的次數）；'
+    + `「正面打得贏」＝雙方 HP 全滿正面對打先打倒牠：單打用「模擬對戰」的引擎 1 對 1 帶亂數打 ${SIM_DUEL_N} 場、勝率過半才算（變化招式、強化、反作用力、道具回復、換招補刀都算；`
+    + '換上能扛也是從吃過一下剩下的 HP 再打一樣多場；名字後面的 % 是勝率，算法與誤差見「出戰選角」對位表下方的說明），雙打照速度和連用同一招幾下打倒（取打倒機率一半以上的次數）；'
     + '「會被牠先手一擊」＝打不贏，而且牠一下就打得倒這隻、又比這隻先出手（速度較快、同速或先制招式）。擊掌奇襲、迎頭一擊只有上場第一回合能用，只算一下打倒的。'
     + '有解＝有人換上能扛，半解＝只有人正面打得贏，沒解＝都打不贏。我方照登錄的配招，牠照 OP.GG 最常見的配招（使用率前 4 招，同挑寶可夢時預填的）、道具、能力點數與性格；'
     + `威嚇有算（同「出戰選角」：正面對打雙方的都算、換上來只算我方的）；特性是變身者的百變怪照變成對面那隻算（HP、道具照自己的；抄到的威嚇也會發動）；謎擬Ｑ的畫皮有算（雙方剛出場畫皮還在：第一下沒有傷害、改扣 1/8，換上來吃的那一下也被畫皮擋下）；出場特性開的天氣、場地有算（正面對打速度慢的蓋掉快的、換上來的蓋掉牠的；單打的模擬另外算天氣場地招式與各種效果）；不含其他出場特性（雙打另外不含能力變化）。只選屬性沒挑寶可夢、或沒有招式統計的改看屬性：不怕牠${FMT_ZH[team.fmt]}常帶的攻擊又招式剋得到算換上能扛，`
@@ -545,6 +547,7 @@ function renderTeam() {
   }
   $('#tSpeed').innerHTML = speedHTML(members);
   teamBgStart(miss);
+  pBgFlush();
   saveState();
 }
 // 把屬性加進目前格子（手動改屬性就不再算是名單上的寶可夢）；留在這格，讓使用者從 typeListHTML 的清單挑寶可夢。

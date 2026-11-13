@@ -278,6 +278,7 @@ table.matrix { border-collapse: separate; border-spacing: 0; margin: 0 auto; }
 .matrix.vs tbody th { text-align: left; font-size: 14px; white-space: nowrap; }
 .vs-go { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
 .vs-go:hover { text-decoration: underline; }
+.vs-p { display: block; font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums; opacity: .85; }
 .qpick { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 6px; margin-top: 6px; }
 .qpick button {
   display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 6px 8px; text-align: left;
@@ -650,11 +651,13 @@ footer a { color: inherit; }
 
 <script src="base-stats.js"></script>
 <script src="mons-data.js"></script>
+<script src="sim-matrix.js"></script>
 <script src="js/engine/core.js"></script>
 <script src="js/engine/roles.js"></script>
 <script src="js/engine/damage.js"></script>
 <script src="js/engine/sim.js"></script>
 <script src="js/ui/common.js"></script>
+<script src="js/ui/simbg.js"></script>
 <script src="js/ui/table.js"></script>
 <script src="js/ui/build.js"></script>
 <script src="js/ui/team.js"></script>

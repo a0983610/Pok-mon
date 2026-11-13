@@ -29,16 +29,25 @@ function bringHTML(members, opps) {
   };
   const evoText = c => c.evo == null ? '' : `<span class="who x-msg">⚠ 一場只能超級進化一隻：進化 ${name(c.evo)}，`
     + `${c.idx.filter(j => alt[j] && j !== c.evo).map(j => MON[monOf(j).base].zh).join('、')}以原型上場（帶超級石但不能進化，等於沒道具）</span>`;
-  // 對位表的格子（pairOf，隊員照隊伍分析選的型態）：✔ 換上能扛、贏 正面打得贏、⚠ 會被先手一擊、✘ 打不贏；滑鼠停留看速度與幾下打倒
+  // 對位表的格子（pairOf，隊員照隊伍分析選的型態）：✔ 換上能扛、贏 正面打得贏、⚠ 會被先手一擊、✘ 打不贏；滑鼠停留看速度與幾下打倒。
+  // 單打下面加勝率（duelVs 的 p，各型態裡最低的）：✔ 是換上來那場的、其他是正面對打的；還在背景算的不寫
   const cell = r => r.sw ? ['✔', 'm2'] : r.head ? ['贏', 'm1'] : r.ohko ? ['⚠', 'mh'] : ['✘', 'mh'];
+  const pc = p => `${Math.round(p * 100)}%`;
+  const cellP = r => { const p = r.p && (r.sw ? r.p.sw : r.p.head); return p == null ? '' : `<span class="vs-p">${pc(p)}</span>`; };
   const ORD = ['先動', '後動'];
-  // 單打的模擬結果（duelVs 的 sim.head，simDuel）：正面對打幾回合分出勝負
+  // 單打勝率還沒算好時的模擬一場（duelVs 的 sim，simDuel）：正面對打幾回合分出勝負
   const simText = h => h.win ? `第 ${h.turns} 回合打倒牠` : h.tieLose ? '同速，牠先動就輸' : h.res < 0 ? `第 ${h.turns} 回合被打倒` : `打滿 ${h.turns} 回合分不出勝負`;
+  const simTip = f => {
+    if (!f.p) return '';
+    const h = f.p.head != null ? `正面 ${pc(f.p.head)}` : `正面還在算（先打一場：${simText(f.sim.head)}）`;
+    const s = f.p.sw != null ? `、換上來 ${pc(f.p.sw)}` : f.sim.sw ? `、換上來還在算（先打一場：${f.sim.sw.win ? '贏' : '輸'}）` : '';
+    return `（模擬 ${SIM_DUEL_N} 場的勝率：${h}${s}）`;
+  };
   const tip = (r, me, o) => r.type ? `${me}對${opps[o][0].zh}：只看屬性（${r.sw ? '不怕牠又剋得到' : r.head ? '招式剋得到' : '剋不到'}）`
     : [opps[o][0], ...oppMegas[o]].map((m, n) => { const f = r.forms[n];
       return `${me}對${m.zh}：${f.first < 0 ? '同速' : ORD[f.first]}（速度 ${f.spd.join('／')}）・我 ${f.me < 9 ? f.me + ' 下' : '四下打不倒'}、牠 ${f.opp < 9 ? f.opp + ' 下' : '四下打不倒'}`
         + (f.sw ? '・換上來吃一下還打得贏' : f.head ? '・正面打得贏' : f.ohko ? '・牠先動一下打倒我' : '')
-        + (f.sim ? `（模擬：${simText(f.sim.head)}）` : ''); }).join('；');
+        + simTip(f); }).join('；');
   let t = '<thead><tr><th class="corner">我方 ↓<br>對手 →</th>'
     + opps.map(([m, i], o) => `<th title="${m.zh}${oppMegas[o].length ? `（可能超級進化成${oppMegas[o].map(x => x.zh).join('、')}）` : ''}">`
       + `<span class="tcol"><span class="slot-n">${i + 1}${oppMegas[o].length ? '・超' : ''}</span><span class="slot-n">${m.zh}</span><span class="duo">`
@@ -51,14 +60,14 @@ function bringHTML(members, opps) {
     t += `<tr><th>${best.idx.includes(j) ? '★ ' : ''}${name(j)}${spe(j) ? ` <span class="meta">${spe(j)}</span>` : ''}</th>`
       + opps.map(([op], o) => {
         const r = pairOf(j, o), [v, c] = cell(r), tt = tip(r, me ? MON[me].zh : slotName(members[j][1]), o);
-        return `<td class="${c}">${me ? `<button class="vs-go" data-ca="${me}" data-cd="${op.key}" data-tip="${tt}" title="${tt}（點一下到傷害計算看細節）">${v}</button>`
+        return `<td class="${c}">${me ? `<button class="vs-go" data-ca="${me}" data-cd="${op.key}" data-tip="${tt}" title="${tt}（點一下到傷害計算看細節）">${v}${cellP(r)}</button>`
           : `<button class="vs-go" data-tip="${tt}" title="${tt}">${v}</button>`}</td>`;
       }).join('') + '</tr>';
   });
   return `<div class="res-head">建議出戰<span class="muted small">（${FMT_ZH[team.fmt]}帶 ${k} 隻，共 ${combos.length} 種帶法）</span></div>`
     + (members.length < BRING_N[team.fmt] ? `<p class="muted small b-intro">我方只有 ${members.length} 隻，全部帶上。</p>` : '')
     + '<p class="muted small b-intro">每隻對手看組合裡有沒有人應付得了：有人換上來先吃牠最痛的一招、還打得贏＝有解；'
-    + '有人正面對打打得贏（單打用對戰模擬 1 對 1 打一場、雙打照速度和幾下打倒，見下方對位表）＝半解；都打不贏＝沒解。'
+    + `有人正面對打打得贏（單打用對戰模擬 1 對 1 打 ${SIM_DUEL_N} 場、勝率過半，雙打照速度和幾下打倒，見下方對位表）＝半解；都打不贏＝沒解。`
     + '超級石最多帶 1 顆的組合排前面（一場只能超級進化一隻，多帶的那隻等於沒道具），'
     + '再依「沒解」的數量由少到多、「有解」的數量由多到少排序，再比組合內的搭配（一起帶才成立的攻擊搭配，'
     + '如晴天＋靠晴天的、戲法空間＋慢速打手，每個加 1；帶進來的搭配提醒，如靠天氣卻沒帶開天氣的、兩種天氣，每個扣 1），最後比換上能扛的配對數。'
@@ -78,11 +87,15 @@ function bringHTML(members, opps) {
       + (c.none ? `<span class="who x-msg">沒解：${c.res.map((x, o) => x.level ? '' : opps[o][0].zh).filter(Boolean).join('、')}</span>` : '')
       + '</div>').join('')
     + oppGuessHTML()
-    + `<h3>對位表</h3><div class="mwrap cover"><table class="matrix vs">${t}</tbody></table></div><div id="pCellTip"></div>`
+    + `<h3>對位表</h3>${pBgNote('對位表')}<div class="mwrap cover"><table class="matrix vs">${t}</tbody></table></div><div id="pCellTip"></div>`
     + '<p class="note">※ ✔＝換上來先吃牠最痛的一招（取最高傷害）、剩下的 HP 對打還打得贏；贏＝正面對打（雙方 HP 全滿）打得贏；'
     + '⚠＝打不贏，而且牠一下就打得倒我、又比我先出手（速度較快、同速或用先制招式），還沒出手就倒；✘＝其他打不贏的。'
-    + '單打的「打得贏」＝用「模擬對戰」的引擎 1 對 1 打一場（不靠亂數：傷害、命中、追加效果照期望值，雙方每回合出期望最好的選擇；變化招式、強化、反作用力、道具回復、換招補刀都算；'
-    + '同速時兩種先後都贏才算），換上來的從吃過一下剩下的 HP 再打一場（畫皮已揭穿、只有我方的威嚇、牠早就在場上不能用擊掌奇襲），格子說明的「模擬」是正面對打幾回合分出勝負。'
+    + `單打的「打得贏」＝用「模擬對戰」的引擎 1 對 1 打 ${SIM_DUEL_N} 場、勝率過半（剛好一半不算）：傷害亂數、急所、命中、追加效果照機率抽，`
+    + '雙方每回合先把這回合各種出法都試算一遍（同「模擬對戰」的往前算一回合），再照算出來的比例抽一種出；變化招式、強化、反作用力、道具回復、換招補刀都算；'
+    + '打滿回合分不出勝負的算半場。換上來的從吃過一下剩下的 HP 再打一樣多場（畫皮已揭穿、只有我方的威嚇、牠早就在場上不能用擊掌奇襲），正面打不贏、或吃一下就倒的不打換上來那場。'
+    + '格子下面的 % 是勝率（✔ 是換上來那場的，其他是正面對打的；對手會超級進化的取進化前後裡最低的），格子說明有兩場各自的勝率。'
+    + '單打排名前 100 的寶可夢照 OP.GG 最常見的配招互打的勝率已經事先算好，登錄了其他配招、或不在前 100 的，打開頁面後在背景算（算好前先照不靠亂數模擬一場的勝負，算好自動更新）。'
+    + `亂數照對位決定，同一組每次算出一樣的勝率；${SIM_DUEL_N} 場的勝率大約有 ±${Math.round(50 / Math.sqrt(SIM_DUEL_N))}% 的誤差，接近一半的格子勝負可能跟實際不同。`
     + '雙打的「打得贏」＝我連用同一招打倒牠的次數比牠打倒我的少；一樣多時，有先制招式能打倒的一方先出手，不然看實際速度（同速算打不贏），'
     + '四下都打不倒算打不贏。格子說明的幾下打倒取打倒機率一半以上的次數（例如亂數一擊 60%、50% 算一下，40% 算兩下）；擊掌奇襲、迎頭一擊只有上場第一回合能用，只算一下打倒的。'
     + '傷害、速度、配招、道具、能力點數的算法同下方「出招表」（我方照登錄的配招，對手照 OP.GG 最常見的，招式用使用率前 4 招）；換上來吃過一下後，氣勢披帶、多重鱗片就沒用了。'
@@ -196,6 +209,7 @@ function renderBring() {
     : bringHTML(members, opps);
   $('#pInfo').innerHTML = opps.length ? oppInfoHTML(opps)
     : '<p class="empty">選好對手的寶可夢後，這裡會列出每隻對手常帶的攻擊招式、特性、道具、種族值，以及實戰對上我方誰常輸／常贏。</p>';
+  pBgFlush();
   saveState();
 }
 // 快速選對手：沒選屬性時列目前排名前 QUICK_N（不含超級進化），有選屬性就全部列出屬性都符合的（monsOfTypes 的順序）；

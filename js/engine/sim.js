@@ -1743,10 +1743,7 @@ function simPlay(ctx, sides, rnd, log, opt = {}) {
 // 回傳 { win, res 我方先動那場的結果（1 贏、−1 輸、0 打滿回合）, turns 那場打了幾回合, tieLose 同速時對手先動就輸 }
 function simDuel(fmt, x, yk, left) {
   const run = tie => {
-    const ctx = simCtx(fmt), me = simMon(x.key, x.set, x.item, 0, fmt), op = simMon(yk, undefined, undefined, 1, fmt);
-    if (left != null) Object.assign(me, { hp: Math.min(me.max, left), bust: true });
-    const st = simStart([{ mons: [me] }, { mons: [op] }], false, left != null ? [0] : [0, 1]), pick = (c, s) => simGreedyPick(ctx, c, s);
-    if (left != null) simAct(st, 1).in = -1;
+    const ctx = simCtx(fmt), st = simDuelStart(fmt, x, yk, left), pick = (c, s) => simGreedyPick(ctx, c, s);
     let tied = false;
     while (!simOver(st) && st.turn < SIM_MAX_TURN) {
       tied = simTurn(ctx, st, simDecide(ctx, st, 'turn', null), null, tie, pick) || tied;
@@ -1757,4 +1754,32 @@ function simDuel(fmt, x, yk, left) {
   };
   const a = run(0), tieLose = a.res > 0 && a.tied && run(1).res <= 0;
   return { win: a.res > 0 && !tieLose, res: a.res, turns: a.turns, tieLose };
+}
+// 單打一對一的開頭局面（simDuel、simDuelP 共用；x、yk、left 同 simDuel）
+function simDuelStart(fmt, x, yk, left) {
+  const me = simMon(x.key, x.set, x.item, 0, fmt), op = simMon(yk, undefined, undefined, 1, fmt);
+  if (left != null) Object.assign(me, { hp: Math.min(me.max, left), bust: true });
+  const st = simStart([{ mons: [me] }, { mons: [op] }], false, left != null ? [0] : [0, 1]);
+  if (left != null) simAct(st, 1).in = -1;
+  return st;
+}
+// 有種子的亂數（mulberry32）與字串雜湊（FNV-1a）：同一組對位每次算出一樣的勝率（事先算好的 sim-matrix.js 和畫面上現算的對得起來）
+const simRng = seed => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+const simHash = s => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193); return h >>> 0; };
+// 單打一對一的勝率（對位 duelVs 用）：x、yk、left 同 simDuel，帶亂數打 n 場（傷害、急所、命中、追加效果照亂數；雙方每回合照 simDecide 的混合策略抽），
+// 贏 1、打滿回合算 0.5、輸 0 的平均。亂數種子照輸入雜湊，同一組每次一樣；n 場共用一個計算快取
+const SIM_DUEL_N = 30;
+function simDuelP(fmt, x, yk, left, n = SIM_DUEL_N) {
+  const rnd = simRng(simHash(JSON.stringify([fmt, x.key, x.set || null, x.item ?? null, yk, left ?? null, n]))), ctx = simCtx(fmt), pick = (c, s) => simGreedyPick(ctx, c, s);
+  let w = 0;
+  for (let r = 0; r < n; r++) {
+    const st = simDuelStart(fmt, x, yk, left);
+    while (!simOver(st) && st.turn < SIM_MAX_TURN) {
+      simTurn(ctx, st, simDecide(ctx, st, 'turn', rnd), rnd, 0, pick);
+      while (!simOver(st) && (simNeed(st, 0) || simNeed(st, 1))) simReplace(st, simDecide(ctx, st, 'replace', rnd), rnd);
+    }
+    const win = simWinner(st);
+    w += win === 0 ? 1 : win === 1 ? 0 : 0.5;
+  }
+  return w / n;
 }

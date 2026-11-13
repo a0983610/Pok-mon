@@ -82,6 +82,7 @@ function renderSim() {
     : '<p class="empty">按「開始模擬」後，這裡會列出對手每一種帶法下我方的勝率（最難應付的在前），點「看怎麼打」看開局雙方各種出招的勝率。</p>';
   // 正在填「改成實戰的結果」時不重畫推演（賽前整批跑完會呼叫這裡，填到一半的會被洗掉；推演的內容和這裡無關）
   if (!sim.tree?.edit) renderSimTree();
+  pBgFlush();
   saveState();
 }
 // 背景計算（js/engine/sim-worker.js）開幾個：電腦的執行緒數減 1（留一個給畫面），最多 SIM_WK_MAX；

@@ -222,29 +222,73 @@ function answerOf(members, opp) {
 }
 // 一對一結果的快取（matchup 要算兩次對位；出戰選角、隊伍分析每次重畫都會用到）：fmt、我方 key、base、配招、對手 key → duelVs 的結果
 const MATCH_MEMO = new Map();
+// 單打對位的勝率（simDuelP 打 SIM_DUEL_N 場）：MATCH_P＝背景算好的（key 見 duelPKey），SIM_P_WANT＝還沒算、要交給背景計算的 { key: [fmt, x, yk, left] }
+// （畫面這邊的 js/ui/simbg.js 拿去算，算好存進 MATCH_P、清掉 MATCH_MEMO 再重畫）
+const MATCH_P = new Map(), SIM_P_WANT = new Map();
+const duelPKey = (fmt, x, yk, left) => JSON.stringify([fmt, x.key, x.set || null, x.item ?? null, yk, left ?? null]);
+// MATCH_DEP：勝率還沒算好時用了這組勝率的 MATCH_MEMO 的 key（算好時只清掉這些，不用整個重算）
+const MATCH_DEP = new Map();
+// 背景算好一組勝率：存起來，清掉用到它的對位快取
+function simPDone(k, p) {
+  MATCH_P.set(k, p);
+  MATCH_DEP.get(k)?.forEach(m => MATCH_MEMO.delete(m));
+  MATCH_DEP.delete(k);
+}
+// 事先算好的勝率（tools/sim_matrix.js 產生的 sim-matrix.js：單打排名前 100 的預設配招互打；資料日期和 mons-data.js 不一樣、或每組場數和 SIM_DUEL_N 不一樣就不用）。
+// 每格一個字：'0' 起算 0～60（勝率 × 60），'~' 是沒算（換上來那場只在正面打得贏、換上來還站得住時才算）
+let SIM_MX = null;
+function simMatrixP(x, yk, left) {
+  if (typeof SIM_MATRIX === 'undefined' || SIM_MATRIX.date !== MONS_DATE || SIM_MATRIX.n !== SIM_DUEL_N || x.item !== undefined) return null;
+  if (x.set) return null;
+  SIM_MX ||= Object.fromEntries(SIM_MATRIX.keys.map((k, i) => [k, i]));
+  const i = SIM_MX[x.key], j = SIM_MX[yk];
+  if (i == null || j == null) return null;
+  const c = SIM_MATRIX[left == null ? 'head' : 'sw'][i * SIM_MATRIX.keys.length + j];
+  return c === '~' ? null : (c.charCodeAt(0) - 48) / 60;
+}
+// 單打一對一的勝率：先查事先算好的（simMatrixP），再查背景算好的（MATCH_P），都沒有就排進 SIM_P_WANT、回傳 null
+function duelP(fmt, x, yk, left) {
+  const mx = simMatrixP(x, yk, left);
+  if (mx != null) return mx;
+  const k = duelPKey(fmt, x, yk, left);
+  if (MATCH_P.has(k)) return MATCH_P.get(k);
+  SIM_P_WANT.set(k, [fmt, x, yk, left]);
+  return null;
+}
 // 我方寶可夢 key（配招 set；base＝超級進化這場不進化、以原型 key 上場，帶著超級石等於沒道具）對上對手寶可夢 m：
 // 看速度與傷害（matchup，同出招表的算法；雙方出場的威嚇、開的天氣場地都算，見 matchup 的 intim、entryField），對手常帶超級石的進化前後每種型態都要成立（ohko 任一種成立就算），
-// 單打的正面打得贏、換上能扛改用對戰模擬 1 對 1 打一場判斷（simDuel：變化招式、反作用力、道具回復、換招補刀都算），ohko 照模擬的勝負重算，
-// 幾下打倒、速度等照 matchup（forms 的 sim＝{ head, sw } 兩場 simDuel 的結果，沒打換上來那場是 null）；雙打照 matchup。
-// 回傳 { sw 換上能扛, head 正面打得贏, ohko 會被牠先手一擊, forms 各型態的 matchup }；有一方沒有招式資料回傳 null（呼叫端改看屬性）。
+// 單打的正面打得贏、換上能扛改用對戰模擬 1 對 1 的勝率判斷（duelP：帶亂數打 30 場，變化招式、反作用力、道具回復、換招補刀都算，過半算贏；
+// 還沒算好的先用 simDuel 不帶亂數打一場的勝負，算好再重畫），ohko 照模擬的勝負重算，幾下打倒、速度等照 matchup
+// （forms 的 p＝{ head, sw } 兩種情況的勝率，沒算好或沒打換上來那場是 null；sim＝還沒有勝率時 simDuel 的結果）；雙打照 matchup。
+// 回傳 { sw 換上能扛, head 正面打得贏, ohko 會被牠先手一擊, p { head, sw } 各型態裡最低的勝率, forms 各型態的 matchup }；
+// 有一方沒有招式資料回傳 null（呼叫端改看屬性）。
 // miss：給了就不當場打模擬（單打第一次算的組合很花時間，隊伍分析的下一隻建議放到背景算）：沒算過的把參數 [key, set, fmt, m, base] 放進 miss、回傳 undefined
 function duelVs(key, set, fmt, m, base = false, miss) {
   if (!key || !useOf(key, fmt, set)?.moves.length || !useOf(m.key, fmt)?.moves.length) return null;
   const memo = [fmt, key, base, JSON.stringify(set || null), m.key].join('|');
   if (!MATCH_MEMO.has(memo)) {
     if (miss && fmt === 's') { miss.push([key, set, fmt, m, base]); return undefined; }
-    // 特性變身者（百變怪）照變成對面那隻算（imposterVs；我方先變，對手再變的話對面已經是變身來的就失敗）
-    const me = { ...battler(key, fmt, set), ...(base && { item: '' }) };
+    // 特性變身者（百變怪）照變成對面那隻算（imposterVs；我方先變，對手再變的話對面已經是變身來的就失敗）；pend＝還沒算好的勝率（見 MATCH_DEP）
+    // dset＝登錄的配招就是預設配招：和不給配招一樣（battler 的值相同、模擬只拿配招的招式；單打前 100 名互打的對位逐組比過相同），
+    // 勝率當成沒給配招，和事先算好的、推薦的候補共用
+    const me = { ...battler(key, fmt, set), ...(base && { item: '' }) }, pend = [], dset = set && JSON.stringify(set) === JSON.stringify(defaultSet(key, fmt));
     const rs = [m, ...megaInfo(m, fmt).filter(x => x.counted).map(x => x.mon)].map(f => {
       // 出場特性開的天氣場地（entryField：正面對打雙方同時出場、換上來那段只有我方剛出場）
       const op = battler(f.key, fmt), a = imposterVs(me, op), b = imposterVs(op, a);
       const r = matchup(a, b, { fmt, intim: 'both', ...entryField(a, b), sw: entryField(a, b, true) });
       if (fmt !== 's') return r;
-      // 換上來剩下的 HP 比全滿少，正面都打不贏的換上來也當打不贏（同 matchup）
-      const x = { key, set, item: base ? '' : undefined }, h = simDuel(fmt, x, f.key), s = h.win && r.left > 0 ? simDuel(fmt, x, f.key, r.left) : null;
-      return { ...r, head: h.win, sw: !!s?.win, ohko: !h.win && r.opp === 1 && (r.oppPri || r.first !== 0), sim: { head: h, sw: s } };
+      // 換上來剩下的 HP 比全滿少，正面都打不贏的換上來也當打不贏（同 matchup）；勝率過半算贏（剛好一半不算），還沒算好的先照 simDuel 一場
+      const x = { key, set: dset ? undefined : set, item: base ? '' : undefined }, ph = duelP(fmt, x, f.key), h = ph == null ? simDuel(fmt, x, f.key) : null;
+      if (ph == null) pend.push(duelPKey(fmt, x, f.key));
+      const head = ph != null ? ph > 0.5 : h.win, ps = head && r.left > 0 ? duelP(fmt, x, f.key, r.left) : null;
+      if (head && r.left > 0 && ps == null) pend.push(duelPKey(fmt, x, f.key, r.left));
+      const s = head && r.left > 0 && ps == null ? simDuel(fmt, x, f.key, r.left) : null;
+      return { ...r, head, sw: ps != null ? ps > 0.5 : !!s?.win, ohko: !head && r.opp === 1 && (r.oppPri || r.first !== 0), sim: { head: h, sw: s }, p: { head: ph, sw: ps } };
     });
-    MATCH_MEMO.set(memo, { sw: rs.every(r => r.sw), head: rs.every(r => r.head), ohko: rs.some(r => r.ohko), forms: rs });
+    // 各型態裡最低的勝率（有一種還沒算好就是 null；雙打沒有勝率）
+    const lowest = k => fmt !== 's' || rs.some(r => r.p?.[k] == null) ? null : Math.min(...rs.map(r => r.p[k]));
+    MATCH_MEMO.set(memo, { sw: rs.every(r => r.sw), head: rs.every(r => r.head), ohko: rs.some(r => r.ohko), p: { head: lowest('head'), sw: lowest('sw') }, forms: rs });
+    pend.forEach(k => { if (!MATCH_DEP.has(k)) MATCH_DEP.set(k, new Set()); MATCH_DEP.get(k).add(memo); });
   }
   return MATCH_MEMO.get(memo);
 }
@@ -252,9 +296,9 @@ function duelVs(key, set, fmt, m, base = false, miss) {
 const typeVs = (unit, ou) => { const a = answerOf([unit], ou); return { sw: a.level === 2, head: a.hit.length > 0, ohko: false, type: true }; };
 // 隊員 members（unitOf：defs、atk、key、set）對上一隻對手寶可夢 m：safe＝換上能扛、hit＝正面打得贏、ohko＝會被牠先手一擊（都是 members 的索引）；
 // 有人換上能扛＝有解(2)、有人正面打得贏＝半解(1)、都沒有＝沒解(0)。同出戰選角的對位（duelVs，沒有招式資料的看屬性 typeVs）。
-// miss：同 duelVs，沒算過的隊員先跳過（不算進 safe／hit／ohko）
+// miss：同 duelVs，沒算過的隊員先跳過（不算進 safe／hit／ohko）。另外回傳 p[i]＝第 i 隻的勝率 { head, sw }（duelVs 的 p；沒有是 null）
 function teamVs(members, m, fmt, miss) {
-  const ou = oppUnit(m, fmt), safe = [], hit = [], ohko = [];
+  const ou = oppUnit(m, fmt), safe = [], hit = [], ohko = [], p = [];
   members.forEach((u, i) => {
     const d = duelVs(u.key, u.set, fmt, m, false, miss);
     if (d === undefined) return;
@@ -262,8 +306,9 @@ function teamVs(members, m, fmt, miss) {
     if (r.sw) safe.push(i);
     if (r.head) hit.push(i);
     if (r.ohko) ohko.push(i);
+    p[i] = r.p || null;
   });
-  return { safe, hit, ohko, level: safe.length ? 2 : hit.length ? 1 : 0 };
+  return { safe, hit, ohko, p, level: safe.length ? 2 : hit.length ? 1 : 0 };
 }
 // 熱門寶可夢逐隻檢查隊員 members（teamVs，連常帶超級石的超級進化型態一起看）
 const threatCheck = (members, fmt, n) => topMons(fmt, n).map(m => ({ mon: m, ...teamVs(members, m, fmt) }));
