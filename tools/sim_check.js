@@ -29,11 +29,7 @@ const alnum = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
 // ---------- 已知的缺口（還沒做的）：Showdown id → 原因；有差異的組合牽涉到這些就標 △ ----------
 const KNOWN = Object.fromEntries(Object.entries({
-  '幻覺': 'illusion', '危險迴避': 'emergencyexit', '火焰之軀': 'flamebody', '輕裝': 'unburden', '複製': 'trace', '電力轉換': 'electromorphosis',
-  '自信過度': 'moxie', '正義之心': 'justified', '黏滑': 'gooey', '毒刺': 'poisonpoint', '迷人之軀': 'cutecharm', '毒滿地': 'toxicdebris', '怒火沖天': 'berserk',
-  '超級龍頭地鼠特性': 'piercingdrill', '超級大食花特性': 'innardsout', '巨劍突擊副作用': 'glaiverush', '靈騷': 'poltergeist', '岩斧撒岩': 'stoneaxe',
-  '千重濤撒菱': 'ceaselessedge', '逆鱗': 'outrage', '羽棲失去飛行屬性': 'roost', '冰旋清場地': 'icespinner',
-  '逃脫按鍵': 'ejectbutton', '紅牌': 'redcard', '場地種子': 'psychicseed grassyseed electricseed mistyseed',
+  '迷人之軀（著迷沒做）': 'cutecharm',
   'Showdown 舊資料（祈願、吸取力量 PP）': 'wish strengthsap',
 }).flatMap(([why, ks]) => ks.split(' ').map(k => [k, why])));
 
@@ -109,6 +105,7 @@ function ourAct(st, s, k) {
   const M = E.simAct(st, s);
   if (M.rech) return { t: 'rech' };
   if (M.chg) return { t: 'mv', k: M.chg };
+  if (M.v.rage) return { t: 'mv', k: M.v.rage.k };
   const ok = x => M.pp[x] > 0 && !(M.v.taunt && E.SIM_SUP[x]) && M.v.dis?.k !== x && !(E.SIM_TWICE.has(x) && M.last === x)
     && !(M.v.enc && M.moves.includes(M.v.encK) && M.pp[M.v.encK] > 0 && M.v.encK !== x)
     && !(M.lock && M.item === 'choice-scarf' && M.moves.includes(M.lock) && M.lock !== x);

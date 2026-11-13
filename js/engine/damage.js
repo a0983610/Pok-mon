@@ -85,9 +85,9 @@ const FLAG = Object.fromEntries(Object.entries({
     + 'sucker-punch upper-hand vacuum-wave water-shuriken',
 }).map(([f, s]) => [f, new Set(s.split(' '))]));
 // 特性，效果與倍率照 Smogon champions.ts。超級進化專屬、ABILS（一般寶可夢的 OP.GG 詳細頁）裡沒有的中文名依神奇寶貝百科「特性列表」
-// （辣椒噴發依 Bulbapedia Spicy Spray 頁的中文名）
+// （辣椒噴發、飛出的內在物依 Bulbapedia 各特性頁的中文名；超級龍頭地鼠的 piercing-drill 查不到中文名，不列）
 const ABIL_ZH = { aerilate: '飛行皮膚', dragonize: '龍皮膚', eelevate: '鰻鰻高升', 'mega-sol': '超級日光', 'fire-mane': '火焰鬃毛',
-  'aura-guard': '波導防護', 'parental-bond': '親子愛', 'fairy-aura': '妖精氣場', 'spicy-spray': '辣椒噴發' };
+  'aura-guard': '波導防護', 'parental-bond': '親子愛', 'fairy-aura': '妖精氣場', 'spicy-spray': '辣椒噴發', 'innards-out': '飛出的內在物' };
 const abilZh = k => ABILS[k]?.[0] || ABIL_ZH[k] || '';
 // 寶可夢 key 在 fmt 實際用的特性：超級進化用固定特性；其他用選的 cur，沒選或不在這隻的常用特性裡就用使用率最高的；沒有統計回傳 ''
 function defAbOf(key, fmt, cur = '') {
@@ -166,7 +166,8 @@ const invAt = (x, i, inv) => x.sp ? [x.sp[i], natOf(x.nat, i)] : inv;
 // 速度（照 Smogon util.ts 的 getFinalSpeed，冠軍版）：速度能力值 → 能力變化 → 順風 ×2、天氣／場地加速特性 ×2（不然飛毛腿在異常狀態時 ×1.5）、
 // 講究圍巾 ×1.5 連乘後四捨五入 → 麻痺 ×½（飛毛腿不減）。SPE_ABILS：特性 → 要的天氣或場地（衝浪之尾看電氣場地）
 const SPE_ABILS = { chlorophyll: 'sun', 'swift-swim': 'rain', 'sand-rush': 'sand', 'slush-rush': 'snow', 'surge-surfer': 'electric' };
-// s：{ key, inv 速度投資 [點數, 性格]（或 sp／nat，見 invAt）, st 速度能力變化, item, ab 特性, tw 順風, par 麻痺, status 有異常狀態（麻痺或灼傷） }；
+// s：{ key, inv 速度投資 [點數, 性格]（或 sp／nat，見 invAt）, st 速度能力變化, item, ab 特性, tw 順風, par 麻痺, status 有異常狀態（麻痺或灼傷），
+//   unburden 輕裝發動中（對戰模擬：道具用掉或被拿掉後、沒有道具時 ×2，Showdown unburden onModifySpe） }；
 // f：{ weather（已扣掉無關天氣／氣閘）, terrain }。回傳 { v 速度, notes 有作用的修正 }
 function speedOf(s, f) {
   const [sp, nat] = invAt(s, 5, s.inv), notes = [], mods = [];
@@ -176,6 +177,7 @@ function speedOf(s, f) {
   if (need && need === (need === 'electric' ? f.terrain : f.weather)) { mods.push(8192); notes.push(`${abilZh(s.ab)} ×2`); }
   else if (s.ab === 'quick-feet' && s.status) { mods.push(6144); notes.push(`${abilZh(s.ab)} ×1.5`); }
   if (DMG_ITEMS[s.item]?.spe) { mods.push(DMG_ITEMS[s.item].spe); notes.push(`${ITEMS[s.item][0]} ×1.5`); }
+  if (s.unburden && s.ab === 'unburden' && !s.item) { mods.push(8192); notes.push(`${abilZh(s.ab)} ×2`); }
   v = pokeRound(v * chainMods(mods, 410, 131172) / 4096);
   if (s.par && s.ab !== 'quick-feet') { v = Math.floor(v * 50 / 100); notes.push('麻痺 ×½'); }
   return { v, notes };
@@ -193,7 +195,8 @@ function speedPair(x, y, f) {
 // 看場上狀況的特性（LIVE_ABILS，沒給就不算）：a.pinch＝攻擊方 HP 剩 1/3 以下（PINCH_AB）、a.fallen＝攻擊方這一方倒下幾隻（大將）、
 // d.disguise＝防守方的畫皮還沒被揭穿（這次的第一下沒有傷害、改扣 1/8，之後連用照常；回傳 disguise 標記）；
 // 對戰模擬另外給：a.types／d.types＝場上現在的屬性（變幻自如、自由者換過；沒給照圖鑑）、a.ptUsed＝攻擊方的變幻自如／自由者這次上場已經發動過
-// （發動過就只有現在的屬性算本系；沒發動過的這招出手前會變成招式的屬性，照樣算本系）、a.flashFire＝攻擊方的引火吸收過火屬性招式（火屬性招式攻擊／特攻 ×1.5）；
+// （發動過就只有現在的屬性算本系；沒發動過的這招出手前會變成招式的屬性，照樣算本系）、a.flashFire＝攻擊方的引火吸收過火屬性招式（火屬性招式攻擊／特攻 ×1.5）、
+// d.glaive＝防守方用了巨劍突擊、還沒再出招（受到的傷害 ×2，Showdown glaiverush onSourceModifyDamage）；
 // 雙打時 a.field／d.field＝攻擊方／防守方場上還站著幾隻（沒給當 2）：範圍招式實際只打到 1 隻時不減傷（Showdown battle-actions.ts：targets.length > 1 才 spreadHit）；
 // o：{ fmt 's'／'d', weather, crit, terrain, hh 幫助, walls 防守方的牆, burn 攻擊方灼傷, bp 威力（對戰模擬給隨場上狀況變的，見 simVarBp；沒給照資料）,
 //   last 攻擊方比防守方晚出招（特性分析；沒給當先出招）}
@@ -352,6 +355,7 @@ function damageCalc(a, d, mk, o) {
     if (wall) m.push(wall);
     if (aab === 'sniper' && r.crit) m.push(use(aab) && 6144);
     if (dab === 'multiscale' && full && first) m.push(use(dab) && 2048);
+    if (d.glaive) { m.push(8192); notes.add('巨劍突擊後受到的傷害 ×2'); }
     if ((dab === 'fluffy' || dab === 'aura-guard') && contact) m.push(use(dab) && 2048);
     else if (dab === 'punk-rock' && FLAG.sound.has(mk)) m.push(use(dab) && 2048);
     if (['solid-rock', 'filter'].includes(dab) && r.eff > 1) m.push(use(dab) && 3072);
@@ -379,11 +383,19 @@ function damageCalc(a, d, mk, o) {
     });
   };
   const pw = h => mk === 'triple-axel' ? 20 * (h + 1) : power;
-  const first0 = Array.from({ length: hits }, (_, h) => rollsOf(pw(h), !h, pb && h === 1));
-  const later = r.berry || (dab === 'multiscale' && full) || (knock && !keep) ? Array.from({ length: hits }, (_, h) => rollsOf(pw(h), false, pb && h === 1)) : first0;
-  // 畫皮（d.disguise：還沒被揭穿；破格無視）：這次的第一下沒有傷害，揭穿後扣最大 HP 的 1/8（Showdown disguise onDamage／onUpdate），之後連用照常
+  const rollsAll = isFirst => Array.from({ length: hits }, (_, h) => rollsOf(pw(h), isFirst && !h, pb && h === 1));
+  // 畫皮（d.disguise：還沒被揭穿；破格無視）：這次的第一下沒有傷害，揭穿後扣最大 HP 的 1/8（Showdown disguise onDamage／onUpdate），之後連用照常；
+  // 破掉畫皮的這一招整招都當效果普通（Showdown disguise onEffectiveness 的 neutral：連續攻擊揭穿後的幾下也是，效果絕佳／不好的修正、抗性樹果都不算）
   const disg = d.disguise && dab === 'disguise' && d.key === 'mimikyu';
-  if (disg) { r.disguise = true; notes.add(`${abilZh(dab)}擋下第一下（改扣 1/8）`); }
+  let first0;
+  if (disg && r.eff !== 1) {
+    const keep0 = { eff: r.eff, berry: r.berry };
+    Object.assign(r, { eff: 1, berry: false });
+    first0 = rollsAll(true);
+    Object.assign(r, keep0);
+  } else first0 = rollsAll(true);
+  const later = disg || r.berry || (dab === 'multiscale' && full) || (knock && !keep) ? rollsAll(false) : first0;
+  if (disg) { r.disguise = true; notes.add(`${abilZh(dab)}擋下第一下（改扣 1/8）${hits > 1 && r.eff !== 1 ? '，這招其他下照效果普通算' : ''}`); }
   const first = disg ? [Array(16).fill(Math.max(1, Math.floor(r.hp / 8))), ...first0.slice(1)] : first0;
   r.min = first.reduce((s, x) => s + x[0], 0);
   r.max = first.reduce((s, x) => s + x[15], 0);
