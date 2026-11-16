@@ -87,7 +87,9 @@ const FLAG = Object.fromEntries(Object.entries({
 // 特性，效果與倍率照 Smogon champions.ts。超級進化專屬、ABILS（一般寶可夢的 OP.GG 詳細頁）裡沒有的中文名依神奇寶貝百科「特性列表」
 // （辣椒噴發、飛出的內在物依 Bulbapedia 各特性頁的中文名；超級龍頭地鼠的 piercing-drill 查不到中文名，不列）
 const ABIL_ZH = { aerilate: '飛行皮膚', dragonize: '龍皮膚', eelevate: '鰻鰻高升', 'mega-sol': '超級日光', 'fire-mane': '火焰鬃毛',
-  'aura-guard': '波導防護', 'parental-bond': '親子愛', 'fairy-aura': '妖精氣場', 'spicy-spray': '辣椒噴發', 'innards-out': '飛出的內在物' };
+  'aura-guard': '波導防護', 'parental-bond': '親子愛', 'fairy-aura': '妖精氣場', 'spicy-spray': '辣椒噴發', 'innards-out': '飛出的內在物',
+  // 單純：對戰模擬的單純光束換上的（中文名取自 OP.GG 單純光束的說明）
+  simple: '單純' };
 const abilZh = k => ABILS[k]?.[0] || ABIL_ZH[k] || '';
 // 寶可夢 key 在 fmt 實際用的特性：超級進化用固定特性；其他用選的 cur，沒選或不在這隻的常用特性裡就用使用率最高的；沒有統計回傳 ''
 function defAbOf(key, fmt, cur = '') {
@@ -181,7 +183,8 @@ const SPE_ABILS = { chlorophyll: 'sun', 'swift-swim': 'rain', 'sand-rush': 'sand
 // f：{ weather（已扣掉無關天氣／氣閘）, terrain }。回傳 { v 速度, notes 有作用的修正 }
 function speedOf(s, f) {
   const [sp, nat] = invAt(s, 5, s.inv), notes = [], mods = [];
-  let v = stageStat(statOf(MON[s.key].bs[5], sp, 5, nat), s.st);
+  // s.raw＝換掉的速度能力值（對戰模擬的速度互換）；沒給照種族值、點數、性格算
+  let v = stageStat(s.raw ?? statOf(MON[s.key].bs[5], sp, 5, nat), s.st);
   if (s.tw) { mods.push(8192); notes.push('順風 ×2'); }
   const need = SPE_ABILS[s.ab];
   if (need && need === (need === 'electric' ? f.terrain : f.weather)) { mods.push(8192); notes.push(`${abilZh(s.ab)} ×2`); }
@@ -210,7 +213,7 @@ function speedPair(x, y, f) {
 // d.glaive＝防守方用了巨劍突擊、還沒再出招（受到的傷害 ×2，Showdown glaiverush onSourceModifyDamage）；
 // 雙打時 a.field／d.field＝攻擊方／防守方場上還站著幾隻（沒給當 2）：範圍招式實際只打到 1 隻時不減傷（Showdown battle-actions.ts：targets.length > 1 才 spreadHit）；
 // o：{ fmt 's'／'d', weather, crit, terrain, hh 幫助, walls 防守方的牆, burn 攻擊方灼傷, bp 威力（對戰模擬給隨場上狀況變的，見 simVarBp；沒給照資料）,
-//   last 攻擊方比防守方晚出招（特性分析；沒給當先出招）}
+//   bps 每一下的威力（對戰模擬的圍攻，見 simBeatUp：打 bps.length 下）, last 攻擊方比防守方晚出招（特性分析；沒給當先出招）}
 // （必定急所的招式不管 crit 都算急所）。不算的招式回傳 { skip 原因 }；
 // 沒有效果的回傳 eff 0（沒有 hp 以後的欄位；immuneBy＝讓招式無效的防守方特性，blockedBy＝其他原因的說明，如精神場地擋先制）；
 // 其餘回傳 hp 防守方最大 HP、min／max 用一次的傷害（多段攻擊是各下加總）、ko[n] 連用 n＋1 次打掉剩下 HP 的機率（n＝0～3）、stab 本系倍率（4096 制）、
@@ -219,7 +222,7 @@ function speedPair(x, y, f) {
 // d.cur 比最大 HP 少時，氣勢披帶、結實、多重鱗片（都要 HP 全滿）沒有作用
 function damageCalc(a, d, mk, o) {
   const [, mtype, cat0, bp0] = MOVES[mk];
-  let power0 = o.bp ?? bp0;
+  let power0 = o.bp ?? o.bps?.[0] ?? bp0;
   if (NO_CALC[mk]) return { skip: NO_CALC[mk] };
   if (power0 == null && !WEIGHT_BP[mk]) return { skip: '威力會變動或固定傷害' };
   const A = MON[a.key], D = MON[d.key], aab = a.ab || '', notes = new Set(), aTy = a.types || A.types, dTy = d.types || D.types;
@@ -259,12 +262,13 @@ function damageCalc(a, d, mk, o) {
   else if (ATE[aab] && type === 'normal') ate = use(aab) && (type = ATE[aab]);
   else if (aab === 'liquid-voice' && FLAG.sound.has(mk)) type = use(aab) && 'water';
   if (mk === 'rising-voltage' && terr === 'electric' && dGround) { power *= 2; notes.add(`${FIELD_ZH[terr]}威力 ×2`); }
-  let [hits, hitNote] = HITS[mk] || [1], pb = false;
+  let [hits, hitNote] = o.bps ? [o.bps.length] : HITS[mk] || [1], pb = false;
   if (aab === 'skill-link' && hitNote === VAR_HITS) [hits, hitNote] = [5, use(aab) && `${abilZh(aab)}固定 5 下`];
   // 廣域戰力在精神場地（攻擊方在地面上）變成打所有對手；實際打到的：對手場上的，地震這種打周圍全部的（all-other-pokemon）再加自己的隊友
   const hitN = (d.field ?? 2) + (MOVES[mk][8] === 'all-other-pokemon' ? (a.field ?? 2) - 1 : 0);
   const spread = o.fmt === 'd' && hitN > 1 && (SPREAD.has(mk) || (mk === 'expanding-force' && terr === 'psychic' && aGround));
-  if (aab === 'parental-bond' && hits === 1 && !spread) [hits, hitNote, pb] = [2, use(aab) && `${abilZh(aab)}：第 2 下傷害 ¼`, true];
+  // 親子愛（Showdown parentalbond onPrepareHit：本來就是連續攻擊的不算，圍攻只打 1 下也是）
+  if (aab === 'parental-bond' && hits === 1 && !spread && !o.bps) [hits, hitNote, pb] = [2, use(aab) && `${abilZh(aab)}：第 2 下傷害 ¼`, true];
   const scrappy = aab === 'scrappy' && (type === 'normal' || type === 'fighting') && dTy.includes('ghost') && use(aab);
   // 冷凍乾燥對水屬性 ×2（Smogon util.ts getMoveEffectiveness：Freeze-Dry 打 Water 回傳 2）
   const dTypes = scrappy ? dTy.filter(t => t !== 'ghost') : dTy, dry = mk === 'freeze-dry' && dTypes.includes('water');
@@ -417,7 +421,7 @@ function damageCalc(a, d, mk, o) {
       return pokeRound(Math.max(1, x * fm / 4096));
     });
   };
-  const pw = h => mk === 'triple-axel' ? 20 * (h + 1) : power;
+  const pw = h => mk === 'triple-axel' ? 20 * (h + 1) : o.bps ? o.bps[h] : power;
   const rollsAll = isFirst => Array.from({ length: hits }, (_, h) => rollsOf(pw(h), isFirst && !h, pb && h === 1));
   // 畫皮（d.disguise：還沒被揭穿；破格無視）：這次的第一下沒有傷害，揭穿後扣最大 HP 的 1/8（Showdown disguise onDamage／onUpdate），之後連用照常；
   // 破掉畫皮的這一招整招都當效果普通（Showdown disguise onEffectiveness 的 neutral：連續攻擊揭穿後的幾下也是，效果絕佳／不好的修正、抗性樹果都不算）

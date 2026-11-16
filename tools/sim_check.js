@@ -6,7 +6,7 @@
 //     有明顯差異（z 檢定）的列出來，牽涉到 KNOWN 已知缺口的標 △、其他標 ✘（要查的）
 //   node tools/sim_check.js one 寶可夢A 寶可夢B 招式A 招式B [場數 200]   只比一組，並印出兩邊第一場的逐回合紀錄
 //   node tools/sim_check.js moves   招式資料（OP.GG 的 MOVES）對照 Showdown：屬性、分類、威力、命中、PP、先制
-//   node tools/sim_check.js cover [每組場數 200] [種子 7] [move／ability／item]   全面覆蓋：單打有使用率的每一招、特性、道具都找會帶的寶可夢
+//   node tools/sim_check.js cover [每組場數 200] [種子 7] [move／ability／item]   全面覆蓋：單打有使用率的每一招、特性、道具都找會帶的寶可夢（雙打才有人帶的招式照雙打的配招）
 //     對幾隻對手打（見 cover），列出有差異的項目與模擬不會出的招（上面的隨機組合只抽前幾名的預設 4 招，覆蓋不到的靠這個）
 //   node tools/sim_check.js team [組數 200] [每組場數 200] [種子 7]   3 對 3：換人相關的（撒菱類、出場特性、急速折返、紅牌、吼叫、接棒…）要有後排才比得到（見 team）
 // 雙方的配招、點數、性格、特性、道具都照模擬用的（OP.GG 預設：simMon），Showdown 用「[Gen 9 Champions] Custom Game」（Lv50、不驗隊伍）。
@@ -26,7 +26,7 @@ vm.createContext(ctxG);
 vm.runInContext(['base-stats.js', 'mons-data.js', 'js/engine/core.js', 'js/engine/roles.js', 'js/engine/damage.js', 'js/engine/sim.js']
   .map(f => fs.readFileSync(path.join(R, f), 'utf8')).join('\n;\n') + `
 ;globalThis.E = { MONS, MON, MOVES, ITEMS, ABILS, ABIL_ZH, SIM_FIRST, SIM_SUP, SIM_PRI, SIM_TWICE, simMon, simStart, simTurn, simOver, simWinner, simAct, simCtx, simGreedyPick,
-  simCanUse, statOf, natOf, stoneOf, isStone, useOf, defaultSet, SIM_HEALMV, simSound, simBench, simNeed, simReplace, simOpts };`, ctxG);
+  simCanUse, statOf, natOf, stoneOf, isStone, useOf, defaultSet, SIM_HEALMV, simSound, simBench, simNeed, simReplace, simOpts, simImpr };`, ctxG);
 const E = ctxG.E;
 const alnum = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -117,7 +117,7 @@ function ourAct(st, s, k) {
   if (M.chg) return { t: 'mv', k: M.chg };
   if (M.v.rage) return { t: 'mv', k: M.v.rage.k };
   const ok = x => M.pp[x] > 0 && !(M.v.taunt && E.SIM_SUP[x]) && M.v.dis?.k !== x && !(E.SIM_TWICE.has(x) && M.last === x)
-    && !(M.v.hblock && E.SIM_HEALMV.has(x)) && !(M.v.tchop && E.simSound(x))
+    && !(M.v.hblock && E.SIM_HEALMV.has(x)) && !(M.v.tchop && E.simSound(x)) && !E.simImpr(st, s, x)
     && !(M.v.enc && M.moves.includes(M.v.encK) && M.pp[M.v.encK] > 0 && M.v.encK !== x)
     && !(M.lock && M.item === 'choice-scarf' && M.moves.includes(M.lock) && M.lock !== x);
   // 擊掌奇襲類上場第一回合以後兩邊都改出備用招（模擬的 simOpts 本來就不列，Showdown 能選但一定失敗；同 sdChoice）
@@ -165,7 +165,9 @@ function runSD(A, B, ma, mb, n) {
     const stats = [b.p1, b.p2].map(x => [x.pokemon[0].maxhp, ...STAT_ID.slice(1).map(s => x.pokemon[0].storedStats[s])]);
     let t1 = null, moved = 0;
     while (!b.ended && b.turn <= 100) {
-      b.makeChoices(sdChoice(b.p1, alnum(ma)), sdChoice(b.p2, alnum(mb)));
+      // 選的招被退回（被封印的招式在選招畫面看不出來，Showdown disableMove 的 isHidden；退回後選單會標成不能選）就照更新後的選單再選一次
+      [[b.p1, ma], [b.p2, mb]].forEach(([side, m]) => { const c = sdChoice(side, alnum(m)); if (c && !side.choose(c)) side.choose(sdChoice(side, alnum(m))); });
+      b.commitChoices();
       if (++moved === 1) t1 = fr();
     }
     out.push({ w: b.winner === 'A' ? 0 : b.winner === 'B' ? 1 : -1, turns: Math.min(b.turn, 100), t1, stats, log: r ? null : b.log });
@@ -207,20 +209,30 @@ async function cover() {
     u.abils.forEach(([k, p]) => put('ability', k, m.key, p));
     u.items.forEach(([k, p]) => { if (!E.isStone(k)) put('item', k, m.key, p); });
   }
-  // 能力值要先對得上（同一般模式）；每隻只比一次
-  const statOk = {}, okKey = k => { if (!(k in statOk)) { const x = sdSet(k); statOk[k] = !x.err && runSD(x, x, x.M.moves[0], x.M.moves[0], 1)[0].stats[0].every((v, i) => v === ourStats(k, x.M.b)[i]); } return statOk[k]; };
+  // 雙打才有人帶的招式（單打沒有使用率，如幫助、廣域防守）：照雙打的使用率找會帶的寶可夢（d，配招用雙打的預設），一樣在單打和 Showdown 對打
+  for (const m of E.MONS.filter(m => !m.base && m.rank.d > 0)) {
+    for (const [k, p] of E.useOf(m.key, 'd')?.moves || []) {
+      const x = T.move.get(k);
+      if (x && !x.d) continue;
+      const y = x || { w: 0, by: [], d: true };
+      y.w += p; y.by.push([m.key, p]); T.move.set(k, y);
+    }
+  }
+  // 能力值要先對得上（同一般模式）；每隻只比一次（雙打配招的每組各比一次）
+  const statSame = x => !x.err && runSD(x, x, x.M.moves[0], x.M.moves[0], 1)[0].stats[0].every((v, i) => v === ourStats(x.key, x.M.b)[i]);
+  const statOk = {}, okKey = k => { if (!(k in statOk)) statOk[k] = statSame(sdSet(k)); return statOk[k]; };
   const pool = ranked.filter(m => m.rank.s <= 100 && okKey(m.key)).map(m => sdSet(m.key));
   const holders = (t, k, x) => {
     const out = [], fams = new Set(), errs = [];
-    for (const [key] of x.by.slice().sort((a, b) => b[1] - a[1] || E.MON[a[0]].rank.s - E.MON[b[0]].rank.s)) {
-      const f = E.MON[key].base || key, ds = E.defaultSet(key, 's');
+    for (const [key] of x.by.slice().sort((a, b) => b[1] - a[1] || E.MON[a[0]].rank[x.d ? 'd' : 's'] - E.MON[b[0]].rank[x.d ? 'd' : 's'])) {
+      const f = E.MON[key].base || key, ds = x.d ? E.defaultSet(key, 'd') : E.defaultSet(key, 's');
       if (fams.has(f) || !ds) continue;
       const our = t === 'move' ? { ...ds, moves: ds.moves.includes(k) ? ds.moves : [...ds.moves.filter(Boolean).slice(0, 3), k] }
         : t === 'ability' && !E.MON[key].base ? { ...ds, ab: k } : t === 'item' ? { ...ds, item: k } : ds;
       const s = sdSet(key, our);
-      if (s.err || !okKey(key)) { errs.push(`${key}：${s.err || '能力值對不上'}`); continue; }
+      if (s.err || !(x.d ? statSame(s) : okKey(key))) { errs.push(`${key}：${s.err || '能力值對不上'}`); continue; }
       fams.add(f);
-      out.push(s);
+      out.push(x.d ? { ...s, fm: 'd' } : s);
       if (out.length >= HOLD) break;
     }
     return { out, errs };
@@ -231,7 +243,7 @@ async function cover() {
   for (const t of ['move', 'ability', 'item']) {
     if (ONLY && ONLY !== t) continue;
     for (const [k, x] of [...T[t]].sort((a, b) => b[1].w - a[1].w)) {
-      const tg = { t, k, zh: zhOf(t, k) || k, w: Math.round(x.w), cases: [], note: '' };
+      const tg = { t, k, zh: (zhOf(t, k) || k) + (x.d ? '，雙打才有人帶' : ''), w: Math.round(x.w), cases: [], note: '' };
       targets.push(tg);
       const sdx = t === 'move' ? dex.moves.get(k) : t === 'ability' ? dex.abilities.get(k) : dex.items.get(k);
       if (!sdx.exists) { tg.note = 'Showdown 沒有'; continue; }
@@ -244,7 +256,7 @@ async function cover() {
           const B = pickOf(others), ma = t === 'move' ? k : pickOf(noFirst(A.M)), mb = pickOf(noFirst(B.M));
           if (!ma || !mb || E.MOVES[ma][2] === 'status' && E.MOVES[mb][2] === 'status') continue;
           tg.cases.push(cases.length);
-          cases.push({ id: cases.length, A: { key: A.key, our: A.our }, B: { key: B.key, our: B.our }, ma, mb, n: N, seed: SEED * 100000 + cases.length, tg });
+          cases.push({ id: cases.length, A: { key: A.key, our: A.our, fm: A.fm }, B: { key: B.key, our: B.our }, ma, mb, n: N, seed: SEED * 100000 + cases.length, tg });
           break;
         }
       }
@@ -284,8 +296,8 @@ async function cover() {
     const noSD = tg.note === 'Showdown 沒有';
     if (noSD) unk--;
     lines.push(`${tg.note && !noSD ? '✘' : allKnown || noSD ? '△' : '✘'} [${tg.t}] ${tg.zh}（${tg.k}）使用率加總 ${tg.w}：${tg.note || `${fl.length}／${cs.length} 組有差異`}`);
-    // 重跑：node tools/sim_check.js one <A 的寫法> <B> <招A> <招B>（特性、道具和預設不同的接 +ab:／+it:）
-    const spec = x => { const ds = E.defaultSet(x.key, 's') || {}, o = x.our || ds; return x.key + (o.ab !== ds.ab ? `+ab:${o.ab}` : '') + (o.item !== ds.item ? `+it:${o.item}` : ''); };
+    // 重跑：node tools/sim_check.js one <A 的寫法> <B> <招A> <招B>（特性、道具和預設不同的接 +ab:／+it:，用雙打預設配招的接 +fm:d）
+    const spec = x => { const ds = E.defaultSet(x.key, x.fm || 's') || {}, o = x.our || ds; return x.key + (x.fm ? `+fm:${x.fm}` : '') + (o.ab !== ds.ab ? `+ab:${o.ab}` : '') + (o.item !== ds.item ? `+it:${o.item}` : ''); };
     for (const c of fl) lines.push(`    ${E.MON[c.A.key].zh}(${E.MOVES[c.ma]?.[0] || c.ma}) vs ${E.MON[c.B.key].zh}(${E.MOVES[c.mb]?.[0] || c.mb}) [${spec(c.A)} ${spec(c.B)} ${c.ma} ${c.mb}]：${c.f.join('；')}${known(c).length ? '　⇐ 已知：' + known(c).join('、') : ''}`);
   }
   console.log(lines.join('\n'));
@@ -356,7 +368,9 @@ function runSD3(TA, TB, MA, MB, n, swp = 0) {
           if (sw !== 'pass' && side.choose(sw)) return;
           side.clearChoice();
         }
-        if (cs[i] && !side.choose(cs[i])) throw new Error(`${side.id} 選「${cs[i]}」失敗：${side.choice.error}\n${JSON.stringify(side.activeRequest)}`);
+        // 被封印的招式選了會被退回（見 runSD），照更新後的選單再選一次
+        if (cs[i] && !side.choose(cs[i]) && !side.choose(sdChoice3(side, names[i], [MA, MB][i], [TA, TB][i].map(x => x.key))))
+          throw new Error(`${side.id} 選「${cs[i]}」失敗：${side.choice.error}\n${JSON.stringify(side.activeRequest)}`);
         if (!cs[i] && side.activeRequest && !side.activeRequest.wait) throw new Error(`${side.id} 沒有選：${JSON.stringify(side.activeRequest)}`);
       });
       b.commitChoices();
@@ -406,9 +420,17 @@ async function team() {
   }
   console.log(`\n${cases.length} 組、各 ${N} 場：有差異 ${bad} 組（${((Date.now() - t0) / 1000).toFixed(0)} 秒）`);
 }
-// 重跑一組 3 對 3 並印出兩邊第一場：node tools/sim_check.js team1 a,b,c d,e,f 招,招,招 招,招,招 [場數 200] [主動換人機率 0]
+// 寫法「寶可夢+fm:d+ab:特性+it:道具」→ sdSet：配招照預設（fm:d＝雙打的預設），想出的招 mv 不在前 4 招就換掉第 4 招，再換特性、道具（it: 後面空白＝不帶）
+function specSet(spec, mv) {
+  const [key, ...opt] = spec.split('+'), o = Object.fromEntries(opt.map(x => [x.slice(0, 2), x.slice(3)])), ds = E.defaultSet(key, o.fm === 'd' ? 'd' : 's');
+  const our = ds && { ...ds, moves: ds.moves.includes(mv) ? ds.moves : [...ds.moves.filter(Boolean).slice(0, 3), mv], ...('ab' in o && { ab: o.ab }), ...('it' in o && { item: o.it }) };
+  const x = sdSet(key, our);
+  if (x.err) { console.error(`${spec}：${x.err}`); process.exit(1); }
+  return x;
+}
+// 重跑一組 3 對 3 並印出兩邊第一場：node tools/sim_check.js team1 a,b,c d,e,f 招,招,招 招,招,招 [場數 200] [主動換人機率 0]（寶可夢可用 specSet 的寫法）
 function team1() {
-  const [ta, tb, ma, mb, n, swp] = process.argv.slice(3), TA = ta.split(',').map(k => sdSet(k)), TB = tb.split(',').map(k => sdSet(k));
+  const [ta, tb, ma, mb, n, swp] = process.argv.slice(3), TA = ta.split(',').map((k, i) => specSet(k, ma.split(',')[i])), TB = tb.split(',').map((k, i) => specSet(k, mb.split(',')[i]));
   const o = runOurs3(TA, TB, ma.split(','), mb.split(','), +(n || 200), 1, true, +(swp || 0)), s = runSD3(TA, TB, ma.split(','), mb.split(','), +(n || 200), +(swp || 0));
   console.log(compare(o, s).join('；') || '沒有差異');
   console.log('--- 我們（第一場）---\n' + o[0].log.join('\n'));
@@ -439,14 +461,8 @@ const one = args[0] === 'one' ? args.slice(1, 5) : null;
 const [CASES, N, SEED, TOP] = one ? [1, +(args[5] || 200), 1, 0] : [+(args[0] || 300), +(args[1] || 200), +(args[2] || 7), +(args[3] || 100)];
 const sets = {};
 if (one) {
-  // 寫法「寶可夢+ab:特性+it:道具」（同 cover 印的）：配招照預設，想出的招不在前 4 招就換掉第 4 招，再換特性、道具（it: 後面空白＝不帶）
-  one.slice(0, 2).forEach((spec, n) => {
-    const [key, ...opt] = spec.split('+'), o = Object.fromEntries(opt.map(x => [x.slice(0, 2), x.slice(3)])), ds = E.defaultSet(key, 's'), mv = one[2 + n];
-    const our = ds && { ...ds, moves: ds.moves.includes(mv) ? ds.moves : [...ds.moves.filter(Boolean).slice(0, 3), mv], ...('ab' in o && { ab: o.ab }), ...('it' in o && { item: o.it }) };
-    const x = sdSet(key, our);
-    if (x.err) { console.error(`${spec}：${x.err}`); process.exit(1); }
-    sets[spec] = x;
-  });
+  // 寫法同 cover 印的（見 specSet）
+  one.slice(0, 2).forEach((spec, n) => { sets[spec] = specSet(spec, one[2 + n]); });
 } else {
   const pool = E.MONS.filter(m => m.rank.s > 0 && m.rank.s <= TOP).map(m => m.key);
   for (const k of pool) {
