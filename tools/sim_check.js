@@ -1,5 +1,10 @@
 // 對戰模擬對照 Pokémon Showdown 冠軍版（mod champions）：檢查 js/engine 的模擬引擎、傷害計算有沒有算錯或漏算。
-// 第一次用先在 repo 根目錄裝 Showdown（裝在 tools/node_modules，不進 git）：npm install --prefix tools --ignore-scripts --no-package-lock
+// 對照的是 Showdown GitHub 主線固定在 41ba4797f（2026-11-15，含冠軍版 1.2 版 Regulation M-C 的修正；npm 最新的 0.11.11 是 2026-07 的，早於 1.2 版）。
+// 第一次用（都不進 git）：
+//   1. 在 repo 根目錄裝 npm 的 Showdown，只是為了它帶的 esbuild 等套件：npm install --prefix tools --ignore-scripts --no-package-lock
+//   2. 下載主線原始碼 https://codeload.github.com/smogon/pokemon-showdown/tar.gz/41ba4797f8bffa503111fb42dc1d66d8cdb8405c
+//      解開放到 tools/showdown，在 tools/showdown 執行 node -e "require('./tools/build-utils').transpile()" 編譯到 tools/showdown/dist
+//      （不用它的 node build：找不到套件時會自己跑 npm ci）
 // 用法（在 repo 根目錄）：
 //   node tools/sim_check.js [組數 300] [每組場數 200] [種子 7] [排名前幾名 100]
 //     從單打排名前幾名（含超級進化）隨機挑兩隻、各挑一招，雙方每回合固定出那招，兩邊各打幾場，比勝率、回合數、第一回合後剩血；
@@ -10,14 +15,13 @@
 //     對幾隻對手打（見 cover），列出有差異的項目與模擬不會出的招（上面的隨機組合只抽前幾名的預設 4 招，覆蓋不到的靠這個）
 //   node tools/sim_check.js team [組數 200] [每組場數 200] [種子 7]   3 對 3：換人相關的（撒菱類、出場特性、急速折返、紅牌、吼叫、接棒…）要有後排才比得到（見 team）
 // 雙方的配招、點數、性格、特性、道具都照模擬用的（OP.GG 預設：simMon），Showdown 用「[Gen 9 Champions] Custom Game」（Lv50、不驗隊伍）。
-// 想出的招不能選（PP 用完、被挑釁、定身、巨力錘連用、再來一次或講究圍巾鎖在別招）時兩邊都改出招式欄第一個能選的；擊掌奇襲類上場第一回合以後不當備用。
-// 注意：npm 上的 Showdown 不一定跟得上遊戲改版（0.11.11 是 2026-07 的，早於 1.2 版：祈願、吸取力量的 PP 遊戲已經改成 8），
-// 查到的這類招式資料比對前先改成冠軍版的（SD_FIX）；moves 模式比的是沒改的原始資料。
+// 想出的招不能選（PP 用完、被挑釁、定身、巨力錘連用、再來一次或講究圍巾鎖在別招、珍藏還有其他招沒用過）時兩邊都改出招式欄第一個能選的；擊掌奇襲類上場第一回合以後不當備用。
+// 注意：Showdown 不一定跟得上遊戲改版，查到的這類招式資料比對前先改成冠軍版的（SD_FIX）；moves 模式比的是沒改的原始資料。
 const fs = require('fs'), vm = require('vm'), path = require('path');
 const R = path.resolve(__dirname, '..');
 let SD;
-try { SD = require(require.resolve('pokemon-showdown', { paths: [__dirname] })); }
-catch { console.error('找不到 pokemon-showdown，先在 repo 根目錄執行：npm install --prefix tools --ignore-scripts --no-package-lock'); process.exit(1); }
+try { SD = require(path.join(__dirname, 'showdown')); }
+catch { console.error('找不到 tools/showdown/dist，照檔案開頭「第一次用」下載並編譯 Showdown 主線'); process.exit(1); }
 const { Battle, Dex } = SD, dex = Dex.mod('champions');
 
 // ---------- 載入網頁的計算引擎（不碰 DOM 的部分）----------
@@ -26,7 +30,7 @@ vm.createContext(ctxG);
 vm.runInContext(['base-stats.js', 'mons-data.js', 'js/engine/core.js', 'js/engine/roles.js', 'js/engine/damage.js', 'js/engine/sim.js']
   .map(f => fs.readFileSync(path.join(R, f), 'utf8')).join('\n;\n') + `
 ;globalThis.E = { MONS, MON, MOVES, ITEMS, ABILS, ABIL_ZH, SIM_FIRST, SIM_SUP, SIM_PRI, SIM_TWICE, simMon, simStart, simTurn, simOver, simWinner, simAct, simCtx, simGreedyPick,
-  simCanUse, statOf, natOf, stoneOf, isStone, useOf, defaultSet, SIM_HEALMV, simSound, simBench, simNeed, simReplace, simOpts, simImpr };`, ctxG);
+  simCanUse, statOf, natOf, stoneOf, isStone, useOf, defaultSet, SIM_HEALMV, simSound, simBench, simNeed, simReplace, simOpts, simImpr, simLastResortNo };`, ctxG);
 const E = ctxG.E;
 const alnum = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -35,10 +39,10 @@ const KNOWN = Object.fromEntries(Object.entries({
   // OP.GG 是草屬性，Showdown 冠軍版 mod 與 Smogon 冠軍版計算機是鋼屬性；2026-11-12 使用者選照 OP.GG 不改
   '捕獸夾屬性（照 OP.GG 的草，使用者決定）': 'snaptrap',
 }).flatMap(([why, ks]) => ks.split(' ').map(k => [k, why])));
-// 冠軍版改過、npm 的 Showdown 0.11.11 還沒跟上的招式資料（OP.GG 的才對）：比對前先把 Showdown 的改成冠軍版的（moves 模式不改，才看得到差在哪）。
-// 祈願、吸取力量 PP 12→8（1.2 版，Serebii／theclick／Automaton；冠軍版 PP＝(pp ÷ 5 ＋ 1) × 4，所以 pp 填 5）；
-// 劈開威力 70→80（Bulbapedia、Pokémon Zone）；流星突擊威力 150→170（Regulation M-C，Pokémon Zone、PokéBase）
-const SD_FIX = { wish: { pp: 5 }, strengthsap: { pp: 5 }, slash: { basePower: 80 }, meteorassault: { basePower: 170 } };
+// 冠軍版改過、對照的 Showdown 還沒跟上的招式資料（OP.GG 的才對）：比對前先把 Showdown 的改成冠軍版的（moves 模式不改，才看得到差在哪）。
+// 格式 { 招式 id: { pp: 5 } }（冠軍版 PP＝(pp ÷ 5 ＋ 1) × 4，8 PP 填 5）。目前沒有：以前補的祈願、吸取力量 PP 8，劈開 80、流星突擊 170，
+// 主線 41ba4797f 都已經是這樣（2026-09-09 commit 812501ede「Add Champions Regulation M-C」）
+const SD_FIX = {};
 // （Showdown 的招式物件是凍結的：照原本的建一個新的換進快取，對戰時 dex.moves.get 拿到的就是改過的）
 const fixSD = () => Object.entries(SD_FIX).forEach(([id, fix]) => { const old = dex.moves.get(id); dex.moves.moveCache.set(id, dex.deepFreeze(new old.constructor({ ...old, ...fix }))); });
 
@@ -117,7 +121,7 @@ function ourAct(st, s, k) {
   if (M.chg) return { t: 'mv', k: M.chg };
   if (M.v.rage) return { t: 'mv', k: M.v.rage.k };
   const ok = x => M.pp[x] > 0 && !(M.v.taunt && E.SIM_SUP[x]) && M.v.dis?.k !== x && !(E.SIM_TWICE.has(x) && M.last === x)
-    && !(M.v.hblock && E.SIM_HEALMV.has(x)) && !(M.v.tchop && E.simSound(x)) && !E.simImpr(st, s, x)
+    && !(M.v.hblock && E.SIM_HEALMV.has(x)) && !(M.v.tchop && E.simSound(x)) && !E.simImpr(st, s, x) && !(x === 'last-resort' && E.simLastResortNo(M))
     && !(M.v.enc && M.moves.includes(M.v.encK) && M.pp[M.v.encK] > 0 && M.v.encK !== x)
     && !(M.lock && M.item === 'choice-scarf' && M.moves.includes(M.lock) && M.lock !== x);
   // 擊掌奇襲類上場第一回合以後兩邊都改出備用招（模擬的 simOpts 本來就不列，Showdown 能選但一定失敗；同 sdChoice）

@@ -62,7 +62,8 @@ const FLAG = Object.fromEntries(Object.entries({
     + 'shadow-punch shadow-sneak slash snap-trap solar-blade spirit-break steel-roller stomping-tantrum stone-axe storm-throw sucker-punch '
     + 'super-fang supercell-slam superpower temper-flare thrash throat-chop thunder-fang thunder-punch trailblaze triple-axel trop-kick u-turn '
     + 'upper-hand volt-tackle waterfall wave-crash wild-charge wood-hammer x-scissor zen-headbutt',
-  punch: 'bullet-punch drain-punch dynamic-punch fire-punch hammer-arm headlong-rush ice-hammer ice-punch jet-punch mach-punch '
+  // 電光雙擊冠軍版是拳類（Serebii「Double Shock is now a Punching move」、Showdown mods/champions #12304「flagged in-game」）
+  punch: 'bullet-punch double-shock drain-punch dynamic-punch fire-punch hammer-arm headlong-rush ice-hammer ice-punch jet-punch mach-punch '
     + 'meteor-mash rage-fist shadow-punch thunder-punch',
   bite: 'bite crunch fire-fang ice-fang jaw-lock poison-fang psychic-fangs thunder-fang',
   bullet: 'acid-spray aura-sphere beak-blast bullet-seed energy-ball focus-blast gyro-ball pollen-puff pyro-ball rock-blast rock-wrecker seed-bomb '
@@ -422,19 +423,16 @@ function damageCalc(a, d, mk, o) {
     });
   };
   const pw = h => mk === 'triple-axel' ? 20 * (h + 1) : o.bps ? o.bps[h] : power;
-  const rollsAll = isFirst => Array.from({ length: hits }, (_, h) => rollsOf(pw(h), isFirst && !h, pb && h === 1));
-  // 畫皮（d.disguise：還沒被揭穿；破格無視）：這次的第一下沒有傷害，揭穿後扣最大 HP 的 1/8（Showdown disguise onDamage／onUpdate），之後連用照常；
-  // 破掉畫皮的這一招整招都當效果普通（Showdown disguise onEffectiveness 的 neutral：連續攻擊揭穿後的幾下也是，效果絕佳／不好的修正、抗性樹果都不算）
-  const disg = d.disguise && dab === 'disguise' && d.key === 'mimikyu';
-  let first0;
-  if (disg && r.eff !== 1) {
-    const keep0 = { eff: r.eff, berry: r.berry };
-    Object.assign(r, { eff: 1, berry: false });
-    first0 = rollsAll(true);
-    Object.assign(r, keep0);
-  } else first0 = rollsAll(true);
-  const later = disg || r.berry || (dab === 'multiscale' && full) || (knock && !keep) ? rollsAll(false) : first0;
-  if (disg) { r.disguise = true; notes.add(`${abilZh(dab)}擋下第一下（改扣 1/8）${hits > 1 && r.eff !== 1 ? '，這招其他下照效果普通算' : ''}`); }
+  // 畫皮（d.disguise：還沒被揭穿；破格無視）：這次的第一下沒有傷害，揭穿後扣最大 HP 的 1/8（Showdown disguise onDamage／onUpdate），之後連用照常。
+  // 擋下的那一下當效果普通（Showdown disguise onEffectiveness），抗性樹果不會吃；連續攻擊後面幾下照正常相剋（每下之間就變成揭穿的樣子），
+  // 樹果在第二下吃（fh＝吃樹果的那一下）。冠軍版 M-A 時期整招都當效果普通，1.2 版修掉（Showdown #12297）。
+  // 只打一下的被擋下時樹果還在，對位的之後連用（later）不再算樹果；模擬每次出招照當下重算，不受影響
+  const disg = d.disguise && dab === 'disguise' && d.key === 'mimikyu', fh = disg ? 1 : 0;
+  if (disg && hits === 1) r.berry = false;
+  const rollsAll = isFirst => Array.from({ length: hits }, (_, h) => rollsOf(pw(h), isFirst && h === fh, pb && h === 1));
+  const first0 = rollsAll(true);
+  const later = r.berry || (dab === 'multiscale' && full) || (knock && !keep) ? rollsAll(false) : first0;
+  if (disg) { r.disguise = true; notes.add(`${abilZh(dab)}擋下第一下（改扣 1/8）`); }
   const first = disg ? [Array(16).fill(Math.max(1, Math.floor(r.hp / 8))), ...first0.slice(1)] : first0;
   r.min = first.reduce((s, x) => s + x[0], 0);
   r.max = first.reduce((s, x) => s + x[15], 0);

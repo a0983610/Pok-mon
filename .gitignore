@@ -1,2 +1,3 @@
-# tools/sim_check.js 用的 Pokémon Showdown（npm install --prefix tools 裝的）
+# tools/sim_check.js 用的 Pokémon Showdown（npm install --prefix tools 裝的套件、tools/showdown 是下載編譯的主線）
 tools/node_modules/
+tools/showdown/

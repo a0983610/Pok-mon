@@ -317,7 +317,7 @@ const SIM_ST0 = () => ({ atk: 0, def: 0, spa: 0, spd: 0, spe: 0, acc: 0, eva: 0 
 // bind 被綁住類招式綁住 { s 用的那方, i 用的那隻在隊伍第幾隻, dur 還剩幾回合, div 每回合扣最大 HP 的 1/div, k 招式 }、
 // glaive 用了巨劍突擊還沒再出招、roost 這回合用了羽棲（失去飛行屬性）、unb 輕裝發動了、rage 逆鱗類鎖住 { k, n 共幾次, used 用了幾次 }）、
 // last 上一次用的招式（再來一次用）、pp 各招剩下的 PP（OP.GG 冠軍版的 PP）、bust 畫皮被揭穿了（換下場也不會恢復）、
-// fk 戰鬥切換後能力值用的型態（simStance；換下場變回 key）、hits 被攻擊打中幾下（憤怒之拳；換下場不重算）、
+// fk 戰鬥切換後能力值用的型態（simStance；換下場變回 key）、hits 被攻擊打中幾下（憤怒之拳；換下場歸零：Showdown mods/champions clearVolatile 的 timesAttacked）、
 // b0 複製抄特性前原本的 b（simTrace；換下場換回來）
 // 能算的招式：damageCalc 算得了的攻擊招式（含看體重的）、固定傷害、反擊類與一擊必殺（SIM_FIXED／SIM_REACT／SIM_OHKO）、SIM_SUP 的輔助招；其他（變身…）不列
 const simCanUse = k => canCalc(k) || !!SIM_FIXED[k] || !!SIM_REACT[k] || SIM_OHKO.has(k) || !!SIM_SUP[k] || SIM_VARBP.has(k);
@@ -522,13 +522,14 @@ function simFieldAb(st, s, M, t, hit = false) {
 }
 const simEntryField = (st, s, M) => simFieldAb(st, s, M, WX_AB[M.b.ab] || TER_AB[M.b.ab]);
 // 這一招現在要不要先蓄力（SIM_CHARGE；晴天的日光束、日光刃、下雨的電光束不用，SIM_CHARGE_WX）
-const simMustCharge = (st, M, k) => SIM_CHARGE.has(k) && M.chg !== k && simWxOf(st, M, k) !== SIM_CHARGE_WX[k];
-// M 出招 k 時看的天氣：超級日光自己出招時一律當晴天（Showdown pokemon.effectiveWeather：出招中的是超級日光、而且不是電光束）
-const simWxOf = (st, M, k) => M.b.ab === 'mega-sol' && k !== 'electro-shot' ? 'sun' : simWx(st);
+const simMustCharge = (st, M, k) => SIM_CHARGE.has(k) && M.chg !== k && simWxOf(st, M) !== SIM_CHARGE_WX[k];
+// M 出招時看的天氣：超級日光自己出招時一律當晴天（Showdown pokemon.effectiveWeather：出招中的是超級日光；電光束也是，下雨也要蓄力，
+// 冠軍版 1.2 起：Showdown #12318 拿掉電光束的例外）
+const simWxOf = (st, M) => M.b.ab === 'mega-sol' ? 'sun' : simWx(st);
 // M 出招 k 實際的屬性（氣象球照天氣、大地波動照場地、皮膚類把一般招式變屬性、濕潤之聲把聲音招式變水，同 damageCalc；掙扎沒有屬性）
 function simMoveType(st, M, k) {
   if (k === SIM_STRUGGLE) return '';
-  const wx = simWxOf(st, M, k), ter = simTer(st), ty = MOVES[k][1];
+  const wx = simWxOf(st, M), ter = simTer(st), ty = MOVES[k][1];
   if (k === 'weather-ball') return wx ? WB_TYPE[wx] : ty;
   if (k === 'terrain-pulse') return ter && simGround(M) ? TERRAIN_TYPE[ter] : ty;
   if (k === 'raging-bull' && RB_TYPE[simFk(M)]) return RB_TYPE[simFk(M)];
@@ -612,8 +613,8 @@ const simBeatUp = (st, A) => [A, ...st.sd[+A.id[0]].mons.filter(m => m !== A && 
 // D 那一方的牆、A 灼傷（特性毅力有異常狀態就照 damageCalc 的灼傷算，攻擊 ×1.5、不減半）、威力會變的招式（simVarBp）也算進去；
 // 雙方照場上現在的屬性（simTypes）與能力值用的型態（simFk），A 的變幻自如這次上場發動過了就不再每招本系、引火吸收過（v.ff）火屬性招式 ×1.5；
 // D 沒有道具時拍落不加成（noItem）、D 用了巨劍突擊還沒再出招時傷害 ×2（glaive）；特性會被複製換掉，所以也進快取的鍵；
-// 看場上狀況的特性：猛火類（PINCH_AB）看 A 剩下的 HP、大將看 A.v.fallen（見 simSwitch）；畫皮還在時給 damageCalc d.disguise（整招照效果普通、
-// rolls 第一下是揭穿扣的 1/8），第一下擋掉、揭穿在 simMove 處理；
+// 看場上狀況的特性：猛火類（PINCH_AB）看 A 剩下的 HP、大將看 A.v.fallen（見 simSwitch）；畫皮還在時給 damageCalc d.disguise（擋下的第一下當效果普通、
+// 後面幾下照正常相剋，rolls 第一下是揭穿扣的 1/8），第一下擋掉、揭穿在 simMove 處理；
 // last＝D 這回合已經出過招（特性分析 ×1.3；同對焦鏡，算期望值時不知道順序不給）
 function simCalc(ctx, st, A, D, k, crit, last = false) {
   const dSide = st.sd[+D.id[0]], bp = simVarBp(st, A, D, k, last), bps = k === 'beat-up' ? simBeatUp(st, A) : undefined;
@@ -889,7 +890,7 @@ function simSwitch(st, s, i, rnd, late = false, pass = null) {
   // 全能變身（Showdown zerotohero onSwitchOut）：帕路秋甘換下場就變成全能形態，之後一直是（hk，見 simFk）
   if (O.hp > 0 && O.b.ab === 'zero-to-hero' && !O.tf && O.key === 'palafin' && !O.hk && MON['palafin-hero']) O.hk = 'palafin-hero';
   simUntransform(O);
-  Object.assign(O, { st: SIM_ST0(), lock: '', chg: '', hide: false, rech: false, v: {}, last: '' });
+  Object.assign(O, { st: SIM_ST0(), lock: '', chg: '', hide: false, rech: false, v: {}, last: '', hits: 0 });
   delete O.fk;
   if (O.b0) { O.b = O.b0; delete O.b0; }
   side.act = i;
@@ -1098,14 +1099,16 @@ function simFutile(st, s, k) {
 }
 // 一方這回合能做的：招式（再來一次鎖住的那招；講究圍巾鎖住的那招（圍巾被拍落就解除，Showdown choicelock）；PP 用完的、被挑釁時的輔助招、被定身的招式、
 // 上一次剛用過的巨力錘（SIM_TWICE）、被封印的招式（simImpr）不能選；
-// 擊掌奇襲、迎頭一擊要上場後第一回合；一定失敗的輔助招不列，見 simFutile）、換人（後排還站著的；背水一戰、被對手的踩影困住、
-// 被綁住類綁著、被蛸固纏住、被縫影縫住（用的那隻還在場上，simBound；幽靈屬性不受影響）不能換）。
+// 擊掌奇襲、迎頭一擊要上場後第一回合；珍藏要其他招式都用過；一定失敗的輔助招不列，見 simFutile）、換人（後排還站著的；背水一戰、被對手的踩影困住、
+// 被綁住類綁著、被蛸固纏住、被縫影縫住（用的那隻還在場上，simBound；幽靈屬性不受影響）不能換，特性逃跑的都能換）。
 // 能選的招式（有 PP、沒被挑釁擋）一招都沒有時只能掙扎（或換人）；要休息的、蓄力中的、被逆鱗類鎖住的只能照做、不能換人；
 // 招式都會失敗又不能換人時是 none（什麼都不做）。
 // 連續 SIM_IDLE 回合雙方都沒扣血也沒換人時，打不到對手場上那隻的攻擊招式不能選（不然雙方都出無效招式會原地空轉）；只剩這種招式又不能換人就照舊
 const SIM_IDLE = 2;
 // s 這方的招式 k 被對手場上那隻封印住（Showdown imprison onFoeDisableMove：牠也會的招式不能選）
 const simImpr = (st, s, k) => { const T = simAct(st, 1 - s); return !!T.v.impr && T.hp > 0 && T.moves.includes(k); };
+// 珍藏用不了：只有這一招、或其他招式這場還有沒用過的（冠軍版選不到：Showdown mods/champions lastresort onDisableMove，#12469）
+const simLastResortNo = M => M.moves.length < 2 || M.moves.some(x => x !== 'last-resort' && !M.used?.[x]);
 function simOpts(ctx, st, s) {
   const M = simAct(st, s), T = simAct(st, 1 - s);
   if (M.rech) return [{ t: 'rech' }];
@@ -1113,7 +1116,7 @@ function simOpts(ctx, st, s) {
   if (M.v.rage) return [{ t: 'mv', k: M.v.rage.k }];
   const ks = M.v.enc && M.moves.includes(M.v.encK) && M.pp[M.v.encK] > 0 ? [M.v.encK] : M.lock && M.item === 'choice-scarf' && M.moves.includes(M.lock) ? [M.lock] : M.moves;
   const can = ks.filter(k => M.pp[k] > 0 && !(M.v.taunt && SIM_SUP[k]) && M.v.dis?.k !== k && !(SIM_TWICE.has(k) && M.last === k)
-    && !(M.v.hblock && SIM_HEALMV.has(k)) && !(M.v.tchop && simSound(k)) && !simImpr(st, s, k));
+    && !(M.v.hblock && SIM_HEALMV.has(k)) && !(M.v.tchop && simSound(k)) && !simImpr(st, s, k) && !(k === 'last-resort' && simLastResortNo(M)));
   let mv = !can.length ? [{ t: 'mv', k: SIM_STRUGGLE }]
     : can.filter(k => (!SIM_FIRST.has(k) || M.in === st.turn) && !simFutile(st, s, k)).map(k => ({ t: 'mv', k }));
   // 不能換人：背水一戰；對手場上那隻特性踩影（Showdown shadowtag：自己也是踩影、幽靈屬性不受影響；打完換人、被吹走照樣換）
@@ -1121,7 +1124,8 @@ function simOpts(ctx, st, s) {
   // 被綁住類綁著、被蛸固纏住、被縫影縫住（用的那隻還在場上；幽靈屬性不受影響）
   const held = x => !!x && st.sd[x.s].act === x.i && simAct(st, x.s).hp > 0;
   const bound = (simBound(st, M) || held(M.v.octo) || held(M.v.shackle)) && !simTypes(M).includes('ghost');
-  const sw = M.v.trap || tagged || bound ? [] : simBench(st, s).map(i => ({ t: 'sw', i }));
+  // 特性逃跑：上面這些都困不住（冠軍版：Showdown mods/champions runaway onTrapPokemon，#12303；Serebii「Now functions in battle」）
+  const sw = (M.v.trap || tagged || bound) && M.b.ab !== 'run-away' ? [] : simBench(st, s).map(i => ({ t: 'sw', i }));
   if (st.idle >= SIM_IDLE) {
     const hit = mv.filter(o => SIM_SUP[o.k] || o.k === SIM_STRUGGLE || simHit(ctx, st, M, T, o.k, false, true).eff);
     if (hit.length || sw.length) mv = hit;
@@ -1163,7 +1167,8 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
       if (x.kind === 'charge') M.v.charge = true;
       if (x.kind === 'focus') M.v.focus = true;
       if (x.mini) M.v.mini = true;
-      if (x.b) simBoost(st, s, M, x.b);
+      // 生長：晴天（含超級日光自己出招）攻擊、特攻各 +2（Showdown growth onModifyMove 看 effectiveWeather）
+      if (x.b) simBoost(st, s, M, k === 'growth' && simWxOf(st, M) === 'sun' ? { atk: 2, spa: 2 } : x.b);
       return;
     case 'drum': case 'soul': case 'retreat':
       if (simFutile(st, s, k)) return fail('HP 不夠或能力已經到頂');
@@ -1200,7 +1205,7 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
       if (M.hp >= M.max) return fail('HP 已經全滿');
       say('');
       // 光合作用、晨光、月光照天氣（SIM_SUNHEAL；this.modify 取整同 pokeRound），其他一半（生命水滴 1/4：x.q）
-      const f = SIM_SUNHEAL.has(k) && (SIM_SUNHEAL_F[simWxOf(st, M, k)] || 0.5);
+      const f = SIM_SUNHEAL.has(k) && (SIM_SUNHEAL_F[simWxOf(st, M)] || 0.5);
       simHeal(st, s, M, f ? pokeRound(M.max * Math.floor(f * 4096) / 4096) : Math.round(M.max / (x.q || 2)), '回復');
       // 羽棲：這回合失去飛行屬性（Showdown roost 的 self volatile，回合結束解除，見 simTypes）
       if (k === 'roost') M.v.roost = true;
@@ -1588,9 +1593,9 @@ function simStruggle(st, s, M, T, rnd) {
   // 急所（同一般攻擊：超幸運、焦點鏡、聚氣提高等級；戰鬥盔甲、硬殼盔甲不會被急所；照亂數抽，期望值模式不算）
   const rank = (M.b.ab === 'super-luck') + (M.item === 'scope-lens' || M.item === 'razor-claw') + (M.v.focus ? 2 : 0);
   const crit = () => !!rnd && !['battle-armor', 'shell-armor'].includes(T.b.ab) && rnd() < SIM_CRIT_P[Math.min(3, rank)], cz = c => c ? '（急所）' : '';
-  // hit＝打出傷害（打在替身上也算；畫皮擋下的 0 不算）：反作用力、生命寶珠只在這時扣（Showdown applyRecoilDamage 看 totalDamage）
+  // conn＝打到了（打在替身上、被畫皮擋下、挺住撐到傷害 0 也算）：反作用力、生命寶珠在這時扣
+  // （Showdown 冠軍版掙扎傷害 0 也照扣反作用力：spreadMoveHit 的 struggleRecoil，#12332）
   const conn = T.hp > 0 && !T.hide && !T.v.prot;
-  let hit = conn;
   if (T.hp <= 0) simLog(st, `${me}用掙扎，但沒有目標`);
   else if (T.hide) simLog(st, `${me}用掙扎，但打不到`);
   else if (T.v.prot) { simLog(st, `${me}用掙扎，被${tn}擋下`); simProtHit(st, s, M, T, rnd); }
@@ -1605,7 +1610,6 @@ function simStruggle(st, s, M, T, rnd) {
     if (d >= T.hp && T.hp >= T.max && (T.item === 'focus-sash' || T.b.ab === 'sturdy')) { d = T.hp - 1; held = T.item === 'focus-sash' ? ITEMS[T.item][0] : abilZh('sturdy'); if (T.item === 'focus-sash') simLoseItem(T); }
     else if (T.v.endure && d >= T.hp) { d = T.hp - 1; held = '挺住'; }
     const dd = Math.min(d, T.hp);
-    if (!dd) hit = false;
     T.hp -= dd;
     simFaint(st, T);
     T.hits = (T.hits || 0) + 1;
@@ -1622,7 +1626,7 @@ function simStruggle(st, s, M, T, rnd) {
     simOnHit(st, s, M, T, SIM_STRUGGLE, 1, rnd, true);
     simSitrus(st, 1 - s, T);
   }
-  if (hit && M.hp > 0) simHurt(st, s, M, Math.round(M.max / 4), '受到掙扎的反作用力', false);
+  if (conn && M.hp > 0) simHurt(st, s, M, Math.round(M.max / 4), '受到掙扎的反作用力', false);
   // 生命寶珠（Showdown lifeorb onAfterMoveSecondarySelf：打中就扣，打在畫皮上也扣，同 simMove）
   if (conn && M.hp > 0 && M.item === 'life-orb') simHurt(st, s, M, M.max / 10, '生命寶珠');
 }
@@ -1740,8 +1744,8 @@ function simMove(ctx, st, s, k, oa, oWill, rnd, pick, called = false) {
 }
 function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
   const M = simAct(st, s), me = simName(st, s), mz = simMoveZh(k);
-  // 特性強行打有追加效果的招式（Showdown hasSheerForce）：打完後的 AfterMoveSecondarySelf（生命寶珠、貝殼之鈴）、被打方的 AfterMoveSecondary
-  // （怒火沖天、逃脫按鍵、紅牌）、危險迴避都不發動（battle-actions.ts）
+  // 特性強行打有追加效果的招式（Showdown hasSheerForce）：打完後的 AfterMoveSecondarySelf（生命寶珠、貝殼之鈴、魔術師）不發動；
+  // 被打方的 AfterMoveSecondary（怒火沖天、順手牽羊、逃脫按鍵、紅牌）與危險迴避冠軍版照樣發動（Showdown mods/champions scripts，#12330、#12361）
   const sf = M.b.ab === 'sheer-force' && FLAG.secondary.has(k);
   // 不能出招（睡著、結冰、畏縮、混亂打到自己、麻痺、被挑釁／定身擋下）：蓄力中的招式也中斷、下次要重新蓄力（Showdown twoturnmove onMoveAborted）；同命也解除；
   // 也記成這回合出招失敗（Showdown runMove：BeforeMove 回傳 false 時 moveThisTurnResult＝false，下一回合的豁出去、跺腳威力 ×2）
@@ -1862,7 +1866,7 @@ function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
   }
   // 天氣讓蓄力招式直接打（電光束照樣先特攻 +1）
   if (SIM_CHARGE.has(k) && M.chg !== k) {
-    simLog(st, `${simWx(st) === simWxOf(st, M, k) ? FIELD_ZH[simWx(st)] : `${me}的${abilZh(M.b.ab)}`}，${mz}不用蓄力`);
+    simLog(st, `${simWx(st) === simWxOf(st, M) ? FIELD_ZH[simWx(st)] : `${me}的${abilZh(M.b.ab)}`}，${mz}不用蓄力`);
     if (k === 'electro-shot') simBoost(st, s, M, { spa: 1 });
   }
   Object.assign(M, { chg: '', hide: false });
@@ -1871,8 +1875,8 @@ function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
   if (SIM_LOSE_TYPE[k] && !simTypes(M).includes(SIM_LOSE_TYPE[k])) return fail(`已經沒有${TYPES[IDX[SIM_LOSE_TYPE[k]]].zh}屬性`);
   if (k === 'sucker-punch' && (!oWill || oa.t !== 'mv' || simCat(oa.k) === 'status')) return fail('對手沒有要出攻擊招式');
   if (k === 'upper-hand' && (!oWill || oa.t !== 'mv' || simCat(oa.k) === 'status' || simPri(st, T, oa.k) <= 0)) return fail('對手沒有要出先制招式');
-  // 珍藏：其他招式這場都用過才能用、只有這一招也失敗（Showdown lastresort onTry）
-  if (k === 'last-resort' && (M.moves.length < 2 || M.moves.some(x => x !== k && !M.used?.[x]))) return fail('還有其他招式沒用過');
+  // 珍藏：其他招式這場都用過才能用、只有這一招也失敗（Showdown lastresort onTry；選招時就擋掉了，見 simOpts，這裡擋的是叫出來的，如仿效、節拍器）
+  if (k === 'last-resort' && simLastResortNo(M)) return fail('還有其他招式沒用過');
   if (k === 'future-sight') {
     if (st.fut.some(f => f.s === 1 - s)) return fail('已經在預知未來');
     // 打中時用使用者當下的樣子算（Showdown futuremove 的 data.source 是那隻寶可夢本身：被浸水改屬性、換下場清掉能力變化都照現在的）
@@ -1894,8 +1898,8 @@ function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
   if (k === 'fickle-beam' && (M.v.fickle = !!rnd && rnd() < 0.3)) simLog(st, `${me}的${mz}威力加倍`);
   // 沒打中（打不到、被守住、沒有效果、沒命中）：記成出招失敗，SIM_CRASH 的招式扣撞擊傷害
   const crash = () => { M.v.mt.ok = false; if (SIM_CRASH.has(k)) simHurt(st, s, M, M.max / 2, '沒打中，摔傷自己'); };
-  // dealt＝打出的傷害（-1＝沒打中）；stay＝對手用逃脫按鍵、危險迴避換下場了，自己的急速折返類就不換
-  let dealt = -1, stay = false;
+  // dealt＝打出的傷害（-1＝沒打中）；out＝對手用了逃脫按鍵、危險迴避發動，出招結束時換下場（見最後）
+  let dealt = -1, out = false;
   // 超級龍頭地鼠的特性（piercing-drill，Showdown onHitProtect）：接觸招式穿透守住類，傷害變 ¼（getDamage 最後 modify 0.25），守住照樣留著
   // 無形拳同樣穿透（冠軍版 mods/champions：onHitProtect 同 piercing-drill，scripts.ts getDamage 的 bypassProtect ×0.25）
   // 對手那邊的廣域防守、快速防守（simGuard）同守住：佯攻、潛靈奇襲穿透（沒有 protect 標記），上面兩個特性的接觸招式穿透（¼）
@@ -2076,9 +2080,10 @@ function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
       if (k === 'glaive-rush') M.v.glaive = true;
       // 鐵滾輪、冰旋打中（含打在替身上）就清掉場地（Showdown steelroller／icespinner onAfterHit、onAfterSubDamage；鐵滾輪沒有場地時 damageCalc 已經當失敗）
       if ((k === 'steel-roller' || k === 'ice-spinner') && st.ter) simClearTer(st, '消失了');
-      // 岩斧、秘劍・千重濤：打中後在對手那邊撒隱形岩／一層撒菱（Showdown stoneaxe／ceaselessedge onAfterHit；自己還站著、特性不是強行）
+      // 岩斧、秘劍・千重濤：打中後在對手那邊撒隱形岩／一層撒菱（Showdown stoneaxe／ceaselessedge onAfterHit；特性不是強行；
+      // 自己被飛出的內在物等打倒也照撒：冠軍版 1.2 修掉 M-A 要自己還站著的錯，#12297）
       const hz = { 'stone-axe': 'sr', 'ceaseless-edge': 'spikes' }[k], th = st.sd[1 - s].haz;
-      if (hz && M.hp > 0 && M.b.ab !== 'sheer-force' && th[hz] < (hz === 'sr' ? 1 : 3)) { th[hz]++; simLog(st, `${me}在${tn}那邊撒了${SIM_HAZ_ZH[hz]}`); }
+      if (hz && M.b.ab !== 'sheer-force' && th[hz] < (hz === 'sr' ? 1 : 3)) { th[hz]++; simLog(st, `${me}在${tn}那邊撒了${SIM_HAZ_ZH[hz]}`); }
       if (gem) { simLoseItem(M); simLog(st, `${me}的${ITEMS[gem][0]}用掉了`); }
       // 搏命：自己倒下（Showdown damageCallback 在對手受到傷害前就 pokemon.faint()：倒下的順序在對手之前，雙方同時全倒時對手那方贏，見 simWinner）
       if (k === 'final-gambit' && M.hp > 0) { const tf = T.ft; M.hp = 0; simFaint(st, M); if (tf) [M.ft, T.ft] = [tf, M.ft]; simLog(st, `${me}倒下`); }
@@ -2099,13 +2104,13 @@ function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
         simOnHit(st, s, M, T, k, nt, rnd, contact, pend);
         // 拍落（Showdown knockoff onAfterHit，在凸凸頭盔等 DamagingHit 之後）：自己還站著就打掉對手的道具（超級石、黏著拿不掉）
         if (k === 'knock-off' && T.item && !MON[T.key].base && T.b.ab !== 'sticky-hold' && M.hp > 0) { simLog(st, `${me}打掉了${tn}的${ITEMS[T.item]?.[0] || T.item}`); simLoseItem(T, true); }
-        // 順手牽羊（Showdown pickpocket onAfterMoveSecondary；強行不發動）：沒有道具時被接觸招式打中，偷走攻擊方的道具（黏著偷不到）
-        else if (!sf && contact && T.b.ab === 'pickpocket' && !T.item && T.hp > 0 && M.item && M.b.ab !== 'sticky-hold') {
+        // 順手牽羊（Showdown pickpocket onAfterMoveSecondary；冠軍版強行照樣發動）：沒有道具時被接觸招式打中，偷走攻擊方的道具（黏著偷不到）
+        else if (contact && T.b.ab === 'pickpocket' && !T.item && T.hp > 0 && M.item && M.b.ab !== 'sticky-hold') {
           T.item = M.item; simLoseItem(M, true);
           simLog(st, `${tn}的${abilZh('pickpocket')}：偷走了${me}的${ITEMS[T.item]?.[0] || T.item}`);
         }
-        // 怒火沖天（Showdown berserk onAfterMoveSecondary）：這招讓 HP 從一半以上跌到一半以下時特攻 +1
-        if (!sf && T.b.ab === 'berserk' && T.hp > 0 && T.hp <= T.max / 2 && T.hp + td > T.max / 2) simBoost(st, 1 - s, T, { spa: 1 });
+        // 怒火沖天（Showdown berserk onAfterMoveSecondary；冠軍版強行照樣發動）：這招讓 HP 從一半以上跌到一半以下時特攻 +1
+        if (T.b.ab === 'berserk' && T.hp > 0 && T.hp <= T.max / 2 && T.hp + td > T.max / 2) simBoost(st, 1 - s, T, { spa: 1 });
         // 綁住類（SIM_BIND）：還沒被綁住的才綁
         if (SIM_BIND.has(k) && T.hp > 0 && !T.v.bind) {
           T.v.bind = { s, i: st.sd[s].act, dur: rnd && rnd() < 0.5 ? 6 : 5, div: M.item === 'binding-band' ? 6 : 8, k };
@@ -2139,11 +2144,11 @@ function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
         delete M.v.bind;
       }
       if (SIM_PHAZE.has(k) && !subbed && T.hp > 0 && simBench(st, 1 - s).length && !simOver(st) && !(SIM_ANCHOR.has(T.b.ab) && M.b.ab !== 'mold-breaker')) simSwitch(st, 1 - s, simPhazeTo(st, 1 - s, rnd), rnd);
-      // 逃脫按鍵、紅牌（Showdown onAfterMoveSecondary；打在替身上的不算）：被攻擊打中還站著時，逃脫按鍵自己換下場（打的那方急速折返類就不換）、
+      // 逃脫按鍵、紅牌（Showdown onAfterMoveSecondary；打在替身上的不算）：被攻擊打中還站著時，逃脫按鍵自己換下場（出招結束才換，見最後）、
       // 紅牌讓打的那方被換下場（後排隨機換上）；道具用掉，後排沒有就不發動
-      if (!sf && !subbed && T.hp > 0 && st.sd[1 - s].act === it && !simOver(st)) {
+      if (!subbed && T.hp > 0 && st.sd[1 - s].act === it && !simOver(st)) {
         if (T.item === 'eject-button' && simBench(st, 1 - s).length) {
-          simLog(st, `${tn}用了${ITEMS[T.item][0]}`); simLoseItem(T); simSwitch(st, 1 - s, pick(st, 1 - s), rnd); stay = true;
+          simLog(st, `${tn}用了${ITEMS[T.item][0]}`); simLoseItem(T); out = true;
         } else if (T.item === 'red-card' && M.hp > 0 && st.sd[s].act === ia && simBench(st, s).length) {
           simLog(st, `${tn}舉起了${ITEMS[T.item][0]}`); simLoseItem(T);
           // 紅牌照樣用掉，但打的那方是吸盤就不會被換下場（Showdown redcard forceSwitchFlag → dragOut 被 suctioncups 擋）
@@ -2156,15 +2161,24 @@ function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
   // 鐵蹄光線：打出傷害（含打在替身上）或沒打中（onMoveFail）都扣一半；打在畫皮上傷害 0 不扣（Showdown applyRecoilDamage 看 totalDamage）
   if (k === 'steel-beam' && M.hp > 0 && dealt !== 0) simHurt(st, s, M, Math.round(M.max / 2), '自己受到傷害', false);
   if (M.hp <= 0 && SIM_BOOM.has(k)) { M.hp = 0; simLog(st, `${me}倒下`); }
-  // 危險迴避（Showdown emergencyexit：這招讓 HP 從一半以上跌到一半以下）：自己換下場，打的那方急速折返類就不換
-  if (!sf && T.b.ab === 'emergency-exit' && st.sd[1 - s].act === it && T.hp > 0 && T.hp <= T.max / 2 && tHp0 > T.max / 2 && simBench(st, 1 - s).length && !simOver(st)) {
+  // 危險迴避（Showdown emergencyexit：這招讓 HP 從一半以上跌到一半以下；已經要用逃脫按鍵換下場的不再發動）：出招結束時自己換下場
+  if (!out && T.b.ab === 'emergency-exit' && st.sd[1 - s].act === it && T.hp > 0 && T.hp <= T.max / 2 && tHp0 > T.max / 2 && simBench(st, 1 - s).length && !simOver(st)) {
     simLog(st, `${tn}的${abilZh('emergency-exit')}發動`);
-    simSwitch(st, 1 - s, pick(st, 1 - s), rnd);
-    stay = true;
+    out = true;
   }
   // 逆鱗類：鎖招、解除與混亂（simRage；打中＝dealt 0 以上）
   if (SIM_RAGE.has(k) && st.sd[s].act === ia) simRage(st, s, M, k, dealt >= 0, rnd);
-  if (SIM_PIVOT.has(k) && dealt >= 0 && M.hp > 0 && !stay && st.sd[s].act === ia && !simOver(st) && simBench(st, s).length) simSwitch(st, s, pick(st, s), rnd);
+  // 出招結束的換人（Showdown 出招結束後，要換的各方同時收到換人要求）：對手逃脫按鍵、危險迴避（out），自己急速折返類（piv）。
+  // 冠軍版兩邊都換（逃脫按鍵、危險迴避不會取消對方的急速折返：Showdown mods/champions ejectbutton、emergencyexit，#12309、#12320）：
+  // 雙方各自決定換誰（都看換之前的場面），照換下場那隻的速度先後換上，都換上來才照速度發動出場效果（同 simReplace）
+  out = out && T.hp > 0 && st.sd[1 - s].act === it && !simOver(st);
+  const piv = SIM_PIVOT.has(k) && dealt >= 0 && M.hp > 0 && st.sd[s].act === ia && !simOver(st) && simBench(st, s).length > 0;
+  if (out && piv) {
+    const to = [0, 1].map(x => pick(st, x)), ord = simOrder(st);
+    ord.forEach(x => simSwitch(st, x, to[x], rnd, true));
+    simEntry(st, ord); simSeeds(st); simUpdate(st);
+  } else if (out) simSwitch(st, 1 - s, pick(st, 1 - s), rnd);
+  else if (piv) simSwitch(st, s, pick(st, s), rnd);
 }
 // 回合結束（Showdown onResidualOrder 的順序）：天氣、預知未來、祈願、青草場地、濕潤之軀、蛻皮、吃剩的東西、寄生種子、中毒、灼傷、詛咒、
 // 綁住類、挑釁／再來一次／定身／哈欠倒數、牆倒數、場地倒數、加速、心情不定、危險迴避；
