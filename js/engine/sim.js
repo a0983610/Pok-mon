@@ -2665,8 +2665,9 @@ function simMix(v) {
 }
 // phase 'turn'：雙方這回合的每種選擇組合（simOpts）都用期望值試算這一回合（同速時兩種先後各算一半），之後用簡單規則打完，得到對我方的分數；
 // phase 'replace'：倒下的那方每種補位（另一方 pass，兩方都倒就兩方都選）同樣試算。
-// 雙方照 simMix 的比例抽一種（rnd 抽；沒給 rnd 取機率最高的）。回傳 [我方, 對手] 的選擇
-function simDecide(ctx, st, phase, rnd) {
+// 雙方照 simMix 的比例抽一種（rnd 抽；沒給 rnd 取機率最高的）。回傳 [我方, 對手] 的選擇；
+// stats＝要不要附上 out.stats＝{ opts 雙方的選擇, v 各組合的分數（simValue，我方角度）, p 雙方的出招比例 }（tools/sim_ai.js 和老師比對用；雙方都只有一種選擇時不附）
+function simDecide(ctx, st, phase, rnd, stats) {
   const A = simPhaseOpts(ctx, st, 0, phase), B = simPhaseOpts(ctx, st, 1, phase);
   if (A.length === 1 && B.length === 1) return [A[0], B[0]];
   const pick = (c, s, hit) => simGreedyPick(ctx, c, s, hit);
@@ -2679,8 +2680,9 @@ function simDecide(ctx, st, phase, rnd) {
     const [x, tied] = run([a, b], 0);
     return tied ? (x + run([a, b], 1)[0]) / 2 : x;
   }));
-  const [pa, pb] = simMix(v);
-  return [A[simDraw(pa, rnd)], B[simDraw(pb, rnd)]];
+  const [pa, pb] = simMix(v), out = [A[simDraw(pa, rnd)], B[simDraw(pb, rnd)]];
+  if (stats) out.stats = { opts: [A, B], v, p: [pa, pb] };
+  return out;
 }
 // 打一場：sides＝[我方, 對手]，每方 { mons 帶出場的（simMySide／simOppScenarios 的 mons，先發排第一）}（會複製一份，不改到 sides）；
 // rnd 亂數；log＝要不要逐回合紀錄。
