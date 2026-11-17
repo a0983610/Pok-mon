@@ -39,7 +39,8 @@ const recInfo = (r, skip) => `<b>${r.mon.zh}</b>${chips(r.mon.types)}${r.role ? 
   + (r.mon.base && megaOn(skip).length ? `<span class="meta">⚠ 隊上已有超級進化（${megaOn(skip).map(k => MON[k].zh).join('、')}），一場只能進化一隻</span>` : '');
 // 隊上挑了的超級進化型態（skip＝不算的格子）
 const megaOn = skip => team.mons.filter((k, i) => k && i !== skip && MON[k].base);
-// 隊伍總評：把搭配、缺的角色、沒解的熱門威脅、屬性弱點集中列出；要補誰、換誰看最上面的「推薦」卡片（teamsim.js）
+// 隊伍總評：把搭配、沒解的熱門威脅、屬性弱點集中列出；要補誰、換誰看最上面的「推薦」卡片（teamsim.js）。
+// 缺的角色（換人、撒菱…）不列（2026-11-17 使用者選拿掉：照規則判斷，其實不一定要配；「隊伍角色」卡片的「隊伍該有」保留當參考）
 function summaryHTML(members) {
   const fmt = team.fmt, fz = FMT_ZH[fmt];
   const slots = members.filter(([, i]) => team.mons[i]).map(([, i]) => i), named = slots.map(i => team.mons[i]);
@@ -54,8 +55,6 @@ function summaryHTML(members) {
   // 一場只能超級進化一隻：隊上 2 隻以上時提醒（熱門威脅、速度線、角色都把牠們當成進化後；出戰選角會只讓其中一隻進化）
   if (megaOn().length > 1) out.push(line('⚠ 超級進化', `隊上有 ${megaOn().length} 隻超級進化（${megaOn().map(k => MON[k].zh).join('、')}），一場只能進化一隻；`
     + '下面的熱門威脅、速度線都當成每隻都進化了，實際帶出場時「出戰選角」只讓其中一隻進化、其他以原型上場（帶著超級石等於沒道具）'));
-  lackNeeds(named.map(k => roleOf(k, fmt, sets[k])).filter(Boolean), fmt).forEach(n =>
-    out.push(line('✘ 缺角色', n.zh)));
   const none = threatCheck(units, fmt, THREAT_N).filter(t => !t.level).map(t => t.mon);
   if (none.length) out.push(line('✘ 熱門威脅沒解', none.map(m => m.zh).join('、')));
   const rows = teamProfile(members.map(([s]) => s)), warn = rows.filter(r => r.warn), gaps = teamGaps(rows);
@@ -63,7 +62,7 @@ function summaryHTML(members) {
     [warn.length && `要注意 ${warn.map(r => T[r.atk].zh).join('、')}`, gaps.length && `缺口 ${gaps.map(id => T[id].zh).join('、')}`].filter(Boolean).join('；')));
   return `<div class="res-head">隊伍總評<span class="muted small">（${fz}；${members.length} 隻，其中 ${named.length} 隻挑了寶可夢）</span></div>`
     + (out.length ? out.join('') : '<p class="b-sum">✔ 目前沒有明顯問題。</p>')
-    + '<p class="note">※ 問題整理自下面各卡片（隊伍角色、隊伍特性與場地招式、弱點總表、聯防搭檔、熱門威脅檢查）；要補誰、換誰看最上面的「推薦」。</p>';
+    + '<p class="note">※ 問題整理自下面各卡片（隊伍特性與場地招式、弱點總表、聯防搭檔、熱門威脅檢查）；要補誰、換誰看最上面的「推薦」。</p>';
 }
 // 隊伍角色：挑了寶可夢的隊員依常用招式判斷角色、列出常用招式與效果，並對照 NEEDS 標出隊伍還缺什麼
 const MAIN_ZH = { phys: '物攻', spec: '特攻', sup: '輔助' };
@@ -449,7 +448,7 @@ function renderTeam() {
 
   const members = team.slots.map((s, i) => [s, i]).filter(([s]) => s.length);
   $('#tSum').innerHTML = members.length ? summaryHTML(members)
-    : '<p class="empty">選好隊員後，這裡會集中列出隊伍的問題（搭配、缺的角色、沒解的熱門威脅、屬性弱點）。</p>';
+    : '<p class="empty">選好隊員後，這裡會集中列出隊伍的問題（搭配、沒解的熱門威脅、屬性弱點）。</p>';
   $('#tRole').innerHTML = members.length ? roleHTML(members)
     : '<p class="empty">挑好隊員的寶可夢後，這裡會依 OP.GG 常用招式判斷每隻是物攻、特攻輸出還是輔助，列出常用招式與效果，並標出隊伍還缺哪些角色。</p>';
   $('#tTrait').innerHTML = members.length ? traitHTML(members)

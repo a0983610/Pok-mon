@@ -61,15 +61,26 @@ function tSimStart() {
   if (tSim.run || team.fmt !== 's' || !tRecCanSim(mine, plan)) return;
   const teams = simMetaTeams('s');
   tSim.run = { sig: tSimSig(), plan, teams, vs: [], jobs: [], q: [], wks: [], idle: [], done: 0, total: 0, expect: tRecTeams(mine, plan) * teams.length * TSIM_SC * TSIM_K,
-    planned: false, stop: false, local: false, timer: 0, draw: 0, wait: false, t0: performance.now(), ctx: null };
+    planned: false, stop: false, local: false, timer: 0, draw: 0, wait: false, base: false, t0: performance.now(), ctx: null };
   tSim.res = null;
   tSimDraw();
   tSimPlanAll(tSim.run, mine, plan);
 }
-// 先排原本的隊伍（滿 BRING_N 隻才排），再排每個候選放進去的隊伍（候選的配招用預設 defaultSet）
+// 先排原本的隊伍（滿 BRING_N 隻才排），再排每個候選放進去的隊伍（候選的配招用預設 defaultSet）。
+// 6 格都選了（換人）：等原本的隊伍打完，照隊員貢獻（tSimMem 的 per）低的格子先排（每格都會試，只是先出結果；使用者選的）
 async function tSimPlanAll(run, mine, plan) {
   if (mine.length >= BRING_N.s) await tSimAdd(run, mine, null);
-  for (const [slot, cands] of plan.cands) {
+  let order = plan.cands;
+  if (plan.add < 0 && run.vs[0] && !run.vs[0].swap) {
+    run.base = true;
+    tSimDraw();
+    while (!run.stop && run.done < run.total) await tSimTick(200);
+    run.base = false;
+    if (run.stop) return;
+    const per = new Map(tSimWeak(run.vs[0]).map((x, r) => [x.slot, r]));
+    order = plan.cands.slice().sort((x, y) => per.get(x[0]) - per.get(y[0]));
+  }
+  for (const [slot, cands] of order) {
     await tSimTick();
     for (const c of cands) {
       if (run.stop) return;
@@ -85,7 +96,7 @@ async function tSimAdd(run, mine, swap) {
   const plans = await tSimPlans(run, mine);
   if (!plans) return;
   const v = run.vs.length;
-  run.vs.push({ mine, swap, plans, win: [], opp: {} });
+  run.vs.push({ mine, swap, plans, win: [], opp: {}, mem: {} });
   plans.forEach((p, t) => p.scs.forEach((sc, r) => {
     for (let i = 0; i < TSIM_K; i++) {
       run.q.push(run.jobs.length);
@@ -95,7 +106,7 @@ async function tSimAdd(run, mine, swap) {
   }));
   tSimPump(run);
 }
-// 隊伍 mine 對每隊對手的帶法 [{ my 我方帶出場的, scs 對手前 TSIM_SC 種帶法 }]（對應 run.teams）。對位勝率還沒算好的先交給背景計算，
+// 隊伍 mine 對每隊對手的帶法 [{ my 我方帶出場的, slots 帶出場的是哪幾格（順序同 my）, scs 對手前 TSIM_SC 種帶法 }]（對應 run.teams）。對位勝率還沒算好的先交給背景計算，
 // 算好再選一次（正面的勝率算好才知道要不要算換上來那場，所以最多重選 2 次）；每 30 毫秒讓畫面喘口氣。停止時回傳 null
 async function tSimPlans(run, mine) {
   for (let round = 0; ; round++) {
@@ -104,7 +115,7 @@ async function tSimPlans(run, mine) {
     for (const T of run.teams) {
       if (run.stop) return null;
       const p = simMyPlan(mine, T.keys, 's');
-      plans.push({ my: simMySide(mine, p.slots, p.evo, 's'), scs: simOppScenarios(T.keys, mine.map(x => x.key), 's').slice(0, TSIM_SC) });
+      plans.push({ my: simMySide(mine, p.slots, p.evo, 's'), slots: p.slots, scs:simOppScenarios(T.keys, mine.map(x => x.key), 's').slice(0, TSIM_SC) });
       if (performance.now() - t0 > 30) { await tSimTick(); t0 = performance.now(); }
     }
     pBgFlush();
@@ -153,11 +164,15 @@ function tSimLocal(run) {
   }
   if (run.q.length && !run.stop) run.timer = setTimeout(() => tSimLocal(run), 0);
 }
-// 記一場：贏記 1（打滿回合平手、輸記 0，同模擬分頁的勝率）；原本的隊伍另外記對手每隻帶出場的場數、那幾場我方贏幾場、打倒我方幾隻
+// 記一場：贏記 1（打滿回合平手、輸記 0，同模擬分頁的勝率）；原本的隊伍另外記對手每隻帶出場的場數、那幾場我方贏幾場、打倒我方幾隻，
+// 和我方每格（mem，照帶出場的順序對回格子）帶出場的場數、打倒幾隻、倒下幾次
 function tSimSave(run, id, out) {
   const j = run.jobs[id], V = run.vs[j.v], win = out.res > 0 ? 1 : 0;
   V.win[j.k] = win;
-  if (!V.swap) out.mons[1].forEach(m => { const t = V.opp[m.key] ||= { n: 0, win: 0, kos: 0 }; t.n++; t.win += win; t.kos += m.kos; });
+  if (!V.swap) {
+    out.mons[1].forEach(m => { const t = V.opp[m.key] ||= { n: 0, win: 0, kos: 0 }; t.n++; t.win += win; t.kos += m.kos; });
+    out.mons[0].forEach((m, q) => { const t = V.mem[V.plans[j.t].slots[q]] ||= { n: 0, kos: 0, down: 0 }; t.n++; t.kos += m.kos; if (m.hp <= 0) t.down++; });
+  }
   run.done++;
   tSimCheck(run);
 }
@@ -207,6 +222,16 @@ function tRecPut(slot, key) {
 const tSimPct = x => `${Math.round(x * 1000) / 10}%`;
 // 勝率 { n 場數, w 贏的場數 }（ks＝場次索引，沒給是全部）
 const tSimRate = (V, ks) => (ks || Object.keys(V.win)).reduce((a, k) => V.win[k] == null ? a : { n: a.n + 1, w: a.w + V.win[k] }, { n: 0, w: 0 });
+// 原本的隊伍每格的貢獻（隊伍分析的格子順序）：{ slot, key, teams 選角帶出場的隊數, lead 先發的隊數（每隊對手我方照一種帶法），
+//   n 打完的場次裡帶出場的場數, kos 打倒幾隻, down 倒下幾次, per 每場平均打倒（打完的全部場次算，沒帶出場的算 0）}
+function tSimMem(base) {
+  const all = tSimRate(base).n;
+  return base.mine.map(x => { const m = base.mem[x.slot] || { n: 0, kos: 0, down: 0 };
+    return { slot: x.slot, key: x.key, teams: base.plans.filter(p => p.slots.includes(x.slot)).length,
+      lead: base.plans.filter(p => p.slots[0] === x.slot).length, ...m, per: all ? m.kos / all : 0 }; });
+}
+// 貢獻低的在前（換人先試）：每場平均打倒少的，一樣再比帶出場的隊數少的
+const tSimWeak = base => tSimMem(base).sort((x, y) => x.per - y.per || x.teams - y.teams);
 // V 和 base 比：兩邊都打完的同一場配對，d＝差值平均、se＝差值的標準誤、from／to＝這些場次 base 與 V 的勝率
 function tSimDiff(base, V) {
   const ds = Object.keys(V.win).filter(k => base.win[k] != null).map(k => V.win[k] - base.win[k]), n = ds.length;
@@ -231,7 +256,7 @@ function tSimHTML() {
     + '再用模擬決定補誰最好；放進去後接著推薦下一格，一格一格補到 6 隻。6 隻都選了會推薦換掉誰、換成誰。</p>';
   const mine = simMine(), plan = tRecPlan(), add = plan.add >= 0, can = tRecCanSim(mine, plan), R = tSim.run || tSim.res;
   const n = simMetaTeams('s').length, per = n * TSIM_SC * TSIM_K, kinds = tRecTeams(mine, plan), wk = simWkN();
-  const intro = `<p class="muted small b-intro">${add ? `第 ${plan.add + 1} 格（第一個空格）補誰` : `6 格都選了：每隻換成 ${TSIM_ALT} 個候選，看換誰最好`}。`
+  const intro = `<p class="muted small b-intro">${add ? `第 ${plan.add + 1} 格（第一個空格）補誰` : `6 格都選了：每隻換成 ${TSIM_ALT} 個候選，看換誰最好（模擬時先打原本的隊伍看隊員貢獻，貢獻低的格子先試）`}。`
     + '候選照聯防挑（同「聯防搭檔」只看屬性：放進去後隊上沒人扛的弱點最少的排前面）；'
     + `按「用模擬排序」把候選放進隊伍，整隊打 ${n} 隊熱門隊伍（3 對 3），照勝率決定${add ? '補誰' : '換誰'}。點寶可夢直接放進那一格${add ? '，接著推薦下一格' : ''}。</p>`;
   const btn = tSim.run ? '<button class="btn" data-tsim="stop">停止</button>'
@@ -240,7 +265,7 @@ function tSimHTML() {
     + `${wk ? `（${wk} 個背景計算一起打）` : ''}；改隊伍會停掉` : `至少要挑 ${BRING_N.s - (add ? 1 : 0)} 隻寶可夢才能用模擬排序（3 對 3 要湊滿 ${BRING_N.s} 隻，只選屬性的不算）`}</span></div>`;
   const prog = tSim.run ? `<p class="muted small b-intro">⏳ 打了 ${R.done}／${R.planned ? R.total : `約 ${R.expect}`} 場`
     + (R.done ? `，預估還要 ${simEta((performance.now() - R.t0) / R.done * Math.max(0, (R.planned ? R.total : R.expect) - R.done))}` : '')
-    + (R.wait ? '・先等對位勝率算好再選角' : '') + '。結果會邊打邊更新。</p>'
+    + (R.wait ? '・先等對位勝率算好再選角' : '') + (R.base ? '・先打原本的隊伍看隊員貢獻，打完照貢獻低的格子先試換人' : '') + '。結果會邊打邊更新。</p>'
     : R?.stop ? `<p class="muted small b-intro">已停止，只打了 ${R.done} 場。</p>` : '';
   const nm = k => MON[k].zh;
   const items = plan.cands.flatMap(([slot, cs]) => cs.map(c => ({ slot, c, V: R?.vs.find(V => V.swap?.slot === slot && V.swap.to === c.key) })));
@@ -270,7 +295,19 @@ function tSimHTML() {
       + `<div class="b-rec">${scored.slice(0, show).map(row).join('')}</div>`
       + (scored.length > show ? tFoldHTML('tsimmore', `其他 ${scored.length - show} 種換法（點開看）`, `<div class="b-rec">${scored.slice(show).map((x, i) => row(x, i + show)).join('')}</div>`) : '');
   }
-  return head + intro + bar + prog + list + (base && tSimRate(base).n ? tSimTeamHTML(R, base) : '') + tRecNote();
+  return head + intro + bar + prog + list + (base && tSimRate(base).n ? tSimMemHTML(R, base, !add) + tSimTeamHTML(R, base) : '') + tRecNote();
+}
+// 隊員貢獻（原本的隊伍打的結果，不收合）：每隻帶出場幾隊、先發幾隊、帶出場時平均打倒幾隻、倒下比例；swap＝6 格都選了，列出換人先試的順序
+function tSimMemHTML(R, base, swap) {
+  const nm = k => MON[k].zh, T0 = base.plans.length, all = tSimRate(base).n, r2 = x => Math.round(x * 100) / 100;
+  const row = x => `<div class="x-line"><b>${x.slot + 1} ${nm(x.key)}</b>` + (x.teams
+    ? `<span class="meta">帶出場 ${x.teams}／${T0} 隊（先發 ${x.lead} 隊）`
+      + (x.n ? `・帶出場時平均打倒 ${r2(x.kos / x.n)} 隻、倒下 ${Math.round(x.down / x.n * 100)}%（${x.n} 場）` : '') + '</span>'
+    : `<span class="x-msg">${T0} 隊都沒帶出場</span>`) + '</div>';
+  return `<h3>隊員貢獻<span class="muted small">（原本的隊伍打了 ${all} 場${R === tSim.run ? '，邊打邊更新' : ''}）</span></h3>`
+    + tSimMem(base).map(row).join('')
+    + (swap ? `<p class="muted small b-intro">換人時貢獻低的格子先試（每場平均打倒少的先，沒帶出場的場次算 0）：`
+      + `${tSimWeak(base).map(x => `${x.slot + 1} ${nm(x.key)}`).join(' → ')}；每格都會試，看夠了可以按停止。</p>` : '');
 }
 // 原本的隊伍打的結果（收合）：整隊勝率、最難打的隊伍、最常打倒我方的
 function tSimTeamHTML(R, base) {
@@ -301,7 +338,10 @@ const tRecNote = () => tFoldHTML('tsimnote', '怎麼挑候選、怎麼排（點�
   + '配招照 OP.GG 最常見、道具同一隊不重複、超級石使用率過半的當成超級進化（同「模擬對戰」的對手）。帶法：我方照「出戰選角」第 1 名的組合與先發（一場只能超級進化一隻）；'
   + `對手照「出戰選角」的「對手可能帶的」前 ${TSIM_SC} 種（對手看不到我方的配招），各打 ${TSIM_K} 場。出招：雙方都用「模擬對戰」的「快速」（每步把雙方各種出法都試算一回合，照算出來的比例抽）；`
   + '勝率＝贏的場數／場數（打滿回合的平手不算贏）。候選的配招用預設（OP.GG 最常見），放進去後重新選角，打同一批對手；同一場用同一組亂數，所以差值比各自的勝率準。'
-  + `「最常打倒我方的」只算原本的隊伍、出場 ${TSIM_K} 場以上的。模擬的規則（算到哪些效果）見「模擬對戰」分頁的說明；結果只存在這個頁面，重新整理或改隊伍就沒了。</p>`);
+  + `「最常打倒我方的」只算原本的隊伍、出場 ${TSIM_K} 場以上的。`
+  + '「隊員貢獻」也只算原本的隊伍（挑了 3 隻以上才打）：帶出場／先發幾隊照選角（每隊對手我方照一種帶法），平均打倒、倒下照帶出場的場次；'
+  + '6 格都選了時，換人照「每場平均打倒」（全部場次算，沒帶出場的算 0）少的格子先試，再比帶出場的隊數，每格都會試，只是先出結果。'
+  + '輔助手打倒的本來就少，貢獻低不一定代表換掉最好，換誰還是看模擬排序的結果。模擬的規則（算到哪些效果）見「模擬對戰」分頁的說明；結果只存在這個頁面，重新整理或改隊伍就沒了。</p>');
 // 雙打：還沒有模擬，照原本的規則（recommendMon，含能對付幾隻沒解的熱門威脅）排前 5 名；6 格都選了不推薦
 function tRecDoublesHTML() {
   const head = '<div class="res-head">推薦<span class="muted small">（雙打：補誰）</span></div>';
