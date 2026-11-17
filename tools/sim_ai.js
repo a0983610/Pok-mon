@@ -66,9 +66,12 @@ function play(T, seed, log, mk) {
   return { w: E.simWinner(st), turns: st.turn, log: st.log };
 }
 // vs：第 s 方用 D[s] 選（各自的計算快取與亂數；打完換人換誰也用自己的簡單規則）
-const mkVs = (D, seed) => st => {
+// ms[s]：第 s 方選擇花的時間累計（毫秒）
+const mkVs = (D, seed, ms) => st => {
   const ctx = D.map(d => d.E.simCtx('s')), rnd = [0, 1].map(s => engine().simRng(seed ^ SALT[s]));
-  return { decide: phase => [0, 1].map(s => D[s].decide(ctx[s], st, phase, rnd[s])[s]), pick: (c, s, hit) => D[s].E.simGreedyPick(ctx[s], c, s, hit) };
+  const timed = s => phase => { const t0 = performance.now(), a = D[s].decide(ctx[s], st, phase, rnd[s])[s]; ms[s] += performance.now() - t0; return a; };
+  const dec = [timed(0), timed(1)];
+  return { decide: phase => [dec[0](phase), dec[1](phase)], pick: (c, s, hit) => D[s].E.simGreedyPick(ctx[s], c, s, hit) };
 };
 
 // ---------- diff：快速和老師比對 ----------
@@ -121,9 +124,10 @@ if (!isMainThread) {
   parentPort.on('message', c => {
     if (mode === 'vs') {
       // 第一場 A 是第 0 方，第二場交換；A 的分數：贏 1、平手 0.5
-      const g = [[D[0], D[1]], [D[1], D[0]]].map(pair => play(c.T, c.seed, false, mkVs(pair, c.seed)));
+      const ms = [[0, 0], [0, 0]], g = [[D[0], D[1]], [D[1], D[0]]].map((pair, i) => play(c.T, c.seed, false, mkVs(pair, c.seed, ms[i])));
       const scA = [g[0].w === 0 ? 1 : g[0].w === 1 ? 0 : 0.5, g[1].w === 1 ? 1 : g[1].w === 0 ? 0 : 0.5];
-      parentPort.postMessage({ id: c.id, sc: scA, turns: g.map(x => x.turns) });
+      // A 第一場是第 0 方、第二場是第 1 方
+      parentPort.postMessage({ id: c.id, sc: scA, turns: g.map(x => x.turns), ms: [ms[0][0] + ms[1][1], ms[0][1] + ms[1][0]] });
     } else {
       const out = [], E = engine(), r = play(c.T, c.seed, true, mkDiff(D[0], D[1], c.seed, c.id, out));
       out.push({ type: 'game', g: c.id, T: c.T.map(ks => ks.map(k => E.MON[k].zh)), w: r.w, turns: r.turns, log: r.log });
@@ -161,14 +165,15 @@ async function main() {
   if (mode === 'vs') {
     const [A, B] = a, [N, SEED, TOP] = [+(a[2] || 200), +(a[3] || 7), +(a[4] || 60)];
     if (!A || !B) throw new Error('用法：node tools/sim_ai.js vs 決策A 決策B [組數 200] [種子 7] [排名前幾名 60]');
-    const cases = teams(N, SEED, TOP), sc = [], turns = [];
+    const cases = teams(N, SEED, TOP), sc = [], turns = [], ms = [0, 0];
     console.log(`A＝${A}、B＝${B}：單打前 ${TOP} 名隨機兩隊 ${N} 組，每組交換決策各打一場`);
-    const sec = await runAll('vs', [A, B], cases, m => { sc.push((m.sc[0] + m.sc[1]) / 2); turns.push(...m.turns); });
+    const sec = await runAll('vs', [A, B], cases, m => { sc.push((m.sc[0] + m.sc[1]) / 2); turns.push(...m.turns); ms[0] += m.ms[0]; ms[1] += m.ms[1]; });
     const all = sc.length, mean = sc.reduce((t, x) => t + x, 0) / all, sd = Math.sqrt(sc.reduce((t, x) => t + (x - mean) ** 2, 0) / Math.max(1, all - 1));
     const res = { win: 0, lose: 0, draw: 0 };
     sc.forEach(x => { res[x > 0.5 ? 'win' : x < 0.5 ? 'lose' : 'draw']++; });
     console.log(`A 得分率 ${(mean * 100).toFixed(1)}% ± ${(sd / Math.sqrt(all) * 100).toFixed(1)}（標準誤）；兩場合計 A 較好 ${res.win} 組、B 較好 ${res.lose} 組、平分 ${res.draw} 組；` +
       `平均 ${(turns.reduce((t, x) => t + x, 0) / turns.length).toFixed(1)} 回合（${sec.toFixed(0)} 秒）`);
+    console.log(`選擇花的時間（單一執行緒、每場平均）：A ${(ms[0] / turns.length).toFixed(0)} 毫秒、B ${(ms[1] / turns.length).toFixed(0)} 毫秒`);
   } else if (mode === 'diff') {
     const OUT = a[0], [N, TEACH, SEED, TOP] = [+(a[1] || 100), a[2] || 'tree:800', +(a[3] || 7), +(a[4] || 60)];
     if (!OUT) throw new Error('用法：node tools/sim_ai.js diff 輸出檔 [場數 100] [老師 tree:800] [種子 7] [排名前幾名 60]');
