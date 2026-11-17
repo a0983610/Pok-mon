@@ -2665,8 +2665,12 @@ function simMix(v) {
 }
 // phase 'turn'：雙方這回合的每種選擇組合（simOpts）都用期望值試算這一回合（同速時兩種先後各算一半），之後用簡單規則打完，得到對我方的分數；
 // phase 'replace'：倒下的那方每種補位（另一方 pass，兩方都倒就兩方都選）同樣試算。
+// 推演用期望值沒有亂數，「怎樣都會輸／都會贏」時好幾種選擇推演到底的局面常常一模一樣，原本就選排在前面的（打不到的招式、被抵抗的招式也會選）；
+// 所以分數再加上這一回合（或補位）剛打完的局面 × SIM_TIE_W，推演結果一樣時偏向當下局面比較好的（2026-11-17 tools/sim_ai.js diff：
+// 和樹搜尋 800 次選得不一樣的損失約三分之一是這種平手）。
 // 雙方照 simMix 的比例抽一種（rnd 抽；沒給 rnd 取機率最高的）。回傳 [我方, 對手] 的選擇；
 // stats＝要不要附上 out.stats＝{ opts 雙方的選擇, v 各組合的分數（simValue，我方角度）, p 雙方的出招比例 }（tools/sim_ai.js 和老師比對用；雙方都只有一種選擇時不附）
+const SIM_TIE_W = 0.01;
 function simDecide(ctx, st, phase, rnd, stats) {
   const A = simPhaseOpts(ctx, st, 0, phase), B = simPhaseOpts(ctx, st, 1, phase);
   if (A.length === 1 && B.length === 1) return [A[0], B[0]];
@@ -2674,7 +2678,8 @@ function simDecide(ctx, st, phase, rnd, stats) {
   const run = (acts, tie) => {
     const c = simClone(st);
     const tied = phase === 'turn' ? simTurn(ctx, c, acts, null, tie, pick) : (simReplace(c, acts, null), false);
-    return [simRollout(ctx, c), tied];
+    const now = simValue(c);
+    return [simRollout(ctx, c) + SIM_TIE_W * now, tied];
   };
   const v = A.map(a => B.map(b => {
     const [x, tied] = run([a, b], 0);
