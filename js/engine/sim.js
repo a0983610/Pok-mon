@@ -1138,6 +1138,8 @@ function simOpts(ctx, st, s) {
 function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
   const x = SIM_SUP[k], M = simAct(st, s), T = simAct(st, 1 - s), side = st.sd[s], tSide = st.sd[1 - s];
   const me = simName(st, s), tn = simName(st, 1 - s), mz = MOVES[k][0];
+  // 換人類輔助招換上來的會不會先吃對手一招（對手這回合還沒出招，同 simMoveIn 的急速折返類）
+  const hit = () => oWill && oa?.t === 'mv' && T.hp > 0 && simAct(st, 1 - s) === T;
   const bad = () => { if (!bounced && M.v.mt) M.v.mt.ok = false; };
   const say = t => simLog(st, `${me}用${mz}${t}`), fail = why => { bad(); say(`，但失敗了（${why}）`); };
   if (x.tgt && T.hp <= 0) return fail('沒有目標');
@@ -1318,7 +1320,7 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
     case 'shot': {
       say('');
       const ok = simBoost(st, 1 - s, T, x.d, s) || T.b.ab === 'mirror-armor';
-      if (ok && M.hp > 0 && simBench(st, s).length && !simOver(st)) simSwitch(st, s, pick(st, s), rnd);
+      if (ok && M.hp > 0 && simBench(st, s).length && !simOver(st)) simSwitch(st, s, pick(st, s, hit()), rnd);
       return;
     }
     case 'memento':
@@ -1337,7 +1339,7 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
       if (!n && !out) return fail(`已經是${FIELD_ZH[x.w]}`);
       say(n ? `：變成${FIELD_ZH[x.w]}（${n} 回合）` : `：已經是${FIELD_ZH[x.w]}`);
       if (n && !(x.w in SIM_WX_ROCK)) simSeeds(st);
-      if (out) simSwitch(st, s, pick(st, s), rnd);
+      if (out) simSwitch(st, s, pick(st, s, hit()), rnd);
       return;
     }
     case 'troom':
@@ -1354,7 +1356,8 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
       return say('：到下次出招前被打倒，對手也會倒下');
     case 'baton': case 'shedtail': {
       if (!simBench(st, s).length || simOver(st)) return fail('沒有可以換的');
-      if (x.kind === 'baton') { say(''); return simSwitch(st, s, pick(st, s), rnd, false, 'baton'); }
+      // 接棒有替身會一起傳過去，先吃的那招打在替身上（照沒吃到算）；斷尾換上來的有替身，也照沒吃到算
+      if (x.kind === 'baton') { say(''); return simSwitch(st, s, pick(st, s, hit() && !M.v.sub), rnd, false, 'baton'); }
       if (M.v.sub) return fail('已經有替身');
       if (M.hp <= Math.ceil(M.max / 2)) return fail('HP 不夠');
       say('');
@@ -2170,7 +2173,8 @@ function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
   if (SIM_RAGE.has(k) && st.sd[s].act === ia) simRage(st, s, M, k, dealt >= 0, rnd);
   // 出招結束的換人（Showdown 出招結束後，要換的各方同時收到換人要求）：對手逃脫按鍵、危險迴避（out），自己急速折返類（piv）。
   // 冠軍版兩邊都換（逃脫按鍵、危險迴避不會取消對方的急速折返：Showdown mods/champions ejectbutton、emergencyexit，#12309、#12320）：
-  // 雙方各自決定換誰（都看換之前的場面），照換下場那隻的速度先後換上，都換上來才照速度發動出場效果（同 simReplace）
+  // 雙方各自決定換誰（都看換之前的場面），照換下場那隻的速度先後換上，都換上來才照速度發動出場效果（同 simReplace）。
+  // 只有自己換（急速折返類）且對手這回合還沒出招：換上來的會先吃對手一招（pick 的 hit）
   out = out && T.hp > 0 && st.sd[1 - s].act === it && !simOver(st);
   const piv = SIM_PIVOT.has(k) && dealt >= 0 && M.hp > 0 && st.sd[s].act === ia && !simOver(st) && simBench(st, s).length > 0;
   if (out && piv) {
@@ -2178,7 +2182,7 @@ function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
     ord.forEach(x => simSwitch(st, x, to[x], rnd, true));
     simEntry(st, ord); simSeeds(st); simUpdate(st);
   } else if (out) simSwitch(st, 1 - s, pick(st, 1 - s), rnd);
-  else if (piv) simSwitch(st, s, pick(st, s), rnd);
+  else if (piv) simSwitch(st, s, pick(st, s, oWill && oa?.t === 'mv' && T.hp > 0 && st.sd[1 - s].act === it), rnd);
 }
 // 回合結束（Showdown onResidualOrder 的順序）：天氣、預知未來、祈願、青草場地、濕潤之軀、蛻皮、吃剩的東西、寄生種子、中毒、灼傷、詛咒、
 // 綁住類、挑釁／再來一次／定身／哈欠倒數、牆倒數、場地倒數、加速、心情不定、危險迴避；
@@ -2491,8 +2495,9 @@ function simGreedySup(st, s, M, T, k, dt, dm) {
   }
 }
 // 補位、打完換人：後排每隻和對手場上那隻一對一（雙方最痛一招的期望傷害、速度）：打得贏的優先、再比打完剩下的 HP；
-// 打不贏的比倒下前能打掉對方多少。對手場上那隻也倒了就挑剩下 HP 比例最高的
-function simGreedyPick(ctx, st, s) {
+// 打不贏的比倒下前能打掉對方多少。對手場上那隻也倒了就挑剩下 HP 比例最高的。
+// hit＝換上來先吃對手最痛的一招才開打（對手這回合還沒出招時的急速折返類）：少撐一下，換上來就被打倒的算 0
+function simGreedyPick(ctx, st, s, hit = false) {
   const bench = simBench(st, s), T = simAct(st, 1 - s);
   if (bench.length < 2) return bench[0];
   const score = i => {
@@ -2501,9 +2506,10 @@ function simGreedyPick(ctx, st, s) {
     // 特性變身者的換上來就變成對手那隻：招式、能力照對手的算（HP 是自己的、道具照自己的算速度）
     const imp = M.b.ab === 'imposter' && !T.tf && !T.v.sub, src = imp ? T : M;
     const dm = Math.max(0, ...src.moves.map(k => simExp(ctx, st, src, T, k))), dt = Math.max(0, ...T.moves.map(k => simExp(ctx, st, T, src, k)));
-    const n1 = dm ? Math.ceil(T.hp / dm) : Infinity, n2 = dt ? Math.ceil(M.hp / dt) : Infinity;
+    const n1 = dm ? Math.ceil(T.hp / dm) : Infinity, n2 = (dt ? Math.ceil(M.hp / dt) : Infinity) - (hit ? 1 : 0);
+    if (n2 <= 0) return 0;
     const fast = simFaster(st, simSpeed(ctx, st, imp ? { ...T, item: M.item, status: M.status } : M), simSpeed(ctx, st, T));
-    if (n1 < n2 || (n1 === n2 && fast && n1 < Infinity)) return 2 + Math.max(0, M.hp - dt * (fast ? n1 - 1 : n1)) / M.max;
+    if (n1 < n2 || (n1 === n2 && fast && n1 < Infinity)) return 2 + Math.max(0, M.hp - dt * ((fast ? n1 - 1 : n1) + (hit ? 1 : 0))) / M.max;
     return Math.min(1, dm * (n2 === Infinity ? 9 : n2) / T.hp);
   };
   return bench.map(i => [i, score(i)]).sort((x, y) => y[1] - x[1])[0][0];
@@ -2519,7 +2525,7 @@ function simReplace(st, picks, rnd) {
 // 補位換上來又被撒菱類打倒的再補（補到有人站著才開打）；期望值打時同速輪流誰先：每次打下去換一邊起頭（ctx.flip）、之後每回合再輪流
 // （不然一律我方先，評估會偏向我方；只看回合單雙也不行，樹搜尋往下打大多從同一個回合開始，會固定偏向一方）
 function simRollout(ctx, st, rnd = null) {
-  const end = st.turn + SIM_LOOK, pick = (c, s) => simGreedyPick(ctx, c, s), f = ctx.flip = (ctx.flip || 0) ^ 1;
+  const end = st.turn + SIM_LOOK, pick = (c, s, hit) => simGreedyPick(ctx, c, s, hit), f = ctx.flip = (ctx.flip || 0) ^ 1;
   while (!simOver(st) && st.turn < end) {
     while (!simOver(st) && (simNeed(st, 0) || simNeed(st, 1))) simReplace(st, [0, 1].map(s => simNeed(st, s) ? { t: 'sw', i: pick(st, s) } : { t: 'pass' }), rnd);
     if (simOver(st)) break;
@@ -2557,7 +2563,7 @@ function simUcb(nd, s, opts) {
 function simSearch(ctx, st, phase, iters, rnd, stats, uniform) {
   const opts = [0, 1].map(s => simPhaseOpts(ctx, st, s, phase));
   if (!stats && opts[0].length === 1 && opts[1].length === 1) return [opts[0][0], opts[1][0]];
-  const root = simNode(), rr = rnd || Math.random, pick = (c, s) => simGreedyPick(ctx, c, s), m = opts[0].length;
+  const root = simNode(), rr = rnd || Math.random, pick = (c, s, hit) => simGreedyPick(ctx, c, s, hit), m = opts[0].length;
   for (let it = 0; it < iters; it++) {
     const c = simClone(st), path = [];
     let nd = root, ph = phase;
@@ -2617,7 +2623,7 @@ function simStep(ctx, st, acts, pin) {
   const c = simClone(st), phase = simPhase(st);
   c.log = [];
   c.pin = pin;
-  const pick = (x, s) => simBench(x, s).includes(pin?.[s]) ? pin[s] : simGreedyPick(ctx, x, s);
+  const pick = (x, s, hit) => simBench(x, s).includes(pin?.[s]) ? pin[s] : simGreedyPick(ctx, x, s, hit);
   if (phase === 'turn') { if (simTurn(ctx, c, acts, null, 0, pick)) c.log.splice(1, 0, '　（雙方同速，實際各 50%；這一步照我方先動推，實戰對手先動的話按「改成實戰的結果」改 HP）'); }
   else simReplace(c, acts, null);
   const forced = [0, 1].map(s => {
@@ -2663,7 +2669,7 @@ function simMix(v) {
 function simDecide(ctx, st, phase, rnd) {
   const A = simPhaseOpts(ctx, st, 0, phase), B = simPhaseOpts(ctx, st, 1, phase);
   if (A.length === 1 && B.length === 1) return [A[0], B[0]];
-  const pick = (c, s) => simGreedyPick(ctx, c, s);
+  const pick = (c, s, hit) => simGreedyPick(ctx, c, s, hit);
   const run = (acts, tie) => {
     const c = simClone(st);
     const tied = phase === 'turn' ? simTurn(ctx, c, acts, null, tie, pick) : (simReplace(c, acts, null), false);
@@ -2684,7 +2690,7 @@ function simDecide(ctx, st, phase, rnd) {
 function simPlay(ctx, sides, rnd, log, opt = {}) {
   const st = simStart(sides, log);
   if (st.log) st.log.unshift(`先發：我方${MON[simBaseKey(simAct(st, 0))].zh}、對手${MON[simBaseKey(simAct(st, 1))].zh}`);
-  const pick = (c, s) => simGreedyPick(ctx, c, s), algo = [].concat(opt.algo || 'ply1');
+  const pick = (c, s, hit) => simGreedyPick(ctx, c, s, hit), algo = [].concat(opt.algo || 'ply1');
   const by = (a, phase) => a === 'tree' ? simSearch(ctx, st, phase, opt.iters || 200, rnd) : simDecide(ctx, st, phase, rnd);
   const decide = phase => algo.length < 2 || algo[0] === algo[1] ? by(algo[0], phase) : [by(algo[0], phase)[0], by(algo[1], phase)[1]];
   while (!simOver(st) && st.turn < SIM_MAX_TURN) {
@@ -2707,7 +2713,7 @@ function simPlay(ctx, sides, rnd, log, opt = {}) {
 // 回傳 { win, res 我方先動那場的結果（1 贏、−1 輸、0 打滿回合）, turns 那場打了幾回合, tieLose 同速時對手先動就輸 }
 function simDuel(fmt, x, yk, left) {
   const run = tie => {
-    const ctx = simCtx(fmt), st = simDuelStart(fmt, x, yk, left), pick = (c, s) => simGreedyPick(ctx, c, s);
+    const ctx = simCtx(fmt), st = simDuelStart(fmt, x, yk, left), pick = (c, s, hit) => simGreedyPick(ctx, c, s, hit);
     let tied = false;
     while (!simOver(st) && st.turn < SIM_MAX_TURN) {
       tied = simTurn(ctx, st, simDecide(ctx, st, 'turn', null), null, tie, pick) || tied;
@@ -2734,7 +2740,7 @@ const simHash = s => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) h 
 // 贏 1、打滿回合算 0.5、輸 0 的平均。亂數種子照輸入雜湊，同一組每次一樣；n 場共用一個計算快取
 const SIM_DUEL_N = 30;
 function simDuelP(fmt, x, yk, left, n = SIM_DUEL_N) {
-  const rnd = simRng(simHash(JSON.stringify([fmt, x.key, x.set || null, x.item ?? null, yk, left ?? null, n]))), ctx = simCtx(fmt), pick = (c, s) => simGreedyPick(ctx, c, s);
+  const rnd = simRng(simHash(JSON.stringify([fmt, x.key, x.set || null, x.item ?? null, yk, left ?? null, n]))), ctx = simCtx(fmt), pick = (c, s, hit) => simGreedyPick(ctx, c, s, hit);
   let w = 0;
   for (let r = 0; r < n; r++) {
     const st = simDuelStart(fmt, x, yk, left);
