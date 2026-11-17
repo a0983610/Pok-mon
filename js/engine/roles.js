@@ -170,7 +170,7 @@ const lackNeeds = (roles, fmt) => roles.length ? NEEDS[fmt].filter(n => !roles.s
 // 搭配、角色、隊友只在隊上已有挑了寶可夢的隊員、候選有排名時比（候選在 fmt 沒排名時，OP.GG 仍可能有零星統計，樣本太少不採用）。
 // 超級進化和原型屬性一樣、比較結果也一樣時只留原型。fix 每項是 { w 解決的提醒, by 候選撐起它的特性／招式（traitScan 的 has 項目）}
 // sets：隊上成員 key → 登錄的配招（見 useOf）；候選照挑了以後會登錄的預設配招（defaultSet）評估角色、搭配與對策，加入後說的才對得上。
-// 隊伍分析的推薦（teamsim.js）：雙打照這個排；單打不給 units（對策改看 1 對 1 勝率表），只拿來挑候選，排名交給 3 對 3 模擬
+// 隊伍分析的推薦（teamsim.js）：雙打照這個排；單打的候選改照聯防挑（tRecCands）、排名交給 3 對 3 模擬，不用這個
 const COUNTER_RANK = 60;
 function recommendMon(others, base, fmt, onTeam = [], units = [], sets = {}) {
   const rk = m => m.rank[fmt] || Infinity, fams = onTeam.map(k => family(MON[k]));

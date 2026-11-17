@@ -1,17 +1,16 @@
 // ---------- 隊伍分析：推薦（補誰、換誰；單打用 3 對 3 模擬排名）----------
+// 組隊流程（使用者定的）：先挑 2 隻左右的核心 → 照聯防推薦候選 → 用模擬決定補誰 → 放進去，再推薦下一格，一格一格補到 6 隻。
 // 隊伍還有空格（沒選屬性的格子）＝第一個空格補誰（TREC_N 個候選）；6 格都選了＝每隻挑了寶可夢的換成誰（每格 TSIM_ALT 個候選）。
-// 單打分兩段：①候選（tRecCands，畫面一打開就列）：從「1 對 1 勝率表」（sim-matrix.js）、原本的規則（recommendMon：搭配、補角色、常見隊友、屬性）、
-// OP.GG 常見隊友各挑幾個；②按「用模擬排序」：原本的隊伍和每個候選放進去的隊伍拿去打熱門隊伍（3 對 3），照勝率排。
-// 只看 1 對 1 會高估強化手（1 對 1 沒有後排，換人、撒菱、吼叫都沒作用；2026-11-17 實測烈咬陸鯊＋西獅海壬加火神蛾，熱門前 30 打得贏的從 15 隻變 29 隻），
-// 所以 1 對 1 只拿來挑候選，排名交給 3 對 3 模擬。雙打還沒有模擬：照原本的規則（recommendMon）排，6 格都選了不推薦。
+// 單打分兩段：①候選（tRecCands，畫面一打開就列）：只看聯防（同「聯防搭檔」卡片只算屬性），放進去後隊上沒人扛的弱點最少的；
+// ②按「用模擬排序」：原本的隊伍和每個候選放進去的隊伍拿去打熱門隊伍（3 對 3），照勝率排。雙打還沒有模擬：照原本的規則（recommendMon）排，6 格都選了不推薦。
 // 3 對 3 的打法：對手＝simMetaTeams（單打排名前 SIM_META_N 名各當核心＋OP.GG 隊友名單前 5 隻）。每隊照「出戰選角」的方法：我方帶 simMyPlan 的第 1 名組合與先發，
 // 對手照 simOppScenarios（對手看我方 6 隻、用同一套方法選）的前 TSIM_SC 種帶法，各打 TSIM_K 場；雙方用模擬分頁的「快速」（每步把各種出法試算一回合）。
 // 每場的亂數種子照「對手隊伍、帶法排第幾、第幾場」（simHash；背景計算每場開打前 ctx.flip 也歸零）：不同隊伍的同一場用同一組亂數，差值比較準。
 // 選角前先把對位勝率（duelVs）還沒算好的交給背景計算（pBg）算完，選角才和「出戰選角」分頁一樣。
 // 按按鈕才算（使用者選的），結果只放在記憶體；改隊伍就停掉、收起結果（候選跟著隊伍變）。背景計算開不起來（file://）在畫面這邊一場一場打。
 const TSIM_SC = 3, TSIM_K = 5, TSIM_OPT = { algo: 'ply1' };
-// TREC_N：補空格的候選數；TSIM_ALT：換人時每格的候選數；TREC_THREAT：挑候選時看 1 對 1 打不打得贏的熱門前幾名
-const TREC_N = 8, TSIM_ALT = 3, TREC_THREAT = 30;
+// TREC_N：補空格的候選數；TSIM_ALT：換人時每格的候選數；TREC_RANK：候選只從單打排名前幾名挑
+const TREC_N = 8, TSIM_ALT = 3, TREC_RANK = 100;
 // 預估時間用：每個背景計算打一場 3 對 3 約幾毫秒（2026-11-13 實測，i7-14700、Chromium、8 個背景計算：打的階段 7030 場 162 秒，約 186 毫秒；
 // 加上選角與等對位勝率，全部 8265 場 210 秒）
 const TSIM_MS = 200;
@@ -20,42 +19,27 @@ const tSim = { run: null, res: null, redraw: 0 };
 // 隊伍的簽名（單打雙打、每格屬性、隊員、配招）：候選與結果是不是目前這一隊的
 const tSimSig = () => JSON.stringify([team.fmt, team.slots, team.mons, team.sets]);
 const tSimTick = ms => new Promise(r => setTimeout(r, ms || 0));
-// 事先算好的 1 對 1 勝率表能不能用（同 simMatrixP 的條件：資料日期、每組場數要對得上）
-const tRecMx = () => typeof SIM_MATRIX !== 'undefined' && SIM_MATRIX.date === MONS_DATE && SIM_MATRIX.n === SIM_DUEL_N;
-// 熱門前 TREC_THREAT 名，每隻是 [原型, 常帶超級石的超級進化型態...]（同熱門威脅檢查算進去的型態）
-let tRecTop = null;
-// 隊伍 keys 對熱門前 TREC_THREAT 名每隻的最高勝率（隊上誰正面對打最打得贏；查 1 對 1 勝率表 simMatrixP：單打前 100 名照預設配招，登錄的配招不看，
-// 表裡沒有的當 0）；常帶超級石的每種型態都要打得贏（各型態取最低）
-const tRecBest = keys => (tRecTop ||= topMons('s', TREC_THREAT).map(m => [m.key, ...megaInfo(m, 's').filter(x => x.counted).map(x => x.mon.key)]))
-  .map(forms => Math.max(0, ...keys.map(k => Math.min(...forms.map(f => simMatrixP({ key: k }, f) ?? 0)))));
-// 第 slot 格（空格＝補上、有寶可夢＝換掉）的 n 個候選，其他格照 snap：
-//   ① 1 對 1 勝率表：放進去後熱門前 TREC_THREAT 名的最高勝率加總增加最多的
-//   ② 原本的規則（recommendMon，不給 units＝不算對策，對策改看 ①）排前面的；③ OP.GG 隊友名單裡和隊員互相出現最多的（recommendMon 的 mates）
-// ②③ 各取 n/4 個（至少 1 個），其他給 ①，重複的往下遞補，還不夠再照 ①、② 補；都要單打有排名、有預設配招，不含隊上（含被換掉那隻）的同家族。
-// 回傳 [{ key, r recommendMon 那筆（超級進化和原型的比較結果一樣時 recommendMon 不列，沒有）, now 現在 1 對 1 打得贏熱門前幾名的幾隻,
-//   win 放進去後打得贏幾隻（勝率表不能用時 null）, got 多打得贏的熱門寶可夢 key }]；勝率過半算打得贏（同熱門威脅檢查）
+// 候選名單：單打排名前 TREC_RANK 名（樣本多、配招統計可信；同 1 對 1 勝率表的範圍，選角要的對位勝率大多事先算好，排序不用等太久）有預設配招的型態；
+// 同家族屬性一樣的型態只留一種（OP.GG 帶超級石過半的留超級進化，見 likelyForm；不然留原型），屬性不一樣的超級進化另列
+let tRecPool = null;
+const tRecForms = () => tRecPool ||= MONS.filter(m => !m.base && m.rank.s && m.rank.s <= TREC_RANK).flatMap(m => {
+  const out = [];
+  [likelyForm(m, 's'), m, ...megasOf(m)].filter(x => defaultSet(x.key, 's')).forEach(x => { if (!out.some(y => sameTypes(y.types, x.types))) out.push(x); });
+  return out;
+});
+// 第 slot 格（空格＝補上、有寶可夢＝換掉）的 n 個候選，其他格照 snap（只選屬性的格子也算隊員）。只看聯防，同「聯防搭檔」卡片只算屬性
+// （怕＝受到 ×2 以上、扛＝×½ 以下含免疫，不含特性與道具）：把每隻放進去，依序比
+//   ① 隊上沒人扛的弱點（缺口，memberScore 的 gaps：有人怕、沒人扛）剩幾個，少的優先──能扛原本沒人扛的、自己怕的又有隊友扛的排前面
+//   ② ⚠（3 隻以上都怕，或 2 隻以上怕又沒人扛）剩幾個 ③ 單打排名；不含隊上（含被換掉那隻）的同家族。
+// 回傳 [{ key, gaps 放進去後的缺口, warn 放進去後的 ⚠ 數, now 現在的缺口, warnNow 現在的 ⚠ 數 }]（gapDeltaHTML 的格式）
 function tRecCands(snap, slot, n) {
-  const members = snap.slots.map((s, i) => [s, i]).filter(([s, i]) => s.length && i !== slot);
-  const named = members.filter(([, i]) => snap.mons[i]).map(([, i]) => snap.mons[i]);
-  const fams = [...named, snap.mons[slot]].filter(Boolean).map(k => family(MON[k]));
-  const sets = Object.fromEntries(members.filter(([, i]) => snap.mons[i] && snap.sets[i]).map(([, i]) => [snap.mons[i], snap.sets[i]]));
-  const ok = k => MON[k].rank.s && !fams.includes(family(MON[k])) && defaultSet(k, 's');
-  const recs = recommendMon(members.map(([s]) => s), [], 's', named, [], sets).filter(r => ok(r.mon.key));
-  const sum = a => a.reduce((s, x) => s + x, 0), won = a => a.filter(x => x > 0.5).length, now = tRecBest(named);
-  const cov = new Map(tRecMx() ? SIM_MATRIX.keys.filter(ok).map(k => [k, tRecBest([...named, k])]) : []);
-  const byCov = [...cov].map(([k, b]) => [k, sum(b) - sum(now)]).filter(([, g]) => g > 0).sort((x, y) => y[1] - x[1]).map(([k]) => k);
-  const q = Math.max(1, Math.floor(n / 4)), out = [];
-  const take = (keys, m) => { for (const k of keys) { if (!m || out.length >= n) return; if (!out.includes(k)) { out.push(k); m--; } } };
-  take(byCov, n - 2 * q);
-  take(recs.map(r => r.mon.key), q);
-  take(recs.filter(r => r.mates.length).sort((x, y) => y.mates.length - x.mates.length).map(r => r.mon.key), q);
-  take(byCov, n);
-  take(recs.map(r => r.mon.key), n);
-  const byKey = new Map(recs.map(r => [r.mon.key, r]));
-  return out.map(k => { const b = cov.get(k);
-    return { key: k, r: byKey.get(k), now: won(now), win: b ? won(b) : null, got: b ? tRecTop.filter((f, t) => now[t] <= 0.5 && b[t] > 0.5).map(f => f[0]) : [] }; });
+  const others = snap.slots.filter((s, i) => s.length && i !== slot), fams = snap.mons.filter(Boolean).map(k => family(MON[k]));
+  const rows = teamProfile(others), now = teamGaps(rows), warnNow = rows.filter(r => r.warn).length;
+  return tRecForms().filter(m => !fams.includes(family(m))).map(m => ({ m, ...memberScore(others, m.types) }))
+    .sort((x, y) => x.gaps.length - y.gaps.length || x.warn - y.warn || x.m.rank.s - y.m.rank.s).slice(0, n)
+    .map(({ m, gaps, warn }) => ({ key: m.key, gaps, warn, now, warnNow }));
 }
-// 目前隊伍的候選（照 tSimSig 快取，換隊伍才重算；6 格都選了時每格算一次 recommendMon，約 0.25 秒）：
+// 目前隊伍的候選（照 tSimSig 快取，換隊伍才重算；6 格都選了時每格算一次）：
 // { snap 算的時候的隊伍, add 補的空格（6 格都選了是 -1）, cands [[格子, tRecCands 的結果]...] }
 const tRec = { sig: '', plan: null };
 function tRecPlan() {
@@ -234,21 +218,22 @@ function tSimDiff(base, V) {
 // 差幾個百分點（±誤差）；超過誤差 2 倍的標 ▲／▼，其他的差異可能只是運氣
 const tSimDiffText = r => { const sig = Math.abs(r.d) > 2 * r.se, d = Math.round(r.d * 1000) / 10;
   return `<span class="${sig ? (r.d > 0 ? 'ts-up' : 'ts-dn') : ''}">${sig ? (r.d > 0 ? '▲' : '▼') : ''}${d > 0 ? '+' : ''}${d}</span>，±${Math.round(r.se * 1000) / 10}`; };
-// 候選的說明：原本規則的說明（recInfo：角色、補什麼、常見隊友、搭配與超級進化提醒；recommendMon 沒列的只寫名字）、1 對 1 多打得贏誰、排名
-const tRecInfo = (c, slot) => (c.r ? recInfo(c.r, slot) : `<b>${MON[c.key].zh}</b>${chips(MON[c.key].types)}`)
-  + (c.win != null ? `<span class="fill">1 對 1 打得贏熱門前 ${TREC_THREAT} 的 ${c.now} → ${c.win} 隻`
-    + `${c.got.length ? `（多了 ${c.got.slice(0, 5).map(k => MON[k].zh).join('、')}${c.got.length > 5 ? ' 等' : ''}）` : ''}</span>` : '')
-  + `<span class="meta">${rankText(MON[c.key])}</span>`;
+// 候選的說明：名字、屬性、角色（照預設配招）、聯防（放進去後缺口和 ⚠ 怎麼變）、超級進化提醒（slot＝要換掉的格子，不算那隻）、排名
+const tRecInfo = (c, slot) => { const m = MON[c.key], r = roleOf(c.key, 's', defaultSet(c.key, 's'));
+  return `<b>${m.zh}</b>${chips(m.types)}${r ? roleTags(r) : ''}<span class="fill">聯防：${gapDeltaHTML(c.now, c.warnNow, c)}</span>`
+    + (m.base && megaOn(slot).length ? `<span class="meta">⚠ 隊上已有超級進化（${megaOn(slot).map(k => MON[k].zh).join('、')}），一場只能進化一隻</span>` : '')
+    + `<span class="meta">${rankText(m)}</span>`; };
 function tSimHTML() {
   tSimStale();
   if (team.fmt !== 's') return tRecDoublesHTML();
   const head = '<div class="res-head">推薦<span class="muted small">（單打：補誰、換誰）</span></div>';
-  if (!team.slots.some(s => s.length)) return head + '<p class="empty">先在上面挑 1 隻以上想用的寶可夢，這裡會推薦下一隻補誰；6 隻都選了會推薦換掉誰、換成誰。</p>';
+  if (!team.slots.some(s => s.length)) return head + '<p class="empty">先在上面挑 2 隻左右想當核心的寶可夢，這裡會照聯防推薦下一隻的候選，'
+    + '再用模擬決定補誰最好；放進去後接著推薦下一格，一格一格補到 6 隻。6 隻都選了會推薦換掉誰、換成誰。</p>';
   const mine = simMine(), plan = tRecPlan(), add = plan.add >= 0, can = tRecCanSim(mine, plan), R = tSim.run || tSim.res;
   const n = simMetaTeams('s').length, per = n * TSIM_SC * TSIM_K, kinds = tRecTeams(mine, plan), wk = simWkN();
   const intro = `<p class="muted small b-intro">${add ? `第 ${plan.add + 1} 格（第一個空格）補誰` : `6 格都選了：每隻換成 ${TSIM_ALT} 個候選，看換誰最好`}。`
-    + '候選從 1 對 1 勝率表、原本的規則（搭配、補角色、屬性）、OP.GG 常見隊友各挑幾個（還沒排名）；'
-    + `按「用模擬排序」把候選放進隊伍，整隊打 ${n} 隊熱門隊伍（3 對 3），照勝率排。點寶可夢直接放進那一格。</p>`;
+    + '候選照聯防挑（同「聯防搭檔」只看屬性：放進去後隊上沒人扛的弱點最少的排前面）；'
+    + `按「用模擬排序」把候選放進隊伍，整隊打 ${n} 隊熱門隊伍（3 對 3），照勝率決定${add ? '補誰' : '換誰'}。點寶可夢直接放進那一格${add ? '，接著推薦下一格' : ''}。</p>`;
   const btn = tSim.run ? '<button class="btn" data-tsim="stop">停止</button>'
     : `<button class="btn primary" data-tsim="run"${can ? '' : ' disabled'}>${R ? '重新排序' : '用模擬排序'}</button>`;
   const bar = `<div class="c-f">${btn}<span class="muted small">${can ? `${kinds} 種隊伍各打 ${per} 場，約 ${simEta(TSIM_MS * kinds * per / Math.max(1, wk))}`
@@ -262,10 +247,10 @@ function tSimHTML() {
   const base = R?.vs.find(V => !V.swap);
   let list;
   if (!items.some(x => x.V && tSimRate(x.V).n)) {
-    // 還沒排名：補空格列候選卡片；換人每格一行
+    // 還沒模擬：照聯防的順序，補空格列候選卡片；換人每格一行
     list = add ? `<div class="b-rec">${items.map(({ slot, c }) => `<button data-mon="${c.key}" data-slot="${slot}">${tRecInfo(c, slot)}</button>`).join('')}</div>`
       : plan.cands.map(([slot, cs]) => `<div class="issue"><b>${slot + 1} ${nm(plan.snap.mons[slot])}</b><span class="x-msg">換成：</span>`
-        + cs.map(c => `<button class="mini" data-mon="${c.key}" data-slot="${slot}">${nm(c.key)}${c.win != null ? `<span class="meta">1 對 1 ${c.now}→${c.win}</span>` : ''}</button>`).join('') + '</div>').join('');
+        + cs.map(c => `<button class="mini" data-mon="${c.key}" data-slot="${slot}">${nm(c.key)}<span class="meta">缺口 ${c.now.length}→${c.gaps.length}</span></button>`).join('') + '</div>').join('');
   } else {
     // 照勝率排：有原本的隊伍就比和原本差多少（同一批場次配對），沒有（隊伍只有 2 隻）就比勝率、再和第 1 名比
     const scored = items.map(x => ({ ...x, rt: x.V ? tSimRate(x.V) : { n: 0, w: 0 }, df: base && x.V ? tSimDiff(base, x.V) : null }));
@@ -306,11 +291,12 @@ function tSimTeamHTML(R, base) {
     + `<h3>最常打倒我方的</h3>${opp || '<p class="muted small">還沒有資料。</p>'}`);
 }
 const tRecNote = () => tFoldHTML('tsimnote', '怎麼挑候選、怎麼排（點開看）', '<p class="note">'
-  + `※ 候選：① 1 對 1 勝率表（「模擬對戰」的引擎 1 對 1 帶亂數打 ${SIM_DUEL_N} 場，單打排名前 100 名照預設配招事先算好；隊員登錄的配招這裡不看）裡，`
-  + `放進去後熱門前 ${TREC_THREAT} 名打得贏（勝率過半，常帶超級石的進化前後都要）的最多的；② 原本的規則排前面的（依序比：解決幾個「隊伍特性與場地招式」的提醒扣掉新增的、`
-  + '補上幾個「隊伍角色」缺的角色、是不是 OP.GG 上隊員的常見隊友、加入後的屬性弱點、排名）；③ OP.GG 隊友名單裡和隊員互相出現最多的。'
-  + `補空格取 ${TREC_N} 個（② ③ 各 ${Math.floor(TREC_N / 4)} 個，其他給 ①），換人每格取 ${TSIM_ALT} 個（各 1 個）；都要單打有排名，不含隊上的同家族。`
-  + '只看 1 對 1 會高估強化手（1 對 1 沒有後排，換人、撒菱、吼叫都沒作用），所以只拿來挑候選。'
+  + '※ 候選（聯防）：同「聯防搭檔」卡片只算屬性（怕＝受到 ×2 以上、扛＝×½ 以下含免疫，不含特性與道具），只選屬性的格子也算隊員。把每隻放進那一格，依序比：'
+  + '① 隊上沒人扛的弱點（缺口：有人怕、沒人扛）剩幾個，少的優先──能扛隊上原本沒人扛的、自己怕的又有隊友扛的會排前面；'
+  + '② ⚠（3 隻以上都怕，或 2 隻以上怕又沒人扛）剩幾個；③ 單打排名。'
+  + `只從單打排名前 ${TREC_RANK} 名挑（樣本多、配招統計可信；選角要的對位勝率大多事先算好，排序不用等太久），不含隊上的同家族；`
+  + '超級進化和原型屬性一樣時只留一種（OP.GG 帶超級石過半的留超級進化，不然留原型）。'
+  + `補空格取 ${TREC_N} 個，換人每格取 ${TSIM_ALT} 個。聯防只看屬性，打不打得贏交給模擬排序。`
   + `排序：對手隊伍＝單打排名前 ${SIM_META_N} 名各當核心，加上 OP.GG 隊友名單的前 5 隻（6 隻一樣的只留一隊；OP.GG 只有每隻的隊友名單，沒有整隊統計），`
   + '配招照 OP.GG 最常見、道具同一隊不重複、超級石使用率過半的當成超級進化（同「模擬對戰」的對手）。帶法：我方照「出戰選角」第 1 名的組合與先發（一場只能超級進化一隻）；'
   + `對手照「出戰選角」的「對手可能帶的」前 ${TSIM_SC} 種（對手看不到我方的配招），各打 ${TSIM_K} 場。出招：雙方都用「模擬對戰」的「快速」（每步把雙方各種出法都試算一回合，照算出來的比例抽）；`

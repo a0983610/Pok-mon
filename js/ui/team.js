@@ -10,6 +10,14 @@ const slotName = i => team.mons[i] ? MON[team.mons[i]].zh : team.slots[i].map(id
 // 隊伍格子 [屬性, 格子索引] → 對位用的 { defs, atk }（answerOf 的格式）＋ key、set（teamVs 看速度與傷害用）
 const unitOf = ([s, i]) => ({ defs: s, atk: attacksOf(team.mons[i], s, team.fmt, team.sets[i]), key: team.mons[i], set: team.sets[i] });
 const rankText = m => `${FMT_ZH[team.fmt]}${m.rank[team.fmt] ? ' #' + m.rank[team.fmt] : '無排名'}`;
+// 加入後隊伍的屬性變化「缺口 3 → 1・補上 地面、妖精・新增 火・⚠ 1 → 0」：gaps／warnNow 是加入前的缺口與 ⚠ 數，r.gaps／r.warn 是加入後的
+// （memberScore 的格式）；推薦屬性和「推薦」卡片的聯防共用
+function gapDeltaHTML(gaps, warnNow, r) {
+  const names = ids => ids.map(id => T[id].zh).join('、');
+  const fixed = gaps.filter(g => !r.gaps.includes(g)), added = r.gaps.filter(g => !gaps.includes(g));
+  return `<span>缺口 <b>${gaps.length} → ${r.gaps.length}</b>` + (fixed.length ? `・補上 ${names(fixed)}` : '')
+    + (added.length ? `・新增 ${names(added)}` : '') + (warnNow || r.warn ? `・⚠ <b>${warnNow} → ${r.warn}</b>` : '') + '</span>';
+}
 // 目前格子的屬性推薦前 5 名，點了直接加入（空格推第一個屬性、已選一個就推第二個）；推薦寶可夢在最上面的「推薦」卡片（teamsim.js）
 function teamRecHTML(gaps, warnNow) {
   const base = team.slots[team.cur];
@@ -17,15 +25,9 @@ function teamRecHTML(gaps, warnNow) {
     return team.slots.some((s, i) => s.length < 2 && !team.mons[i]) ? '<p class="muted small">點還沒選滿的格子，看建議補什麼屬性。</p>' : '';
   }
   const others = team.slots.filter((s, i) => i !== team.cur && s.length);
-  const names = ids => ids.map(id => T[id].zh).join('、');
-  const delta = r => {
-    const fixed = gaps.filter(g => !r.gaps.includes(g)), added = r.gaps.filter(g => !gaps.includes(g));
-    return `<span>缺口 <b>${gaps.length} → ${r.gaps.length}</b>` + (fixed.length ? `・補上 ${names(fixed)}` : '')
-      + (added.length ? `・新增 ${names(added)}` : '') + (warnNow || r.warn ? `・⚠ <b>${warnNow} → ${r.warn}</b>` : '') + '</span>';
-  };
   return `<h3>第 ${team.cur + 1} 隻${base.length ? '的第二屬性' : ''}推薦屬性</h3>`
     + `<p class="muted small b-intro">依加入後隊伍的 ⚠ 數、缺口數由少到多排序，同分再比這隻自己弱點少、抵抗多；點一下直接加入${base.length ? '（這隻是單屬性就不用選，直接點下一格）' : ''}。</p><div class="b-rec">`
-    + recommendMember(others, base).slice(0, 5).map((r, i) => `<button data-add="${r.id}"><span class="rank">${i + 1}</span>${chips(r.defs)}${delta(r)}</button>`).join('')
+    + recommendMember(others, base).slice(0, 5).map((r, i) => `<button data-add="${r.id}"><span class="rank">${i + 1}</span>${chips(r.defs)}${gapDeltaHTML(gaps, warnNow, r)}</button>`).join('')
     + '</div>';
 }
 // 推薦寶可夢的說明：角色標籤、補什麼（角色、搭配）、對策（原本沒解的熱門威脅）、常見隊友、會新增的搭配提醒（skip＝要換掉的格子，超級進化提醒不算那隻）
@@ -436,9 +438,11 @@ let teamDirty = false;
 function renderTeam() {
   if (curTab !== 'team') { teamDirty = true; saveState(); return; }
   teamDirty = false;
-  $('#tSlots').innerHTML = team.slots.map((s, i) => `<button class="slot" data-i="${i}" aria-pressed="${i === team.cur}"><span class="slot-n">第 ${i + 1} 隻</span>`
+  // 每格右上角的 × 只清那一格（空格不顯示）
+  $('#tSlots').innerHTML = team.slots.map((s, i) => `<div class="slot-w"><button class="slot" data-i="${i}" aria-pressed="${i === team.cur}"><span class="slot-n">第 ${i + 1} 隻</span>`
     + `${team.mons[i] ? `<span class="slot-name">${MON[team.mons[i]].zh}</span>` : ''}${s.length ? chips(s) : '<span class="muted small">空</span>'}`
-    + `${team.sets[i] ? '<span class="muted small">已登錄配招</span>' : ''}</button>`).join('');
+    + `${team.sets[i] ? '<span class="muted small">已登錄配招</span>' : ''}</button>`
+    + `${s.length ? `<button class="slot-x" data-clear="${i}" title="清除第 ${i + 1} 隻" aria-label="清除第 ${i + 1} 隻">×</button>` : ''}</div>`).join('');
   renderPick($('#tPick'), team.slots[team.cur]);
   $('#tList').innerHTML = typeListHTML() || setEditorHTML();
   document.querySelectorAll('#tFmt button').forEach(b => b.setAttribute('aria-pressed', b.dataset.fmt === team.fmt));
@@ -517,9 +521,19 @@ function setFmt(e) {
 }
 $('#tFmt').addEventListener('click', setFmt);
 $('#tSlots').addEventListener('click', e => {
+  const x = e.target.closest('[data-clear]');
+  if (x) { clearSlot(+x.dataset.clear); return; }
   const b = e.target.closest('.slot');
   if (b) { team.cur = +b.dataset.i; renderTeam(); }
 });
+// 只清一格（屬性、寶可夢、配招），其他格不動、不往前補；配招改過（和預設不同）時先確認，同改屬性
+function clearSlot(i) {
+  const k = team.mons[i];
+  if (k && JSON.stringify(team.sets[i]) !== JSON.stringify(defaultSet(k, team.fmt))
+    && !confirm(`清除第 ${i + 1} 隻的${MON[k].zh}會丟掉改過的配招，確定嗎？`)) return;
+  team.slots[i] = []; team.mons[i] = ''; team.sets[i] = null;
+  renderTeam();
+}
 $('#tPick').addEventListener('click', e => {
   const b = e.target.closest('.tbtn');
   if (b) pickTeamType(b.dataset.id);
