@@ -1,10 +1,11 @@
 // 模擬 AI 的選擇邏輯：比強弱（vs）、和「老師」比對找出快速模式選錯的地方（diff）。改進 js/engine/sim.js 的決策
 // （simDecide 往前算一回合＝快速、simSearch 樹搜尋、simGreedyAct／simGreedyPick 簡單規則）用；不需要 Showdown。
 // 用法（在 repo 根目錄）：
-//   node tools/sim_ai.js vs 決策A 決策B [組數 200] [種子 7] [排名前幾名 60]
+//   node tools/sim_ai.js vs 決策A 決策B [組數 200] [種子 7] [排名前幾名 60] [配招 def]
 //     隨機兩隊（單打排名前幾名，各 3 隻、同家族不重複、超級進化最多 1 隻；配招照 OP.GG 預設、道具同一隊不重複＝simItems；先發是第一隻），
 //     每組打兩場：A 當第 0 方、B 當第 1 方，再交換決策打一次（兩場同一組亂數），印 A 的得分率（贏 1、平手 0.5）與標準誤。
 //     兩邊的決策一模一樣時每組正好 50%（拿來檢查工具本身、或確認改動沒有改到選擇）。
+//     配招 prob＝每隻實際帶的招式照 OP.GG 使用率抽（simSampleMoves，同一組兩場一樣）；比「看不到對手招式」要用這個，預設配招時看得到看不到一樣。
 //   node tools/sim_ai.js diff 輸出檔 [場數 100] [老師 tree:800] [種子 7] [排名前幾名 60]
 //     雙方都用目前的快速（ply1）打（組隊同 vs），每次要選擇（出招、補位）時也讓老師在同一個局面算一次（老師不影響這場怎麼打）。
 //     輸出檔每行一筆 JSON：type 'dec' 一方的一次選擇（局面、選項、快速和老師的出法比例、各選項在老師評分下的分數、
@@ -12,14 +13,17 @@
 //     最後印 regret 的分布、「快速最常選的 → 老師最常選的」各類合計、regret 最大的幾筆。
 // 決策寫法：ply1（往前算一回合，simDecide）、tree:800（樹搜尋 800 次，simSearch）；前面加「git 版本@」用那個版本的引擎與資料
 // （例如 HEAD@ply1：改 sim.js 前後比強弱）。對打的規則（simTurn 等）一律用目前的檔案，只有選擇（含打完換人換誰）用各自的引擎。
+// 後面加「+prob」「+top」＝看不到對手招式（simDecideHid）：prob 照使用率抽 4 組、各選項分數平均取最高（+prob8 抽 8 組）、
+// top 當成使用率最高的 4 招（網頁現在的做法），
+// 例如 ply1+prob、tree:400+top；沒加＝看得到對手實際帶的招式。只有 vs 能用。
 const fs = require('fs'), vm = require('vm'), path = require('path'), os = require('os'), { execFileSync } = require('child_process');
 const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
 const R = path.resolve(__dirname, '..');
 const FILES = ['base-stats.js', 'mons-data.js', 'js/engine/core.js', 'js/engine/roles.js', 'js/engine/damage.js', 'js/engine/sim.js'];
 const NAMES = ['MONS', 'MON', 'MOVES', 'SIM_MAX_TURN', 'simMon', 'simItems', 'simStart', 'simTurn', 'simReplace', 'simOver', 'simNeed', 'simWinner',
-  'simCtx', 'simDecide', 'simSearch', 'simGreedyPick', 'simRng', 'simKey', 'simBaseKey'];
+  'simCtx', 'simDecide', 'simSearch', 'simGreedyPick', 'simRng', 'simKey', 'simBaseKey', 'simDecideHid', 'simSampleMoves', 'defaultSet'];
 // 各方決策用的亂數（和打的亂數分開，兩場交換決策時同一方的亂數不變）
-const SALT = [0x5bd1e995, 0x27d4eb2f, 0x165667b1];
+const SALT = [0x5bd1e995, 0x27d4eb2f, 0x165667b1, 0x3c6ef372];
 
 // ---------- 載入引擎 ----------
 // 原始碼：ref＝git 版本（空字串＝目前的檔案）；主程式讀好傳給 worker
@@ -33,13 +37,17 @@ function engine(ref = '') {
   engines.set(ref, g.E);
   return g.E;
 }
-// 決策：spec 見檔案開頭；decide(ctx, st, phase, rnd, stats) 回傳 [第 0 方, 第 1 方] 的選擇（stats＝附上根節點的評分，見 simDecide／simSearch）
+// 決策：spec 見檔案開頭；decide(ctx, st, phase, rnd, { stats, s }) 回傳陣列，[s] 是第 s 方的選擇
+// （看得到的回傳 [第 0 方, 第 1 方]；stats＝附上根節點的評分，見 simDecide／simSearch。看不到對手招式的只有 [s]）
 function decider(spec) {
-  const at = spec.lastIndexOf('@'), ref = at >= 0 ? spec.slice(0, at) : '', [algo, n] = spec.slice(at + 1).split(':');
-  if (algo !== 'ply1' && algo !== 'tree') throw new Error(`看不懂的決策「${spec}」：寫 ply1、tree:800，或前面加 git 版本@（例如 HEAD@ply1）`);
-  const E = engine(ref);
-  return { spec, ref, algo, E, decide: algo === 'tree' ? (ctx, st, phase, rnd, stats) => E.simSearch(ctx, st, phase, +n || 200, rnd, stats)
-    : (ctx, st, phase, rnd, stats) => E.simDecide(ctx, st, phase, rnd, stats) };
+  const at = spec.lastIndexOf('@'), ref = at >= 0 ? spec.slice(0, at) : '', [core, hid = ''] = spec.slice(at + 1).split('+'), [algo, n] = core.split(':');
+  const how = hid.replace(/\d+$/, ''), K = +hid.replace(/^\D+/, '') || undefined;
+  if (algo !== 'ply1' && algo !== 'tree' || hid && how !== 'prob' && how !== 'top')
+    throw new Error(`看不懂的決策「${spec}」：寫 ply1、tree:800，可加 git 版本@（例如 HEAD@ply1）、+prob／+top（看不到對手招式）`);
+  const E = engine(ref), iters = +n || 200;
+  const decide = how ? (ctx, st, phase, rnd, o) => { const a = []; a[o.s] = E.simDecideHid(ctx, st, phase, rnd, o.s, algo, iters, how, K); return a; }
+    : algo === 'tree' ? (ctx, st, phase, rnd, o) => E.simSearch(ctx, st, phase, iters, rnd, o.stats) : (ctx, st, phase, rnd, o) => E.simDecide(ctx, st, phase, rnd, o.stats);
+  return { spec, ref, algo, hid: how, E, decide };
 }
 
 // ---------- 組隊、打一場 ----------
@@ -54,10 +62,12 @@ function teams(n, seed, top) {
   };
   return Array.from({ length: n }, (_, id) => ({ id, T: [one(), one()], seed: seed * 100000 + id }));
 }
-// 打一場（同 simPlay，但雙方的選擇由 mk(st) 給的 decide(phase)、pick 決定）：T＝[第 0 方, 第 1 方] 的寶可夢 key
-function play(T, seed, log, mk) {
-  const E = engine(), rnd = E.simRng(seed), rctx = E.simCtx('s');
-  const st = E.simStart(T.map((keys, s) => { const items = E.simItems(keys, 's'); return { mons: keys.map((k, j) => E.simMon(k, undefined, items[j], s, 's')) }; }), log);
+// 打一場（同 simPlay，但雙方的選擇由 mk(st) 給的 decide(phase)、pick 決定）：T＝[第 0 方, 第 1 方] 的寶可夢 key；
+// sets 'prob'＝實際帶的招式照使用率抽（其他照預設配招；用 seed 抽，同一組兩場一樣）
+function play(T, seed, log, mk, sets) {
+  const E = engine(), rnd = E.simRng(seed), rctx = E.simCtx('s'), srnd = E.simRng(seed ^ SALT[3]);
+  const setOf = k => { const d = sets === 'prob' && E.defaultSet(k, 's'); return d ? { ...d, moves: E.simSampleMoves(k, 's', [], srnd, 'prob') } : undefined; };
+  const st = E.simStart(T.map((keys, s) => { const items = E.simItems(keys, 's'); return { mons: keys.map((k, j) => E.simMon(k, setOf(k), items[j], s, 's')) }; }), log);
   const { decide, pick } = mk(st);
   while (!E.simOver(st) && st.turn < E.SIM_MAX_TURN) {
     E.simTurn(rctx, st, decide('turn'), rnd, 0, pick);
@@ -69,7 +79,7 @@ function play(T, seed, log, mk) {
 // ms[s]：第 s 方選擇花的時間累計（毫秒）
 const mkVs = (D, seed, ms) => st => {
   const ctx = D.map(d => d.E.simCtx('s')), rnd = [0, 1].map(s => engine().simRng(seed ^ SALT[s]));
-  const timed = s => phase => { const t0 = performance.now(), a = D[s].decide(ctx[s], st, phase, rnd[s])[s]; ms[s] += performance.now() - t0; return a; };
+  const timed = s => phase => { const t0 = performance.now(), a = D[s].decide(ctx[s], st, phase, rnd[s], { s })[s]; ms[s] += performance.now() - t0; return a; };
   const dec = [timed(0), timed(1)];
   return { decide: phase => [dec[0](phase), dec[1](phase)], pick: (c, s, hit) => D[s].E.simGreedyPick(ctx[s], c, s, hit) };
 };
@@ -110,8 +120,8 @@ const mkDiff = (S, teach, seed, g, out) => st => {
   const sctx = S.E.simCtx('s'), tctx = teach.E.simCtx('s'), srnd = engine().simRng(seed ^ SALT[0]), trnd = engine().simRng(seed ^ SALT[2]);
   return {
     decide: phase => {
-      const a = S.decide(sctx, st, phase, srnd, true);
-      if (a.stats) compare(st, phase, a.stats, teach.decide(tctx, st, phase, trnd, true).stats, teach, g, out);
+      const a = S.decide(sctx, st, phase, srnd, { stats: true });
+      if (a.stats) compare(st, phase, a.stats, teach.decide(tctx, st, phase, trnd, { stats: true }).stats, teach, g, out);
       return [a[0], a[1]];
     },
     pick: (c, s, hit) => S.E.simGreedyPick(sctx, c, s, hit)
@@ -124,7 +134,7 @@ if (!isMainThread) {
   parentPort.on('message', c => {
     if (mode === 'vs') {
       // 第一場 A 是第 0 方，第二場交換；A 的分數：贏 1、平手 0.5
-      const ms = [[0, 0], [0, 0]], g = [[D[0], D[1]], [D[1], D[0]]].map((pair, i) => play(c.T, c.seed, false, mkVs(pair, c.seed, ms[i])));
+      const ms = [[0, 0], [0, 0]], g = [[D[0], D[1]], [D[1], D[0]]].map((pair, i) => play(c.T, c.seed, false, mkVs(pair, c.seed, ms[i]), c.sets));
       const scA = [g[0].w === 0 ? 1 : g[0].w === 1 ? 0 : 0.5, g[1].w === 1 ? 1 : g[1].w === 0 ? 0 : 0.5];
       // A 第一場是第 0 方、第二場是第 1 方
       parentPort.postMessage({ id: c.id, sc: scA, turns: g.map(x => x.turns), ms: [ms[0][0] + ms[1][1], ms[0][1] + ms[1][0]] });
@@ -163,10 +173,10 @@ async function runAll(mode, specs, cases, got) {
 async function main() {
   const [mode, ...a] = process.argv.slice(2);
   if (mode === 'vs') {
-    const [A, B] = a, [N, SEED, TOP] = [+(a[2] || 200), +(a[3] || 7), +(a[4] || 60)];
-    if (!A || !B) throw new Error('用法：node tools/sim_ai.js vs 決策A 決策B [組數 200] [種子 7] [排名前幾名 60]');
-    const cases = teams(N, SEED, TOP), sc = [], turns = [], ms = [0, 0];
-    console.log(`A＝${A}、B＝${B}：單打前 ${TOP} 名隨機兩隊 ${N} 組，每組交換決策各打一場`);
+    const [A, B] = a, [N, SEED, TOP, SETS] = [+(a[2] || 200), +(a[3] || 7), +(a[4] || 60), a[5] || 'def'];
+    if (!A || !B || !['def', 'prob'].includes(SETS)) throw new Error('用法：node tools/sim_ai.js vs 決策A 決策B [組數 200] [種子 7] [排名前幾名 60] [配招 def／prob]');
+    const cases = teams(N, SEED, TOP).map(c => ({ ...c, sets: SETS })), sc = [], turns = [], ms = [0, 0];
+    console.log(`A＝${A}、B＝${B}：單打前 ${TOP} 名隨機兩隊 ${N} 組，每組交換決策各打一場${SETS === 'prob' ? '；實際招式照使用率抽' : ''}`);
     const sec = await runAll('vs', [A, B], cases, m => { sc.push((m.sc[0] + m.sc[1]) / 2); turns.push(...m.turns); ms[0] += m.ms[0]; ms[1] += m.ms[1]; });
     const all = sc.length, mean = sc.reduce((t, x) => t + x, 0) / all, sd = Math.sqrt(sc.reduce((t, x) => t + (x - mean) ** 2, 0) / Math.max(1, all - 1));
     const res = { win: 0, lose: 0, draw: 0 };

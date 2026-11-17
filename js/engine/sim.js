@@ -1808,6 +1808,8 @@ function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
   if (k !== 'copycat') st.lastMv = k;
   if (!called) {
   M.last = k;
+  // 對手看到的招式（看不到對手招式的決策 simDecideHid 用）：真的出了招才算（不能動的沒露出來），換下場也記得；換新陣列，局面複本才不會共用
+  if (k !== SIM_STRUGGLE && !M.seen?.includes(k)) M.seen = [...(M.seen || []), k];
   // 鳥嘴加農炮出招了就不再加熱（Showdown beakblast onAfterMove；這時對手的接觸招式已經打完）
   if (k === 'beak-blast') delete M.v.beak;
   // 節拍器（道具）：上一回合成功用的也是這招就連用次數 +1，不然從 0 算（Showdown metronome onTryMove 的 lastMove、moveLastTurnResult；見 simCalc）
@@ -2710,6 +2712,49 @@ function simDecide(ctx, st, phase, rnd, stats) {
   const [pa, pb] = simMix(v), out = [A[simDraw(pa, rnd)], B[simDraw(pb, rnd)]];
   if (stats) out.stats = { opts: [A, B], v, p: [pa, pb] };
   return out;
+}
+// ---------- 看不到對手招式 ----------
+// 實戰看不到對手的配招，只知道 OP.GG 的使用率和牠用過的招（M.seen，見 simMoveIn）。這一版只把招式當未知，道具、特性、點數、後排是誰仍當已知。
+// key 這隻的 4 招：seen 先放，其餘從 OP.GG 常用招式補——how 'top'＝補使用率最高的（網頁現在把對手當成 OP.GG 常見配置＝defaultSet 前 4 招的做法）、
+// 'prob'＝照使用率加權、不放回抽（rnd）；最後同 simMon 只留模擬算得了的（simCanUse）
+function simSampleMoves(key, fmt, seen, rnd, how) {
+  const out = seen.slice(0, 4), pool = (useOf(key, fmt)?.moves || []).filter(([k]) => MOVES[k] && !out.includes(k));
+  if (how === 'top') return [...out, ...byUse(pool).slice(0, 4 - out.length).map(([k]) => k)].filter(simCanUse);
+  const left = pool.slice();
+  while (out.length < 4 && left.length) {
+    let x = rnd() * left.reduce((t, [, p]) => t + p, 0), i = 0;
+    while (i < left.length - 1 && (x -= left[i][1]) >= 0) i++;
+    out.push(left.splice(i, 1)[0][0]);
+  }
+  return out.filter(simCanUse);
+}
+// 第 s 方看不到對手招式時的選擇：對手（1−s 方）每隻還站著、沒變身的招式換成 simSampleMoves 的（PP：用過的照實際剩下、沒用過的全滿），
+// 各組用 algo（'ply1' simDecide；'tree' simSearch，iters 平均分給各組，總次數不變）算。
+// how 'prob'＝照使用率抽 n 組，第 s 方每個選項對「那組裡對手的出法比例」的分數平均，取平均最高的；
+// how 'top'＝當成使用率最高的 4 招（用過的換進去）只算 1 組，照算出的出法比例抽（網頁現在把對手當成 OP.GG 常見配置的做法；沒給 rnd 取最高）。
+// 2026-11-17 tools/sim_ai.js（快速、實際招式照使用率抽、500 組）：看得到 vs top 51.5%；prob vs top 52.4%；同樣取最高分時 prob 贏 top 54.1%；
+// 改成平均各組的出法比例再抽則輸 top（44.5%），所以 prob 平均的是分數。抽招式用 rnd，沒給用固定種子（同局面每次一樣）。回傳第 s 方的選擇
+const SIM_HID_N = 4;
+function simDecideHid(ctx, st, phase, rnd, s, algo = 'ply1', iters = 400, how = 'prob', n = SIM_HID_N) {
+  const opts = simPhaseOpts(ctx, st, s, phase);
+  if (opts.length === 1) return opts[0];
+  const K = how === 'top' ? 1 : n, r = rnd || simRng(0x51ed27 ^ st.turn), at = new Map(opts.map((o, i) => [simKey(o), i])), p = opts.map(() => 0), val = opts.map(() => 0);
+  for (let g = 0; g < K; g++) {
+    const c = simClone(st);
+    c.sd[1 - s].mons.forEach(O => {
+      if (O.tf || O.hp <= 0) return;
+      const mv = simSampleMoves(O.key, ctx.fmt, O.seen || [], r, how);
+      if (!mv.length) return;
+      O.moves = mv;
+      O.pp = Object.fromEntries(mv.map(k => [k, O.pp[k] ?? MOVES[k][5] ?? Infinity]));
+    });
+    const out = algo === 'tree' ? simSearch(ctx, c, phase, Math.max(1, Math.round(iters / K)), rnd, true) : simDecide(ctx, c, phase, null, true);
+    if (!out.stats) { p[at.get(simKey(out[s]))] += 1; continue; }
+    // rv＝第 s 方各選項對這組對手出法比例的分數（第 s 方角度，越大越好）
+    const x = out.stats, rv = s === 0 ? x.v.map(row => row.reduce((t, y, j) => t + y * x.p[1][j], 0)) : x.v[0].map((_, j) => -x.v.reduce((t, row, i) => t + row[j] * x.p[0][i], 0));
+    x.opts[s].forEach((o, i) => { const j = at.get(simKey(o)); if (j != null) { p[j] += x.p[s][i]; val[j] += rv[i]; } });
+  }
+  return how === 'prob' ? opts[val.indexOf(Math.max(...val))] : opts[simDraw(p, rnd)];
 }
 // 打一場：sides＝[我方, 對手]，每方 { mons 帶出場的（simMySide／simOppScenarios 的 mons，先發排第一）}（會複製一份，不改到 sides）；
 // rnd 亂數；log＝要不要逐回合紀錄。
