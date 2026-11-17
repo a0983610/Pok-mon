@@ -2529,12 +2529,29 @@ function simReplace(st, picks, rnd) {
 // 從局面 st 用簡單規則雙方打下去（最多再 SIM_LOOK 回合），回傳 simValue；rnd＝照亂數打（樹搜尋用），沒給用期望值。
 // 補位換上來又被撒菱類打倒的再補（補到有人站著才開打）；期望值打時同速輪流誰先：每次打下去換一邊起頭（ctx.flip）、之後每回合再輪流
 // （不然一律我方先，評估會偏向我方；只看回合單雙也不行，樹搜尋往下打大多從同一個回合開始，會固定偏向一方）
-function simRollout(ctx, st, rnd = null) {
-  const end = st.turn + SIM_LOOK, pick = (c, s, hit) => simGreedyPick(ctx, c, s, hit), f = ctx.flip = (ctx.flip || 0) ^ 1;
+// split＝期望值打時第一次遇到同速（雙方都出招、先制等級一樣、速度一樣，同 simTurn 的 tied），兩種先後都打到底取平均（只分岔這一次，之後照輪流）：
+// 往前算一回合（simDecide）每格只推演一次，同速決勝負時分數變成看 ctx.flip 剛好輪到誰（同一格可能 +1.1 也可能 −1.0；2026-11-17 tools/sim_ai.js
+// 重播：愛管侍對河馬獸，推演到後面雙方的戟脊龍同速）。樹搜尋推演很多次、先後本來就會輪流平均，不分岔
+function simRollout(ctx, st, rnd = null, split = false) {
+  const f = ctx.flip = (ctx.flip || 0) ^ 1;
+  return simPlayout(ctx, st, rnd, st.turn + SIM_LOOK, f, split && !rnd);
+}
+const simTieAhead = (ctx, st, acts) => acts.every(a => a.t === 'mv' || a.t === 'rech') && simAct(st, 0).hp > 0 && simAct(st, 1).hp > 0
+  && [0, 1].map(s => acts[s].t === 'rech' ? 0 : simPri(st, simAct(st, s), acts[s].k)).reduce((a, b) => a === b)
+  && simSpeed(ctx, st, simAct(st, 0)) === simSpeed(ctx, st, simAct(st, 1));
+function simPlayout(ctx, st, rnd, end, f, split) {
+  const pick = (c, s, hit) => simGreedyPick(ctx, c, s, hit);
   while (!simOver(st) && st.turn < end) {
     while (!simOver(st) && (simNeed(st, 0) || simNeed(st, 1))) simReplace(st, [0, 1].map(s => simNeed(st, s) ? { t: 'sw', i: pick(st, s) } : { t: 'pass' }), rnd);
     if (simOver(st)) break;
-    simTurn(ctx, st, [0, 1].map(s => simGreedyAct(ctx, st, s)), rnd, (st.turn + f) & 1, pick);
+    const acts = [0, 1].map(s => simGreedyAct(ctx, st, s)), tie = (st.turn + f) & 1;
+    if (split && simTieAhead(ctx, st, acts)) {
+      const other = simClone(st);
+      simTurn(ctx, st, acts, rnd, tie, pick);
+      simTurn(ctx, other, acts, rnd, 1 - tie, pick);
+      return (simPlayout(ctx, st, rnd, end, f, false) + simPlayout(ctx, other, rnd, end, f, false)) / 2;
+    }
+    simTurn(ctx, st, acts, rnd, tie, pick);
   }
   return simValue(st);
 }
@@ -2684,7 +2701,7 @@ function simDecide(ctx, st, phase, rnd, stats) {
     const c = simClone(st);
     const tied = phase === 'turn' ? simTurn(ctx, c, acts, null, tie, pick) : (simReplace(c, acts, null), false);
     const now = simValue(c);
-    return [simRollout(ctx, c) + SIM_TIE_W * now, tied];
+    return [simRollout(ctx, c, null, true) + SIM_TIE_W * now, tied];
   };
   const v = A.map(a => B.map(b => {
     const [x, tied] = run([a, b], 0);
