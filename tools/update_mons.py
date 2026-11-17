@@ -116,9 +116,14 @@ def move_extra(m):
     return x
 
 
+# OP.GG 屬性和冠軍版不一樣的招式：捕獸夾冠軍版從草改成鋼（Bulbapedia、Showdown 冠軍版 mod、Smogon 冠軍版計算機），
+# OP.GG 還是草（2026-11-17 使用者決定照冠軍版）
+TYPE_FIX = {'snap-trap': 'steel'}
+
+
 def move_row(m):
     # 招式一筆：[中文名, 屬性, 分類, 威力, 效果, PP, 命中率, 先制等級, 目標範圍, 其他（move_extra）]
-    return [m['name'], m['type'], m['category'], m['power'], clean(m['effect'] or m['description']),
+    return [m['name'], TYPE_FIX.get(m['key'], m['type']), m['category'], m['power'], clean(m['effect'] or m['description']),
             m.get('pp'), m.get('accuracy'), m.get('priority') or 0, m.get('target'), move_extra(m)]
 
 

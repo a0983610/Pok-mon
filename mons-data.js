@@ -962,7 +962,7 @@ const MOVES = {
 "sludge-bomb":["污泥炸彈","poison","special",90,"向對手投擲污泥進行攻擊。有時會讓對手陷入中毒狀態。",12,100,0,"selected-pokemon",{"ail":"poison","ailP":30,"tr":["ball-bomb"]}],
 "sludge-wave":["污泥波","poison","special",95,"用污泥波攻擊自己周圍所有的寶可夢。有時會讓對手陷入中毒狀態。",12,100,0,"all-other-pokemon",{"ail":"poison","ailP":10}],
 "smack-down":["擊落","rock","physical",50,"向空中的對手投擲石頭或炮彈等物體進行攻擊。對手會被擊落，掉到地面。",16,100,0,"selected-pokemon",{"ail":"unknown","ailP":100}],
-"snap-trap":["捕獸夾","grass","physical",35,"用捕獸夾，在４～５回合內夾住對手進行攻擊。",16,100,0,"selected-pokemon",{"ail":"trap","ailP":100,"tr":["contact"]}],
+"snap-trap":["捕獸夾","steel","physical",35,"用捕獸夾，在４～５回合內夾住對手進行攻擊。",16,100,0,"selected-pokemon",{"ail":"trap","ailP":100,"tr":["contact"]}],
 "snarl":["大聲咆哮","dark","special",55,"沒完沒了地向對手大聲咆哮，降低對手的特攻。",16,95,0,"all-opponents",{"stP":100,"st":[["special-attack",-1]],"tr":["sound"]}],
 "snipe-shot":["狙擊","water","special",85,"無視會吸引招式的特性和招式效果。此招式擊中要害的機率提高1階。",16,100,0,"selected-pokemon",{"cr":1}],
 "snowscape":["雪景","ice","status",null,"在5回合內下雪。冰屬性的防禦會提高。",8,null,0,"entire-field",{}],

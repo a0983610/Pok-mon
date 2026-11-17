@@ -36,8 +36,7 @@ const alnum = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
 // ---------- 已知的缺口（還沒做的）：Showdown id → 原因；有差異的組合牽涉到這些就標 △ ----------
 const KNOWN = Object.fromEntries(Object.entries({
-  // OP.GG 是草屬性，Showdown 冠軍版 mod 與 Smogon 冠軍版計算機是鋼屬性；2026-11-12 使用者選照 OP.GG 不改
-  '捕獸夾屬性（照 OP.GG 的草，使用者決定）': 'snaptrap',
+  // 目前沒有（捕獸夾屬性 2026-11-17 改成照冠軍版的鋼，update_mons.py 的 TYPE_FIX）
 }).flatMap(([why, ks]) => ks.split(' ').map(k => [k, why])));
 // 冠軍版改過、對照的 Showdown 還沒跟上的招式資料（OP.GG 的才對）：比對前先把 Showdown 的改成冠軍版的（moves 模式不改，才看得到差在哪）。
 // 格式 { 招式 id: { pp: 5 } }（冠軍版 PP＝(pp ÷ 5 ＋ 1) × 4，8 PP 填 5）。目前沒有：以前補的祈願、吸取力量 PP 8，劈開 80、流星突擊 170，
