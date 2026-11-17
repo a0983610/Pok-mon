@@ -2497,16 +2497,21 @@ function simGreedySup(st, s, M, T, k, dt, dm) {
 // 補位、打完換人：後排每隻和對手場上那隻一對一（雙方最痛一招的期望傷害、速度）：打得贏的優先、再比打完剩下的 HP；
 // 打不贏的比倒下前能打掉對方多少。對手場上那隻也倒了就挑剩下 HP 比例最高的。
 // hit＝換上來先吃對手最痛的一招才開打（對手這回合還沒出招時的急速折返類）：少撐一下，換上來就被打倒的算 0
+// 複製換上來就抄到對手的特性（同 simTrace），照抄到的算；滿血帶氣勢披帶、有結實（對手不是破格）的，對手最痛一招不是連續攻擊、一下打得倒時算撐兩下
+// （同 simFixed／damageCalc 的 endured）。2026-11-17 tools/sim_ai.js 實例：沒算這兩項，路卡利歐倒下後推演換上超級暴鯉龍而不是帶氣勢披帶、
+// 複製抄到適應力的沙奈朵，快速模式就把「攻擊」誤判成必輸（實打 100% 贏）而換人（實打 4%）
 function simGreedyPick(ctx, st, s, hit = false) {
   const bench = simBench(st, s), T = simAct(st, 1 - s);
   if (bench.length < 2) return bench[0];
   const score = i => {
     const M = st.sd[s].mons[i];
     if (T.hp <= 0) return M.hp / M.max;
-    // 特性變身者的換上來就變成對手那隻：招式、能力照對手的算（HP 是自己的、道具照自己的算速度）
-    const imp = M.b.ab === 'imposter' && !T.tf && !T.v.sub, src = imp ? T : M;
-    const dm = Math.max(0, ...src.moves.map(k => simExp(ctx, st, src, T, k))), dt = Math.max(0, ...T.moves.map(k => simExp(ctx, st, T, src, k)));
-    const n1 = dm ? Math.ceil(T.hp / dm) : Infinity, n2 = (dt ? Math.ceil(M.hp / dt) : Infinity) - (hit ? 1 : 0);
+    // 特性變身者的換上來就變成對手那隻：招式、能力照對手的算（HP 是自己的、道具照自己的算速度）；複製的換成抄到的特性（simCalc 快取的鍵有特性）
+    const imp = M.b.ab === 'imposter' && !T.tf && !T.v.sub, tr = M.b.ab === 'trace' && T.b.ab && !SIM_NOTRACE.has(T.b.ab);
+    const src = imp ? T : tr ? { ...M, b: { ...M.b, ab: T.b.ab } } : M;
+    const tExp = T.moves.map(k => simExp(ctx, st, T, src, k)), dm = Math.max(0, ...src.moves.map(k => simExp(ctx, st, src, T, k))), dt = Math.max(0, ...tExp);
+    const endure = M.hp >= M.max && dt >= M.hp && !HITS[T.moves[tExp.indexOf(dt)]] && (M.item === 'focus-sash' || src.b.ab === 'sturdy' && T.b.ab !== 'mold-breaker');
+    const n1 = dm ? Math.ceil(T.hp / dm) : Infinity, n2 = (dt ? (endure ? 2 : Math.ceil(M.hp / dt)) : Infinity) - (hit ? 1 : 0);
     if (n2 <= 0) return 0;
     const fast = simFaster(st, simSpeed(ctx, st, imp ? { ...T, item: M.item, status: M.status } : M), simSpeed(ctx, st, T));
     if (n1 < n2 || (n1 === n2 && fast && n1 < Infinity)) return 2 + Math.max(0, M.hp - dt * ((fast ? n1 - 1 : n1) + (hit ? 1 : 0))) / M.max;
