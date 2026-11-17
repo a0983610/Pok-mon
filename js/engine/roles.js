@@ -170,9 +170,9 @@ const lackNeeds = (roles, fmt) => roles.length ? NEEDS[fmt].filter(n => !roles.s
 // 搭配、角色、隊友只在隊上已有挑了寶可夢的隊員、候選有排名時比（候選在 fmt 沒排名時，OP.GG 仍可能有零星統計，樣本太少不採用）。
 // 超級進化和原型屬性一樣、比較結果也一樣時只留原型。fix 每項是 { w 解決的提醒, by 候選撐起它的特性／招式（traitScan 的 has 項目）}
 // sets：隊上成員 key → 登錄的配招（見 useOf）；候選照挑了以後會登錄的預設配招（defaultSet）評估角色、搭配與對策，加入後說的才對得上。
-// miss：給了就是對策的對位沒算過的先不算（見 duelVs 的 miss；單打要打模擬，隊伍分析放到背景算完再重畫），threats 只列算好的
+// 隊伍分析的推薦（teamsim.js）：雙打照這個排；單打不給 units（對策改看 1 對 1 勝率表），只拿來挑候選，排名交給 3 對 3 模擬
 const COUNTER_RANK = 60;
-function recommendMon(others, base, fmt, onTeam = [], units = [], sets = {}, miss) {
+function recommendMon(others, base, fmt, onTeam = [], units = [], sets = {}) {
   const rk = m => m.rank[fmt] || Infinity, fams = onTeam.map(k => family(MON[k]));
   const lack = lackNeeds(onTeam.map(k => roleOf(k, fmt, sets[k])).filter(Boolean), fmt);
   const scan = onTeam.length ? traitScan(onTeam, fmt, sets) : null, before = scan ? scan.warns : [], me = onTeam.length;
@@ -190,7 +190,7 @@ function recommendMon(others, base, fmt, onTeam = [], units = [], sets = {}, mis
       // 對策只從排名前 COUNTER_RANK 的候選找（含牠們的超級進化；樣本夠多、配招統計可信，也免得上百隻候選都算傷害太慢），
       // 要先在屬性上擋得住或剋得到（answerOf，便宜），再看速度與傷害正面打得贏（teamVs）
       const me1 = { defs: m.types, atk: attacksOf(m.key, m.types, fmt, ds), key: m.key, set: ds };
-      const threats = rk(m) > COUNTER_RANK ? [] : none.filter(t => answerOf([me1], oppUnit(t, fmt)).level > 0 && teamVs([me1], t, fmt, miss).level > 0);
+      const threats = rk(m) > COUNTER_RANK ? [] : none.filter(t => answerOf([me1], oppUnit(t, fmt)).level > 0 && teamVs([me1], t, fmt).level > 0);
       const mates = role ? onTeam.filter(k => useOf(k, fmt)?.mates.includes(family(m)) || role.use.mates.includes(family(MON[k]))) : [];
       return { mon: m, role, fills: role ? lack.filter(n => needBy(role, n)) : [], fix, add, threats, mates, ...memberScore(others, m.types) };
     });
@@ -262,12 +262,10 @@ function duelP(fmt, x, yk, left) {
 // （forms 的 p＝{ head, sw } 兩種情況的勝率，沒算好或沒打換上來那場是 null；sim＝還沒有勝率時 simDuel 的結果）；雙打照 matchup。
 // 回傳 { sw 換上能扛, head 正面打得贏, ohko 會被牠先手一擊, p { head, sw } 各型態裡最低的勝率, forms 各型態的 matchup }；
 // 有一方沒有招式資料回傳 null（呼叫端改看屬性）。
-// miss：給了就不當場打模擬（單打第一次算的組合很花時間，隊伍分析的下一隻建議放到背景算）：沒算過的把參數 [key, set, fmt, m, base] 放進 miss、回傳 undefined
-function duelVs(key, set, fmt, m, base = false, miss) {
+function duelVs(key, set, fmt, m, base = false) {
   if (!key || !useOf(key, fmt, set)?.moves.length || !useOf(m.key, fmt)?.moves.length) return null;
   const memo = [fmt, key, base, JSON.stringify(set || null), m.key].join('|');
   if (!MATCH_MEMO.has(memo)) {
-    if (miss && fmt === 's') { miss.push([key, set, fmt, m, base]); return undefined; }
     // 特性變身者（百變怪）照變成對面那隻算（imposterVs；我方先變，對手再變的話對面已經是變身來的就失敗）；pend＝還沒算好的勝率（見 MATCH_DEP）
     // dset＝登錄的配招就是預設配招：和不給配招一樣（battler 的值相同、模擬只拿配招的招式；單打前 100 名互打的對位逐組比過相同），
     // 勝率當成沒給配招，和事先算好的、推薦的候補共用
@@ -296,12 +294,11 @@ function duelVs(key, set, fmt, m, base = false, miss) {
 const typeVs = (unit, ou) => { const a = answerOf([unit], ou); return { sw: a.level === 2, head: a.hit.length > 0, ohko: false, type: true }; };
 // 隊員 members（unitOf：defs、atk、key、set）對上一隻對手寶可夢 m：safe＝換上能扛、hit＝正面打得贏、ohko＝會被牠先手一擊（都是 members 的索引）；
 // 有人換上能扛＝有解(2)、有人正面打得贏＝半解(1)、都沒有＝沒解(0)。同出戰選角的對位（duelVs，沒有招式資料的看屬性 typeVs）。
-// miss：同 duelVs，沒算過的隊員先跳過（不算進 safe／hit／ohko）。另外回傳 p[i]＝第 i 隻的勝率 { head, sw }（duelVs 的 p；沒有是 null）
-function teamVs(members, m, fmt, miss) {
+// 另外回傳 p[i]＝第 i 隻的勝率 { head, sw }（duelVs 的 p；沒有是 null）
+function teamVs(members, m, fmt) {
   const ou = oppUnit(m, fmt), safe = [], hit = [], ohko = [], p = [];
   members.forEach((u, i) => {
-    const d = duelVs(u.key, u.set, fmt, m, false, miss);
-    if (d === undefined) return;
+    const d = duelVs(u.key, u.set, fmt, m, false);
     const r = d || typeVs(u, ou);
     if (r.sw) safe.push(i);
     if (r.head) hit.push(i);

@@ -1,7 +1,7 @@
 // ---------- 單打對位勝率的背景計算 ----------
 // duelVs 用到、還沒算好的勝率（duelP 排進 SIM_P_WANT）交給背景計算（sim-worker.js 的 duel 訊息，開幾個同模擬分頁的 simWkN），
 // 算好一組就 simPDone（存進 MATCH_P、清掉用到它的對位快取）；累積一下（PBG_REDRAW 毫秒）就重畫目前的分頁（隊伍分析、出戰選角、對戰中、模擬對戰），
-// 滑鼠按著或游標在輸入框、選單時先不畫（同隊伍分析的 teamBg，免得吃掉點擊、打到一半的數字被換掉）。
+// 滑鼠按著或游標在輸入框、選單時先不畫（免得吃掉點擊、打到一半的數字被換掉）。
 // file:// 或背景計算開不起來時，在畫面這邊一小段一小段算（每次一組，算完讓畫面喘口氣再算下一組）。
 // 進度：畫面上 data-pprog 的元素寫「算了 N／M 組」（pBgNote 給的提示）
 const pBg = { wks: [], idle: [], args: new Map(), q: [], done: 0, total: 0, timer: 0, redraw: 0, local: false, down: false };
@@ -72,7 +72,7 @@ function pBgRedraw() {
   else if (curTab === 'battle') renderBattle();
   else if (curTab === 'sim') renderSim();
 }
-// ---------- 一批 3 對 3 的背景計算（出戰選角的「用模擬比較帶法」用；整隊模擬另有自己的一套）----------
+// ---------- 一批 3 對 3 的背景計算（出戰選角的「用模擬比較帶法」用；隊伍分析推薦的模擬排序另有自己的一套，見 teamsim.js）----------
 // jobs[i]＝{ sides [我方, 對手]（每方 { mons }）, seed 亂數種子 }，opt 同 simPlay；每場打完 onRes(i, out)，全部打完或停止時 onEnd()。
 // 開幾個同模擬分頁的 simWkN 背景計算（每場開打前 ctx.flip 歸零、照種子打，同一場在哪裡打都一樣）；開不起來（file://）在畫面這邊一場一場打
 // （每段約 50 毫秒，打完讓畫面喘口氣）。回傳 { stop() }

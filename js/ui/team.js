@@ -10,86 +10,58 @@ const slotName = i => team.mons[i] ? MON[team.mons[i]].zh : team.slots[i].map(id
 // 隊伍格子 [屬性, 格子索引] → 對位用的 { defs, atk }（answerOf 的格式）＋ key、set（teamVs 看速度與傷害用）
 const unitOf = ([s, i]) => ({ defs: s, atk: attacksOf(team.mons[i], s, team.fmt, team.sets[i]), key: team.mons[i], set: team.sets[i] });
 const rankText = m => `${FMT_ZH[team.fmt]}${m.rank[team.fmt] ? ' #' + m.rank[team.fmt] : '無排名'}`;
-// 目前格子的推薦，點了直接放進這格：屬性推薦前 5 名（空格推第一個屬性、已選一個就推第二個），再加推薦寶可夢前 5 名
-// （recs＝目前格子就是第一個空格時 renderTeam 已經算好的 firstRecs，同一份就不再算一次；miss＝對策還沒算的對位，見 teamBg）
-function teamRecHTML(gaps, warnNow, recs, miss) {
+// 目前格子的屬性推薦前 5 名，點了直接加入（空格推第一個屬性、已選一個就推第二個）；推薦寶可夢在最上面的「推薦」卡片（teamsim.js）
+function teamRecHTML(gaps, warnNow) {
   const base = team.slots[team.cur];
   if (base.length === 2 || team.mons[team.cur]) {
-    return team.slots.some((s, i) => s.length < 2 && !team.mons[i]) ? '<p class="muted small">點還沒選滿的格子，看建議補什麼。</p>' : '';
+    return team.slots.some((s, i) => s.length < 2 && !team.mons[i]) ? '<p class="muted small">點還沒選滿的格子，看建議補什麼屬性。</p>' : '';
   }
   const others = team.slots.filter((s, i) => i !== team.cur && s.length);
-  const units = team.slots.map((s, i) => [s, i]).filter(([s, i]) => i !== team.cur && s.length).map(unitOf);
   const names = ids => ids.map(id => T[id].zh).join('、');
   const delta = r => {
     const fixed = gaps.filter(g => !r.gaps.includes(g)), added = r.gaps.filter(g => !gaps.includes(g));
     return `<span>缺口 <b>${gaps.length} → ${r.gaps.length}</b>` + (fixed.length ? `・補上 ${names(fixed)}` : '')
       + (added.length ? `・新增 ${names(added)}` : '') + (warnNow || r.warn ? `・⚠ <b>${warnNow} → ${r.warn}</b>` : '') + '</span>';
   };
-  const list = (recs || recommendMon(others, base, team.fmt, team.mons.filter(Boolean), units, teamSets(), miss)).slice(0, 5);
-  return `<h3>第 ${team.cur + 1} 隻${base.length ? '的第二屬性' : ''}推薦</h3>`
+  return `<h3>第 ${team.cur + 1} 隻${base.length ? '的第二屬性' : ''}推薦屬性</h3>`
     + `<p class="muted small b-intro">依加入後隊伍的 ⚠ 數、缺口數由少到多排序，同分再比這隻自己弱點少、抵抗多；點一下直接加入${base.length ? '（這隻是單屬性就不用選，直接點下一格）' : ''}。</p><div class="b-rec">`
     + recommendMember(others, base).slice(0, 5).map((r, i) => `<button data-add="${r.id}"><span class="rank">${i + 1}</span>${chips(r.defs)}${delta(r)}</button>`).join('')
-    + `</div><h3>第 ${team.cur + 1} 隻推薦寶可夢</h3>`
-    + `<p class="muted small b-intro">從名單${base.length ? `裡有${T[base[0]].zh}屬性的` : ''}寶可夢挑，依序比：①搭配──能解決幾個「隊伍特性與場地招式」的提醒`
-    + `（隊上有戲法空間時，慢的攻擊手也算），扣掉會新增的；②能補上幾個「隊伍角色」缺的角色，加上能當幾隻「沒解」熱門威脅的對策`
-    + `（對策要${FMT_ZH[team.fmt]}排名前 ${COUNTER_RANK}、屬性上擋得住或剋得到，又正面打得贏）；`
-    + `③是不是 OP.GG 上隊上成員的常見隊友（搭配、角色、隊友要隊上已有挑了寶可夢的隊員）；④加入後隊伍的 ⚠ 數、缺口數；⑤${FMT_ZH[team.fmt]}排名。點一下直接放進這格。</p>`
-    + (miss.length ? teamBgNote : '') + '<div class="b-rec">'
-    + list.map((r, i) => `<button data-mon="${r.mon.key}"><span class="rank">${i + 1}</span>`
-      + `${recInfo(r)}${delta(r)}<span class="meta">攻擊 ${r.mon.bs[1]}・特攻 ${r.mon.bs[3]}・${rankText(r.mon)}</span></button>`).join('')
     + '</div>';
 }
-// 推薦寶可夢的說明：角色標籤、補什麼（角色、搭配）、對策（原本沒解的熱門威脅）、常見隊友、會新增的搭配提醒
-const recInfo = r => `<b>${r.mon.zh}</b>${chips(r.mon.types)}${r.role ? roleTags(r.role) : `<span class="meta">${FMT_ZH[team.fmt]}沒有統計</span>`}`
+// 推薦寶可夢的說明：角色標籤、補什麼（角色、搭配）、對策（原本沒解的熱門威脅）、常見隊友、會新增的搭配提醒（skip＝要換掉的格子，超級進化提醒不算那隻）
+const recInfo = (r, skip) => `<b>${r.mon.zh}</b>${chips(r.mon.types)}${r.role ? roleTags(r.role) : `<span class="meta">${FMT_ZH[team.fmt]}沒有統計</span>`}`
   + (r.fills.length || r.fix.length ? `<span class="fill">補：${[...new Set([...r.fills.map(n => n.zh + byText(needBy(r.role, n))), ...r.fix.map(fixText)])].join('、')}</span>` : '')
   + (r.threats.length ? `<span class="fill">對策：${r.threats.map(t => t.zh).join('、')}</span>` : '')
   + (r.mates.length ? `<span class="meta">常和 ${r.mates.map(k => MON[k].zh).join('、')} 同隊</span>` : '')
   + (r.add.length ? `<span class="meta">⚠ 搭配：${[...new Set(r.add.map(warnShort))].join('、')}</span>` : '')
-  + (r.mon.base && megaOn().length ? `<span class="meta">⚠ 隊上已有超級進化（${megaOn().map(k => MON[k].zh).join('、')}），一場只能進化一隻</span>` : '');
-// 隊上挑了的超級進化型態
-const megaOn = () => team.mons.filter(k => k && MON[k].base);
-// 隊伍總評：把搭配、缺的角色、沒解的熱門威脅、屬性弱點集中列出，每條附可以補的寶可夢，最後是下一隻建議。
-// 候選都是放進第一個空格（slot）時 recommendMon 的結果 recs（firstRecs，同一份排序，聯防搭檔也用），每條取前 3；6 隻都有屬性時不推薦
-const firstRecs = (members, slot, miss) => slot >= 0 ? recommendMon(members.map(([s]) => s), [], team.fmt,
-  members.filter(([, i]) => team.mons[i]).map(([, i]) => team.mons[i]), members.map(unitOf), teamSets(), miss) : [];
-// pend＝下一隻建議的對策還沒算完（teamBg），開頭顯示推演中
-function summaryHTML(members, recs, slot, pend) {
+  + (r.mon.base && megaOn(skip).length ? `<span class="meta">⚠ 隊上已有超級進化（${megaOn(skip).map(k => MON[k].zh).join('、')}），一場只能進化一隻</span>` : '');
+// 隊上挑了的超級進化型態（skip＝不算的格子）
+const megaOn = skip => team.mons.filter((k, i) => k && i !== skip && MON[k].base);
+// 隊伍總評：把搭配、缺的角色、沒解的熱門威脅、屬性弱點集中列出；要補誰、換誰看最上面的「推薦」卡片（teamsim.js）
+function summaryHTML(members) {
   const fmt = team.fmt, fz = FMT_ZH[fmt];
   const slots = members.filter(([, i]) => team.mons[i]).map(([, i]) => i), named = slots.map(i => team.mons[i]);
   const units = members.map(unitOf), sets = teamSets();
-  // cands：[[推薦項目, 按鈕上的補充說明]...]
-  const picks = cands => slot < 0 || !cands.length ? '' : '<span class="x-msg">可以補：</span>'
-    + cands.slice(0, 3).map(([r, note]) => `<button class="mini" data-mon="${r.mon.key}">${r.mon.zh}${note ? `<span class="meta">${note}</span>` : ''}</button>`).join('');
-  const line = (label, body, cands = []) => `<div class="issue"><span class="need no">${label}</span><span>${body}</span>${picks(cands)}</div>`;
+  const line = (label, body) => `<div class="issue"><span class="need no">${label}</span><span>${body}</span></div>`;
   const out = [];
   // 搭配：靠天氣／場地沒人開、戲法空間偏快、強化手沒有掩護可以靠加人補；兩種天氣、無關天氣、順風＋戲法空間要換人才解得掉
   (named.length ? traitScan(named, fmt, sets).warns : []).forEach(w => {
     const who = w.h ? `${slots[w.h.j] + 1} ${MON[named[w.h.j]].zh}：` : '';
-    const cands = w.kind === 'need' || w.kind === 'cover' ? recs.filter(r => r.fix.some(f => f.w.id === w.id))
-      : w.kind === 'trfast' ? recs.filter(r => r.fix.some(f => f.w.kind === 'trslow')) : [];
-    out.push(line('⚠ 搭配', who + warnShort(w) + (['two', 'nowx', 'twtr'].includes(w.kind) ? '（要換掉其中一隻）' : ''), cands.map(r => [r])));
+    out.push(line('⚠ 搭配', who + warnShort(w) + (['two', 'nowx', 'twtr'].includes(w.kind) ? '（要換掉其中一隻）' : '')));
   });
   // 一場只能超級進化一隻：隊上 2 隻以上時提醒（熱門威脅、速度線、角色都把牠們當成進化後；出戰選角會只讓其中一隻進化）
   if (megaOn().length > 1) out.push(line('⚠ 超級進化', `隊上有 ${megaOn().length} 隻超級進化（${megaOn().map(k => MON[k].zh).join('、')}），一場只能進化一隻；`
     + '下面的熱門威脅、速度線都當成每隻都進化了，實際帶出場時「出戰選角」只讓其中一隻進化、其他以原型上場（帶著超級石等於沒道具）'));
   lackNeeds(named.map(k => roleOf(k, fmt, sets[k])).filter(Boolean), fmt).forEach(n =>
-    out.push(line('✘ 缺角色', n.zh, recs.filter(r => r.fills.includes(n)).map(r => [r]))));
+    out.push(line('✘ 缺角色', n.zh)));
   const none = threatCheck(units, fmt, THREAT_N).filter(t => !t.level).map(t => t.mon);
-  if (none.length) out.push(line('✘ 熱門威脅沒解', none.map(m => m.zh).join('、'),
-    recs.filter(r => r.threats.length).sort((x, y) => y.threats.length - x.threats.length).map(r => [r, `${r.threats.length} 隻`])));
+  if (none.length) out.push(line('✘ 熱門威脅沒解', none.map(m => m.zh).join('、')));
   const rows = teamProfile(members.map(([s]) => s)), warn = rows.filter(r => r.warn), gaps = teamGaps(rows);
   if (warn.length || gaps.length) out.push(line('⚠ 屬性',
-    [warn.length && `要注意 ${warn.map(r => T[r.atk].zh).join('、')}`, gaps.length && `缺口 ${gaps.map(id => T[id].zh).join('、')}`].filter(Boolean).join('；'),
-    recs.filter(r => r.warn < warn.length || r.gaps.length < gaps.length).sort((x, y) => x.warn - y.warn || x.gaps.length - y.gaps.length)
-      .map(r => [r, `缺口 ${gaps.length}→${r.gaps.length}`])));
+    [warn.length && `要注意 ${warn.map(r => T[r.atk].zh).join('、')}`, gaps.length && `缺口 ${gaps.map(id => T[id].zh).join('、')}`].filter(Boolean).join('；')));
   return `<div class="res-head">隊伍總評<span class="muted small">（${fz}；${members.length} 隻，其中 ${named.length} 隻挑了寶可夢）</span></div>`
-    + (pend ? teamBgNote : '') + (out.length ? out.join('') : '<p class="b-sum">✔ 目前沒有明顯問題。</p>')
-    + (slot < 0 ? '<p class="muted small b-intro">6 隻都選了；要換人的話，點格子後重新選屬性、挑其他寶可夢就能換掉。</p>'
-      : `<h3>下一隻（第 ${slot + 1} 隻）建議</h3><div class="b-rec">`
-        + recs.slice(0, 3).map((r, i) => `<button data-mon="${r.mon.key}"><span class="rank">${i + 1}</span>${recInfo(r)}<span class="meta">${rankText(r.mon)}</span></button>`).join('')
-        + '</div>')
-    + `<p class="note">※ 問題整理自下面各卡片（隊伍角色、隊伍特性與場地招式、弱點總表、聯防搭檔、熱門威脅檢查）；「可以補」和「下一隻建議」`
-    + `都是放進第 ${slot + 1 || '—'} 隻（第一個空格）時的推薦，排序方式同弱點總表下的「推薦寶可夢」，點一下直接放進去。</p>`;
+    + (out.length ? out.join('') : '<p class="b-sum">✔ 目前沒有明顯問題。</p>')
+    + '<p class="note">※ 問題整理自下面各卡片（隊伍角色、隊伍特性與場地招式、弱點總表、聯防搭檔、熱門威脅檢查）；要補誰、換誰看最上面的「推薦」。</p>';
 }
 // 隊伍角色：挑了寶可夢的隊員依常用招式判斷角色、列出常用招式與效果，並對照 NEEDS 標出隊伍還缺什麼
 const MAIN_ZH = { phys: '物攻', spec: '特攻', sup: '輔助' };
@@ -364,9 +336,9 @@ const oppAtkText = u => u.atk.length ? u.atk.map(a => a.zh || `本系${T[a.ty].z
 // 對位（duel）替對手算的招式：OP.GG 使用率前 4 招（topMoves）裡的攻擊招式；沒有招式統計回傳 ''
 const top4Text = key => { const ks = topMoves(key, team.fmt); return ks.length ? ks.filter(k => MOVES[k][2] !== 'status').map(k => MOVES[k][0]).join('、') || '（前 4 招都是變化招式）' : ''; };
 // 聯防搭檔：每隻隊員怕的屬性（受到 ×2 以上），隊上誰抵抗或免疫（×½ 以下）可以換上來扛；只看屬性（同弱點總表，不含特性）。
-// 沒人扛的弱點集中列在最後，附可以補的寶可夢（recs：放進第一個空格 slot 時的推薦，裡面抵抗那個屬性的，依推薦順序取前 3）
+// 沒人扛的弱點集中列在最後
 const MUL_ZH = { 4: '×4', 2: '×2', 0.5: '½', 0.25: '¼', 0: '免疫' };
-function coreHTML(members, recs, slot) {
+function coreHTML(members) {
   const name = i => `${i + 1} ${slotName(i)}`, open = new Map();
   const rows = members.map(([s, i]) => {
     const weak = IDS.filter(ty => eff(ty, s) >= 2);
@@ -376,20 +348,12 @@ function coreHTML(members, recs, slot) {
       return `<span class="rtag">${chip(ty)}${MUL_ZH[eff(ty, s)]} → ${by.length ? by.map(([t, j]) => `${name(j)}（${MUL_ZH[eff(ty, t)]}）`).join('、') : '<span class="need no">沒人扛</span>'}</span>`;
     }).join('') : '<span class="none">沒有怕的屬性</span>'}</div>`;
   });
-  const picks = ty => slot < 0 ? '' : recs.filter(r => eff(ty, r.mon.types) <= 0.5).slice(0, 3)
-    .map(r => `<button class="mini" data-mon="${r.mon.key}">${r.mon.zh}<span class="meta">${MUL_ZH[eff(ty, r.mon.types)]}</span></button>`).join('');
   return `<div class="res-head">聯防搭檔<span class="muted small">（怕的屬性 → 抵抗或免疫、可以換上來扛的隊友）</span></div>`
     + rows.join('')
-    + (open.size ? [...open].map(([ty, who]) => `<div class="issue"><span class="need no">✘ 沒人扛</span><span>${chip(ty)}（${who.map(name).join('、')}怕）</span>`
-      + (picks(ty) ? `<span class="x-msg">可以補：</span>${picks(ty)}` : '') + '</div>').join('')
+    + (open.size ? [...open].map(([ty, who]) => `<div class="issue"><span class="need no">✘ 沒人扛</span><span>${chip(ty)}（${who.map(name).join('、')}怕）</span></div>`).join('')
       : '<p class="b-sum">✔ 每個弱點都有隊友抵抗或免疫。</p>')
-    + `<p class="note">※ 怕＝受到 ×2 以上，扛＝×½ 以下（含免疫）；只算屬性，不含特性（如飄浮、引火）與道具。「可以補」是放進第 ${slot + 1 || '—'} 隻（第一個空格）時的推薦裡，`
-    + '抵抗那個屬性的前 3 隻（排序同隊伍總評），點一下直接放進去。</p>';
+    + '<p class="note">※ 怕＝受到 ×2 以上，扛＝×½ 以下（含免疫）；只算屬性，不含特性（如飄浮、引火）與道具。</p>';
 }
-$('#tCore').addEventListener('click', e => {
-  const b = e.target.closest('[data-mon]'), k = team.slots.findIndex(s => !s.length);
-  if (b && k >= 0) { team.cur = k; pickTeamMon(b.dataset.mon); }
-});
 // 可收合的區塊（熱門威脅的有解、速度線的排行、隊伍角色每隻的常用招式、兩張卡片的說明）：預設收起，點過就照點的（不存網址；重畫時保持）
 const tFold = {};
 const tFoldHTML = (k, summary, body) => `<details class="t-fold" data-tfold="${k}"${tFold[k] ? ' open' : ''}><summary>${summary}</summary>${body}</details>`;
@@ -467,34 +431,6 @@ function speedHTML(members) {
     + `熱門寶可夢 OP.GG 道具統計有 ${ROLE_PCT}% 以上帶超級石的，超級進化型態另列一行（標「超級進化」），上方「比幾隻快／慢」取進化前後較快的那個。`
     + `「講究圍巾 N%」＝OP.GG 統計有 N% 的人帶講究圍巾（速度 ×1.5），帶的話實際會更快（照最常帶的道具已經是講究圍巾的標「已算」）；超級進化要帶超級石，不標。</p>`;
 }
-// 下一隻建議的對策（recommendMon 的 threats）單打要打模擬，第一次算很久（隊伍只有一兩隻時沒解的多，可能要好幾秒）：
-// renderTeam 把沒算過的對位（duelVs 的 miss）交給 teamBgStart，在背景一小段一小段算（每段約 TEAM_BG_SLICE 毫秒，畫面照樣能操作），
-// 進度寫在建議區的 data-tprog；算完重畫隊伍分析。滑鼠還按在這一頁、或游標在這一頁的輸入框時先不畫（免得吃掉點擊、打到一半的數字被換掉），等一下再看
-const teamBg = { q: [], done: 0, total: 0, timer: 0, down: false }, TEAM_BG_SLICE = 40;
-const teamBgNote = '<p class="muted small b-intro">⏳ 下一隻建議的對策還在推演（<span data-tprog>推演中…</span>）：「對策」「可以補」先列已經算好的，算完會自動更新。</p>';
-function teamBgStart(miss) {
-  const seen = new Set();
-  teamBg.q = miss.filter(([key, set, fmt, m, base]) => { const k = [fmt, key, base, JSON.stringify(set || null), m.key].join('|'); return !seen.has(k) && seen.add(k); });
-  teamBg.done = 0;
-  teamBg.total = teamBg.q.length;
-  clearTimeout(teamBg.timer);
-  teamBg.timer = teamBg.q.length ? setTimeout(teamBgStep, 0) : 0;
-}
-function teamBgStep() {
-  const t0 = performance.now();
-  while (teamBg.q.length && performance.now() - t0 < TEAM_BG_SLICE) { duelVs(...teamBg.q.shift()); teamBg.done++; }
-  document.querySelectorAll('[data-tprog]').forEach(e => { e.textContent = `算了 ${teamBg.done}／${teamBg.total} 組`; });
-  teamBg.timer = setTimeout(teamBg.q.length ? teamBgStep : teamBgDone, 0);
-}
-function teamBgDone() {
-  const el = document.activeElement;
-  if (teamBg.down || (el?.matches('#p-team input'))) { teamBg.timer = setTimeout(teamBgDone, 300); return; }
-  teamBg.timer = 0;
-  renderTeam();
-}
-$('#p-team').addEventListener('pointerdown', () => { teamBg.down = true; });
-document.addEventListener('pointerup', () => { teamBg.down = false; });
-document.addEventListener('pointercancel', () => { teamBg.down = false; });
 // 不在隊伍分析分頁時只記下要重畫（切過來時 showTab 再畫；開網頁、在別的分頁切單打／雙打或載入隊伍時不白算），網址照樣存
 let teamDirty = false;
 function renderTeam() {
@@ -507,22 +443,21 @@ function renderTeam() {
   $('#tList').innerHTML = typeListHTML() || setEditorHTML();
   document.querySelectorAll('#tFmt button').forEach(b => b.setAttribute('aria-pressed', b.dataset.fmt === team.fmt));
 
-  const members = team.slots.map((s, i) => [s, i]).filter(([s]) => s.length), slot = team.slots.findIndex(s => !s.length);
-  const miss = [], recs = members.length ? firstRecs(members, slot, miss) : [];
-  $('#tSum').innerHTML = members.length ? summaryHTML(members, recs, slot, miss.length > 0)
-    : '<p class="empty">選好隊員後，這裡會集中列出隊伍的問題（搭配、缺的角色、沒解的熱門威脅、屬性弱點），每條附可以補的寶可夢，並建議下一隻選誰。</p>';
+  const members = team.slots.map((s, i) => [s, i]).filter(([s]) => s.length);
+  $('#tSum').innerHTML = members.length ? summaryHTML(members)
+    : '<p class="empty">選好隊員後，這裡會集中列出隊伍的問題（搭配、缺的角色、沒解的熱門威脅、屬性弱點）。</p>';
   $('#tRole').innerHTML = members.length ? roleHTML(members)
     : '<p class="empty">挑好隊員的寶可夢後，這裡會依 OP.GG 常用招式判斷每隻是物攻、特攻輸出還是輔助，列出常用招式與效果，並標出隊伍還缺哪些角色。</p>';
   $('#tTrait').innerHTML = members.length ? traitHTML(members)
     : '<p class="empty">挑好隊員的寶可夢後，這裡會依 OP.GG 常用特性與招式標出誰會開天氣、開場地、順風、戲法空間、反先制、抗威嚇等，並做搭配檢查。</p>';
   if (!members.length) {
-    $('#tResult').innerHTML = '<p class="empty">選好隊員後，這裡會列出整隊被各屬性打的倍率，標出共同弱點與缺口，並建議下一隻補什麼屬性、哪隻寶可夢。</p>';
+    $('#tResult').innerHTML = '<p class="empty">選好隊員後，這裡會列出整隊被各屬性打的倍率，標出共同弱點與缺口，並建議下一隻補什麼屬性。</p>';
     $('#tThreat').innerHTML = `<p class="empty">選好隊員後，這裡會檢查${FMT_ZH[team.fmt]}排名前 ${THREAT_N} 的熱門寶可夢，看隊伍誰換上來扛得住、誰正面打得贏。</p>`;
     $('#tCore').innerHTML = '<p class="empty">選好隊員後，這裡會列出每隻怕的屬性、哪個隊友抵抗或免疫可以換上來扛，以及沒人扛的弱點。</p>';
   } else {
     const sg = stabGaps(members.map(([s]) => s));
     $('#tThreat').innerHTML = threatHTML(members);
-    $('#tCore').innerHTML = coreHTML(members, recs, slot);
+    $('#tCore').innerHTML = coreHTML(members);
     const rows = teamProfile(members.map(([s]) => s)), warn = rows.filter(r => r.warn), gaps = teamGaps(rows);
     const sym = { 4: '4', 2: '2', 1: '', 0.5: '½', 0.25: '¼', 0: '0' };
     let h = '<thead><tr><th class="corner">攻擊 ↓<br>隊員 →</th>'
@@ -540,14 +475,13 @@ function renderTeam() {
         : '<p class="muted small b-intro">沒有 3 隻以上都怕、或 2 隻以上怕又沒人抗的屬性。</p>')
       + `<div class="x-line"><span class="x-msg">缺口（有人怕、沒人抗）：</span>${gaps.length ? gaps.map(id => chip(id)).join('') : '<span class="none">（無）</span>'}</div>`
       + `<div class="x-line"><span class="x-msg">本系打不出效果絕佳：</span>${sg.length ? sg.map(id => chip(id)).join('') : '<span class="none">（無）</span>'}</div>`
-      + teamRecHTML(gaps, warn.length, team.cur === slot ? recs : null, miss)
+      + teamRecHTML(gaps, warn.length)
       + `<div class="mwrap cover" style="margin-top:10px"><table class="matrix team">${h}</tbody></table></div>`
       + '<p class="note">※ 怕＝受到 ×2 以上；抗＝×½ 以下（含沒有效果）。⚠ 標示 3 隻以上都怕，或 2 隻以上怕又沒人抗的屬性。本系＝隊員自己的屬性。'
-      + '弱點總表只算屬性，不含特性；推薦的雙屬性組合不一定有對應寶可夢。推薦寶可夢的角色與搭配依常用招式、特性判斷（見「隊伍角色」「隊伍特性與場地招式」），不看能力值。</p>';
+      + '弱點總表只算屬性，不含特性；推薦的雙屬性組合不一定有對應寶可夢。</p>';
   }
   $('#tSpeed').innerHTML = speedHTML(members);
   $('#tSim').innerHTML = tSimHTML();
-  teamBgStart(miss);
   pBgFlush();
   saveState();
 }
@@ -624,13 +558,8 @@ $('#tList').addEventListener('change', e => {
   renderTeam();
 });
 $('#tResult').addEventListener('click', e => {
-  const b = e.target.closest('[data-add], [data-mon]');
-  if (b) b.dataset.mon ? pickTeamMon(b.dataset.mon) : pickTeamType(b.dataset.add);
-});
-// 隊伍總評的推薦都是放進第一個空格
-$('#tSum').addEventListener('click', e => {
-  const b = e.target.closest('[data-mon]'), k = team.slots.findIndex(s => !s.length);
-  if (b && k >= 0) { team.cur = k; pickTeamMon(b.dataset.mon); }
+  const b = e.target.closest('[data-add]');
+  if (b) pickTeamType(b.dataset.add);
 });
 // 清除：隊伍有東西時先確認（清掉就存進網址與本機，救不回來）；記憶的隊伍名稱欄一起清掉，免得之後「記住這隊」蓋掉載入過的那筆
 $('#tClear').addEventListener('click', () => {
