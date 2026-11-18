@@ -440,16 +440,18 @@ function damageCalc(a, d, mk, o) {
   // 氣勢披帶、結實：HP 全滿時整場第一下最多打到剩 1 HP
   const endure = !full ? '' : dit.sash ? d.item : dab === 'sturdy' ? dab : '';
   r.endured = endure && hits === 1 && r.max >= r.hp ? endure : '';
-  // 累計傷害的機率分布（超過剩下 HP 的都併在剩下 HP）
-  let dist = new Map([[0, 1]]);
-  r.ko = [0, 1, 2, 3].map(n => {
-    (n ? later : first).forEach((rs, h) => {
-      const xs = endure && !n && !h ? rs.map(x => Math.min(x, r.hp - 1)) : rs, nd = new Map();
-      dist.forEach((p, v) => xs.forEach(x => { const s = Math.min(need, v + x); nd.set(s, (nd.get(s) || 0) + p / 16); }));
-      dist = nd;
+  // 累計傷害的機率分布（超過剩下 HP 的都併在剩下 HP）；o.noKo＝不用算 r.ko（模擬只用 rolls，simCalc 給：這段佔樹搜尋約一成時間）
+  if (!o.noKo) {
+    let dist = new Map([[0, 1]]);
+    r.ko = [0, 1, 2, 3].map(n => {
+      (n ? later : first).forEach((rs, h) => {
+        const xs = endure && !n && !h ? rs.map(x => Math.min(x, r.hp - 1)) : rs, nd = new Map();
+        dist.forEach((p, v) => xs.forEach(x => { const s = Math.min(need, v + x); nd.set(s, (nd.get(s) || 0) + p / 16); }));
+        dist = nd;
+      });
+      return dist.get(need) || 0;
     });
-    return dist.get(need) || 0;
-  });
+  }
   r.notes = [...notes].filter(Boolean);
   return r;
 }

@@ -555,24 +555,30 @@ const simGuard = (st, s, M, k) => { const g = st.sd[1 - s]; return g.wg === st.t
 // 雙方任一隻特性無防守、毒屬性用劇毒、對手用了巨劍突擊還沒再出招（glaiverush onAccuracy）時必中。回傳 100 以下（100＝必中）；一擊必殺不在這裡算（固定 30，見 simFixed），回傳 100。
 // 天氣（simWx）：打雷、暴風下雨時必中、晴天命中 50（thunder／hurricane onModifyMove）；暴風雪下雪時必中（blizzard）；
 // 對手特性沙隱在沙暴、雪隱在下雪時命中 ×0.8（sandveil／snowcloak onModifyAccuracy 3277/4096）
+// 會改命中率的特性（雙方任一隻是才看下面的修正）、不看對手閃避等級的特性
+const SIM_ACC_AB = new Set(['sand-veil', 'snow-cloak', 'compound-eyes', 'hustle', 'tangled-feet']), SIM_NO_EVA = new Set(['unaware', 'keen-eye', 'illuminate', 'minds-eye']);
 function simAcc(st, M, T, k, moved) {
   const wx = simWx(st), tw = k === 'thunder' || k === 'hurricane';
   const a0 = tw && wx === 'sun' ? 50 : MOVES[k]?.[6];
   if (a0 == null || SIM_OHKO.has(k) || M.b.ab === 'no-guard' || T.b.ab === 'no-guard' || T.v.glaive || (k === 'toxic' && simTypes(M).includes('poison'))
     || (tw && wx === 'rain') || (k === 'blizzard' && wx === 'snow') || (SIM_MINI.has(k) && T.v.mini)) return 100;
-  const mods = [];
-  if ((T.b.ab === 'sand-veil' && wx === 'sand') || (T.b.ab === 'snow-cloak' && wx === 'snow')) mods.push(3277);
-  if (M.b.ab === 'compound-eyes') mods.push(5325);
-  if (M.b.ab === 'hustle' && simCat(k) === 'physical') mods.push(3277);
-  if (T.b.ab === 'tangled-feet' && T.v.conf && M.b.ab !== 'mold-breaker') mods.push(2048);
-  if (M.item === 'wide-lens') mods.push(4505);
-  if (M.item === 'zoom-lens' && moved) mods.push(4915);
-  if (T.item === 'bright-powder') mods.push(3686);
-  let a = mods.length ? pokeRound(a0 * chainMods(mods, 0, Infinity) / 4096) : a0;
+  // 修正多半沒有：特性、道具都不相關時不建陣列（樹搜尋的推演每回合呼叫很多次）
+  let a = a0;
+  if (SIM_ACC_AB.has(M.b.ab) || SIM_ACC_AB.has(T.b.ab) || M.item === 'wide-lens' || M.item === 'zoom-lens' || T.item === 'bright-powder') {
+    const mods = [];
+    if ((T.b.ab === 'sand-veil' && wx === 'sand') || (T.b.ab === 'snow-cloak' && wx === 'snow')) mods.push(3277);
+    if (M.b.ab === 'compound-eyes') mods.push(5325);
+    if (M.b.ab === 'hustle' && simCat(k) === 'physical') mods.push(3277);
+    if (T.b.ab === 'tangled-feet' && T.v.conf && M.b.ab !== 'mold-breaker') mods.push(2048);
+    if (M.item === 'wide-lens') mods.push(4505);
+    if (M.item === 'zoom-lens' && moved) mods.push(4915);
+    if (T.item === 'bright-powder') mods.push(3686);
+    if (mods.length) a = pokeRound(a0 * chainMods(mods, 0, Infinity) / 4096);
+  }
   // 命中、閃避等級（Showdown hitStepAccuracy：上面的修正之後，n＝命中等級 − 閃避等級（−6～6），×(3＋n)/3 或 ×3/(3−n) 取整）；
   // 對手特性純樸時不看自己的命中等級；自己純樸、銳利目光、發光、心眼或聖劍類（ignoreEvasion）不看對手的閃避等級
   const ac = T.b.ab === 'unaware' ? 0 : M.st.acc || 0;
-  const ev = ['unaware', 'keen-eye', 'illuminate', 'minds-eye'].includes(M.b.ab) || IGNORE_DEF.has(k) ? 0 : T.st.eva || 0, n = Math.max(-6, Math.min(6, ac - ev));
+  const ev = SIM_NO_EVA.has(M.b.ab) || IGNORE_DEF.has(k) ? 0 : T.st.eva || 0, n = Math.max(-6, Math.min(6, ac - ev));
   if (n > 0) a = Math.floor(a * (3 + n) / 3); else if (n < 0) a = Math.floor(a * 3 / (3 - n));
   return Math.min(100, a);
 }
@@ -633,15 +639,16 @@ function simCalc(ctx, st, A, D, k, crit, last = false) {
   // 撲擊看自己的防禦變化、欺詐看對手的攻擊變化，都要進快取的鍵
   // 天氣、場地（simWx、simTer）照 damageCalc 算：晴雨強化減弱、沙暴岩石特防、下雪冰防禦、氣象球、場地強化與減弱、精神場地擋先制、鐵滾輪沒場地失敗…
   const wx = simWx(st), ter = simTer(st);
-  const key = [A.id, ak, A.b.ab, aTy.join('.'), pt, ff, hg, so, mt, rv, A.item, A.st.atk, spa, A.st.def, burn, D.id, dk, D.b.ab, dTy.join('.'), gl, dg, dst, mi, !!D.v.mrise, !!D.v.smack, D.item, D.st.def, D.st.spd, D.st.atk, full,
-    walls.join('.'), k, crit, bp, bps?.join('.'), pinch, fallen, last, wx, ter].join('|');
+  // 鍵用樣板字串直接接（比陣列 join 快），一定是布林值的欄位寫成 0／1（鍵越短查表越快：查表佔 simCalc 一半以上的時間）；只在 ctx.memo 裡比對
+  const key = `${A.id}|${ak}|${A.b.ab}|${aTy.join('.')}|${+pt}${+ff}${+hg}${+so}|${mt}|${rv}|${A.item}|${A.st.atk}|${spa}|${A.st.def}|${+burn}|${D.id}|${dk}|${D.b.ab}|${dTy.join('.')}|`
+    + `${+gl}${+dg}${+dst}${+mi}${+!!D.v.mrise}${+!!D.v.smack}${+full}${+pinch}|${D.item}|${D.st.def}|${D.st.spd}|${D.st.atk}|${walls.join('.')}|${k}|${crit}|${bp}|${bps?.join('.')}|${fallen}|${last}|${wx}|${ter}`;
   let r = ctx.memo.get(key);
   if (!r) {
     const a = A.b, d = D.b;
     r = damageCalc({ key: ak, types: aTy, ptUsed: pt, flashFire: ff, hangry: hg, stakeout: so, metro: mt, rival: rv, inv: a.atkInv, sp: a.sp, nat: a.nat, st: { atk: A.st.atk, spa, def: A.st.def }, item: A.item, ab: a.ab, pinch, fallen },
       { key: dk, types: dTy, glaive: gl, disguise: dg, status: dst, mini: mi, float: !!D.v.mrise, grounded: !!D.v.smack, hp: d.hp, inv: d.defInv, sp: d.sp, nat: d.nat, st: { def: D.st.def, spd: D.st.spd, atk: D.st.atk }, item: D.item, noItem: !D.item, ab: d.ab,
         cur: full ? undefined : D.hp, atkInv: d.atkInv },
-      k, { fmt: ctx.fmt, weather: wx, crit, terrain: ter, hh: false, walls, burn, bp, bps, last });
+      k, { fmt: ctx.fmt, weather: wx, crit, terrain: ter, hh: false, walls, burn, bp, bps, last, noKo: true });
     r = r.skip || !r.eff ? { eff: 0 } : { eff: r.eff, type: r.type, cat: r.cat, crit: r.crit, rolls: r.rolls, endured: r.endured, berry: r.berry };
     ctx.memo.set(key, r);
   }
@@ -2439,21 +2446,26 @@ function simValue(st) {
 // 要蓄力、要休息的打不倒時只算一半；自爆類扣掉自己剩下的 HP（打不倒再扣 1）；快手還擊不預判（算 0）；對手有替身時只算打替身的一半。
 // 輔助招見 simGreedySup（也乘命中率）。
 // 只有招式都沒用（如講究圍巾鎖在對方免疫的招式）時才換人
-function simGreedyAct(ctx, st, s) {
+// pre＝simGreedyPre（推演一回合雙方共用，同一個方向不用算兩次；沒給就自己算）
+// 雙方場上那隻每招打對方的 [打中時的期望傷害 simExpHit, 命中率 simAcc]：[第 0 方的招式 → Map, 第 1 方的]
+const simGreedyPre = (ctx, st) => [0, 1].map(s => { const M = simAct(st, s), T = simAct(st, 1 - s); return new Map(M.moves.map(k => [k, [simExpHit(ctx, st, M, T, k), simAcc(st, M, T, k, false)]])); });
+function simGreedyAct(ctx, st, s, pre) {
   const opts = simOpts(ctx, st, s), mv = opts.filter(o => o.t === 'mv'), sw = () => ({ t: 'sw', i: simGreedyPick(ctx, st, s) });
   if (!mv.length) return opts[0].t === 'sw' ? sw() : opts[0];
   const M = simAct(st, s), T = simAct(st, 1 - s);
-  const tExp = T.moves.map(k => simExp(ctx, st, T, M, k)), dt = Math.max(0, ...tExp), dm = Math.max(0, ...M.moves.map(k => simExp(ctx, st, M, T, k)));
+  // 雙方每招打中時的期望傷害與命中率（simGreedyPre；simExp＝兩者相乘 ÷ 100），dt、dm 與下面逐招共用
+  const P = pre || simGreedyPre(ctx, st), mH = P[s], exp = ([h, a]) => h * a / 100;
+  const tExp = T.moves.map(k => exp(P[1 - s].get(k))), dt = Math.max(0, ...tExp), dm = Math.max(0, ...M.moves.map(k => exp(mH.get(k))));
   // 對手打我最痛那一招的分類（牆類看這個）
   const dtCat = dt > 0 ? simCat(T.moves[tExp.indexOf(dt)]) : '';
   let best = mv[0], bv = -Infinity;
   mv.forEach(o => {
-    const k = o.k;
+    const k = o.k, hk = mH.get(k);
     let v;
-    const p = simAcc(st, M, T, k, false) / 100;
+    const p = (hk ? hk[1] : simAcc(st, M, T, k, false)) / 100;
     if (SIM_SUP[k]) v = p * simGreedySup(st, s, M, T, k, dt, dm, dtCat);
     else {
-      const e = k === 'upper-hand' ? 0 : simExpHit(ctx, st, M, T, k), sub = T.v.sub > 0 && !FLAG.sound.has(k) && M.b.ab !== 'infiltrator', ko = !sub && e >= T.hp;
+      const e = k === 'upper-hand' ? 0 : hk ? hk[0] : simExpHit(ctx, st, M, T, k), sub = T.v.sub > 0 && !FLAG.sound.has(k) && M.b.ab !== 'infiltrator', ko = !sub && e >= T.hp;
       v = p * (sub ? Math.min(e, T.v.sub) / T.max / 2 : Math.min(e, T.hp) / T.max + (ko ? 1 + (simPri(st, M, k) > 0 ? 0.5 : 0) : 0));
       if (!ko && (simMustCharge(st, M, k) || SIM_RECHARGE.has(k))) v /= 2;
       if (SIM_BOOM.has(k)) v -= M.hp / M.max + (ko ? 0 : 1);
@@ -2561,7 +2573,7 @@ function simPlayout(ctx, st, rnd, end, f, split) {
   while (!simOver(st) && st.turn < end) {
     while (!simOver(st) && (simNeed(st, 0) || simNeed(st, 1))) simReplace(st, [0, 1].map(s => simNeed(st, s) ? { t: 'sw', i: pick(st, s) } : { t: 'pass' }), rnd);
     if (simOver(st)) break;
-    const acts = [0, 1].map(s => simGreedyAct(ctx, st, s)), tie = (st.turn + f) & 1;
+    const pre = simGreedyPre(ctx, st), acts = [0, 1].map(s => simGreedyAct(ctx, st, s, pre)), tie = (st.turn + f) & 1;
     if (split && simTieAhead(ctx, st, acts)) {
       const other = simClone(st);
       simTurn(ctx, st, acts, rnd, tie, pick);
