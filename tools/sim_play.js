@@ -23,7 +23,8 @@ const R = path.resolve(__dirname, '..');
 const FILES = ['base-stats.js', 'mons-data.js', 'js/engine/core.js', 'js/engine/roles.js', 'js/engine/damage.js', 'js/engine/sim.js'];
 const NAMES = ['MONS', 'MON', 'MOVES', 'TYPES', 'IDX', 'ITEMS', 'ABILS', 'FIELD_ZH', 'HITS', 'SIM_SUP', 'SIM_STATUS_ZH', 'SIM_HAZ_ZH', 'SIM_MAX_TURN', 'abilZh',
   'simMon', 'simItems', 'simStart', 'simTurn', 'simReplace', 'simPhase', 'simPhaseOpts', 'simDecide', 'simSearch', 'simGreedyPick', 'simRng', 'simHash', 'simKey',
-  'simBaseKey', 'simCtx', 'simClone', 'simHit', 'simExp', 'simAcc', 'simSwitch', 'simSpeed', 'simFaster', 'simTypes', 'simWx', 'simTer', 'simWinner', 'simDraw'];
+  'simBaseKey', 'simCtx', 'simClone', 'simHit', 'simExp', 'simAcc', 'simSwitch', 'simSpeed', 'simFaster', 'simTypes', 'simWx', 'simTer', 'simWinner', 'simDraw',
+  'simPri', 'FLAG', 'SIM_SEC', 'SIM_RECOIL', 'SIM_DRAIN', 'SIM_STANCE'];
 let E0;
 function engine() {
   if (E0) return E0;
@@ -138,8 +139,22 @@ const V_ZH = { taunt: '被挑釁', seed: '被寄生種子', curse: '被詛咒', 
 function volText(E, M) {
   return Object.entries(M.v).filter(([k, x]) => x && !V_HIDE.has(k)).map(([k, x]) =>
     k === 'sub' ? `替身（剩 ${pct(x, M.max)}%）` : k === 'stock' ? `蓄力 ${x} 次` : k === 'dis' ? `${E.MOVES[x.k]?.[0] || x.k}被定身` : k === 'enc' ? `被再來一次（只能用${E.MOVES[M.v.encK]?.[0] || ''}）`
-      : k === 'rage' ? `逆鱗類鎖住${E.MOVES[x.k]?.[0] || ''}` : k === 'bind' ? '被綁住' : V_ZH[k] || k);
+      : k === 'rage' ? `逆鱗類鎖住${E.MOVES[x.k]?.[0] || ''}` : k === 'bind' ? '被綁住' : k === 'taunt' && typeof x === 'number' ? `被挑釁（剩 ${x} 回合）` : V_ZH[k] || k);
 }
+// 招式的附加效果（SIM_SEC：機率＋異常／畏縮／混亂／能力變化）、反作用力與吸血的比例
+function effText(E, k) {
+  const sts = o => Object.entries(o).map(([s, v]) => `${STAT_ZH[s] || s}${v > 0 ? '+' : ''}${v}`).join('、');
+  const stt = s => [].concat(s).map(x => E.SIM_STATUS_ZH[x] || x).join('／');
+  const xs = (E.SIM_SEC[k] || []).map(x => `${x.c}% ${x.s ? stt(x.s) : x.fl ? '畏縮' : x.cf ? '混亂' : x.d ? '對手' + sts(x.d) : x.me ? '自己' + sts(x.me) : '特殊效果（見說明）'}`);
+  const frac = r => r[1] === 100 ? `${r[0]}%` : `${r[0]}/${r[1]}`;
+  if (E.SIM_RECOIL[k]) xs.push(`反作用力＝打出傷害的 ${frac(E.SIM_RECOIL[k])}`);
+  if (E.SIM_DRAIN[k]) xs.push(`吸血＝打出傷害的 ${frac(E.SIM_DRAIN[k])}`);
+  if (k === 'avalanche') xs.push('這回合先被對手打到時威力 ×2（畫面照上一回合有沒有被打估）');
+  return xs.join('、');
+}
+// 特性戰鬥切換（堅盾劍怪）：出招時變刀劍形態、王者盾牌變盾牌形態（同 simStance）；回傳 [盾牌形態, 刀劍形態] 的複本，不是就 null
+const stanceForms = (E, M) => M.b.ab === 'stance-change' && !M.tf && Object.values(E.SIM_STANCE).includes(M.key)
+  ? [{ ...M, fk: E.SIM_STANCE.shield }, { ...M, fk: E.SIM_STANCE.blade }] : null;
 // 第 s 方隊伍第 i 隻換上場會吃多少（隱形岩、撒菱…）：在複本上換一次看 HP 少多少
 function entryHurt(E, st, s, i) {
   const c = E.simClone(st), M = c.sd[s].mons[i], h0 = M.hp;
@@ -152,7 +167,8 @@ function monBlock(E, ctx, st, s, i) {
   const M = st.sd[s].mons[i], act = st.sd[s].act === i;
   if (M.hp <= 0) return [`  [${i}] ${nameOf(E, M)}：倒下`];
   const boost = Object.entries(M.st).filter(([, v]) => v).map(([k, v]) => `${STAT_ZH[k] || k}${v > 0 ? '+' : ''}${v}`).join(' ');
-  const stt = M.status ? (E.SIM_STATUS_ZH[M.status] || M.status) + (M.status === 'slp' ? `（還要睡 ${M.slp}）` : M.status === 'tox' ? `（計數 ${M.tox}，每回合扣的越來越多）` : '') : '';
+  const stt = M.status ? (E.SIM_STATUS_ZH[M.status] || M.status) + (M.status === 'slp' ? `（還要睡 ${M.slp}）` : M.status === 'tox' ? `（計數 ${M.tox}，每回合扣的越來越多）`
+    : M.status === 'frz' ? `（計數 ${M.frz}：每次輪到出招減 1，減到 0 一定融化，沒到 0 時每次 1/4 機率融化）` : '') : '';
   const bs = E.MON[M.fk || M.key]?.bs || E.MON[M.key].bs, mega = !!E.MON[M.key].base;
   const L = [`  [${i}] ${act ? '★場上' : '後排'} ${nameOf(E, M)}（${E.simTypes(M).map(t => tz(E, t)).join('／')}）HP ${Math.max(0, M.hp)}/${M.max}（${pct(M.hp, M.max)}%）`
     + (stt ? `｜${stt}` : '') + (boost ? `｜能力 ${boost}` : '') + `｜道具 ${M.item ? E.ITEMS?.[M.item]?.[0] || M.item : mega ? '超級石（已超級進化）' : '無'}｜特性 ${E.abilZh(M.b.ab) || M.b.ab}`
@@ -162,14 +178,21 @@ function monBlock(E, ctx, st, s, i) {
     ...(act ? volText(E, M) : [])].filter(Boolean);
   if (extra.length) L.push(`      狀態：${extra.join('、')}`);
   const foes = st.sd[1 - s].mons.map((D, j) => [D, j]).filter(([D]) => D.hp > 0);
+  // 戰鬥切換：自己出攻擊招時照刀劍形態算；對手是戰鬥切換的，盾牌、刀劍兩種形態都列（牠先出招就變刀劍形態挨打）
+  const myForms = stanceForms(E, M), atk = myForms ? myForms[1] : M;
+  if (myForms) L.push('      （戰鬥切換：出攻擊招時變刀劍形態，下面自己的傷害照刀劍形態算；用王者盾牌變回盾牌形態）');
   for (const k of M.moves) {
-    const mv = E.MOVES[k], acc = mv[6] ?? 100, pri = mv[7] || 0;
-    const head = `      ${mv[0]}（${tz(E, mv[1])}／${CAT_ZH[mv[2]] || mv[2]}${mv[3] ? '／威力 ' + mv[3] : ''}${acc < 100 ? '／命中 ' + acc : ''}${pri ? '／先制 ' + (pri > 0 ? '+' : '') + pri : ''}`
+    const mv = E.MOVES[k], acc = mv[6] ?? 100, pri = E.simPri(st, M, k), pri0 = E.simPri(st, { ...M, b: { ...M.b, ab: '' } }, k);
+    const head = `      ${mv[0]}（${tz(E, mv[1])}／${CAT_ZH[mv[2]] || mv[2]}${mv[3] ? '／威力 ' + mv[3] : ''}${acc < 100 ? '／命中 ' + acc : ''}`
+      + `${pri ? '／先制 ' + (pri > 0 ? '+' : '') + pri + (pri !== pri0 ? `（${E.abilZh(M.b.ab) || M.b.ab}）` : '') : ''}${E.FLAG.contact.has(k) ? '／接觸' : ''}`
       + `${E.HITS[k] ? '／' + (E.HITS[k][1] || E.HITS[k][0] + ' 下') : ''}）PP ${M.pp[k]}/${mv[5]}`;
-    const desc = String(mv[4] || '').replace(/\s+/g, '').slice(0, 70);
+    const desc = String(mv[4] || '').replace(/\s+/g, '').slice(0, 70), eff = effText(E, k);
     if (E.SIM_SUP[k]) { L.push(`${head}：${desc}`); continue; }
-    L.push(`${head}：` + foes.map(([D, j]) => `[${j}]${nameOf(E, D)}${st.sd[1 - s].act === j ? '(場上)' : ''} ${dmgText(E, ctx, st, M, D, k)}`).join('｜'));
-    L.push(`        說明：${desc}`);
+    L.push(`${head}：` + foes.map(([D, j]) => {
+      const fs = stanceForms(E, D), name = `[${j}]${nameOf(E, D)}${st.sd[1 - s].act === j ? '(場上)' : ''}`;
+      return fs ? `${name} 盾牌形態 ${dmgText(E, ctx, st, atk, fs[0], k)}／刀劍形態 ${dmgText(E, ctx, st, atk, fs[1], k)}` : `${name} ${dmgText(E, ctx, st, atk, D, k)}`;
+    }).join('｜'));
+    L.push(`        說明：${desc}${eff ? `｜附加：${eff}` : ''}`);
   }
   return L;
 }
@@ -209,8 +232,11 @@ function show(r, G) {
   out.push(`【場地】${fieldText(E, st)}`);
   out.push('（傷害：範圍＝16 個亂數最低～最高、不含命中率與急所；期望＝含命中率的平均；打倒機率看目前 HP、不算急所，命中率不到 100 另外標）');
   ['我方（你）', '對手（AI）'].forEach((who, s) => { out.push(`【${who}】`); st.sd[s].mons.forEach((_, i) => out.push(...monBlock(E, ctx, st, s, i))); });
-  const a = E.simSpeed(ctx, st, st.sd[0].mons[st.sd[0].act]), b = E.simSpeed(ctx, st, st.sd[1].mons[st.sd[1].act]);
-  out.push(`【速度】場上我方 ${a}、對手 ${b}${st.troom ? '（戲法空間：慢的先動）' : ''} → 同先制等級時${a === b ? '同速（各 50%）' : E.simFaster(st, a, b) ? '我方先動' : '對手先動'}`);
+  // 補位時場上有倒下的，速度比較沒有意義，不列
+  if (r.phase === 'turn') {
+    const a = E.simSpeed(ctx, st, st.sd[0].mons[st.sd[0].act]), b = E.simSpeed(ctx, st, st.sd[1].mons[st.sd[1].act]);
+    out.push(`【速度】場上我方 ${a}、對手 ${b}${st.troom ? '（戲法空間：慢的先動）' : ''} → 同先制等級時${a === b ? '同速（各 50%）' : E.simFaster(st, a, b) ? '我方先動' : '對手先動'}`);
+  }
   const cant = r.phase === 'turn' ? cantText(E, st, r.O[0]) : '';
   if (cant) out.push(cant);
   // 換人選項標換上場會吃的傷害（隱形岩、撒菱…）
