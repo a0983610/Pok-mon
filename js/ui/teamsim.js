@@ -12,8 +12,8 @@ const TSIM_SC = 3, TSIM_K = 5, TSIM_OPT = { algo: 'ply1' };
 // TREC_N：補空格的候選數；TSIM_ALT：換人時每格的候選數；TREC_RANK：候選只從單打排名前幾名挑
 const TREC_N = 8, TSIM_ALT = 3, TREC_RANK = 100;
 // 預估時間用：每個背景計算打一場 3 對 3 約幾毫秒（2026-11-13 實測，i7-14700、Chromium、8 個背景計算：打的階段 7030 場 162 秒，約 186 毫秒；
-// 加上選角與等對位勝率，全部 8265 場 210 秒）
-const TSIM_MS = 200;
+// 加上選角與等對位勝率，全部 8265 場 210 秒）；2026-11-17 推演改成只看 3 回合（SIM_LOOK），照 Node 實測快速決策快 1.8 倍改成 110（沒在瀏覽器重量）
+const TSIM_MS = 110;
 // run＝進行中的評估（停止或打完後搬到 res，畫面照同一份資料畫）
 const tSim = { run: null, res: null, redraw: 0 };
 // 隊伍的簽名（單打雙打、每格屬性、隊員、配招）：候選與結果是不是目前這一隊的

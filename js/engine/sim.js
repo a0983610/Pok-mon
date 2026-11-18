@@ -304,7 +304,10 @@ const SIM_CHARGE_WX = { 'solar-beam': 'sun', 'solar-blade': 'sun', 'electro-shot
 const SIM_STATUS_ZH = { brn: '灼傷', par: '麻痺', psn: '中毒', tox: '劇毒', slp: '睡眠', frz: '冰凍' };
 const SIM_HAZ_ZH = { sr: '隱形岩', spikes: '撒菱', tspikes: '毒菱', web: '黏黏網' };
 // 一場最多幾回合（到了算平手）、往前算的時候簡單規則最多再打幾回合
-const SIM_MAX_TURN = 100, SIM_LOOK = 40;
+// SIM_LOOK＝決策（快速、樹搜尋）的推演最多再打幾回合，沒分出勝負就用 simValue（雙方剩下 HP 比例差）當分數：2026-11-17 tools/sim_ai.js
+// 40→3 快速 49.8%／48.2%（快 1.8 倍）、樹搜尋 400 次 51.5%（快 1.7 倍），強弱看不出差，使用者選「只用在決策」；
+// 推演樹狀圖、對戰中推薦（simView）要顯示每格勝率，推演打到分出勝負（SIM_LOOK_FULL），不然多數格子是 50%
+const SIM_MAX_TURN = 100, SIM_LOOK = 3, SIM_LOOK_FULL = 40;
 const SIM_ST0 = () => ({ atk: 0, def: 0, spa: 0, spd: 0, spe: 0, acc: 0, eva: 0 });
 
 // 上場的一隻：key 這場的型態、set 配招（能算傷害的攻擊招式與 SIM_SUP 有的輔助招；沒有招式就用 OP.GG 前 4 招 defaultSet）、
@@ -2528,7 +2531,7 @@ function simReplace(st, picks, rnd) {
   simEntry(st, sw);
   if (sw.length) { simSeeds(st); simUpdate(st); }
 }
-// 從局面 st 用簡單規則雙方打下去（最多再 SIM_LOOK 回合），回傳 simValue；rnd＝照亂數打（樹搜尋用），沒給用期望值。
+// 從局面 st 用簡單規則雙方打下去（最多再 SIM_LOOK 回合；ctx.look 有給就照它，見 simView），回傳 simValue；rnd＝照亂數打（樹搜尋用），沒給用期望值。
 // 補位換上來又被撒菱類打倒的再補（補到有人站著才開打）；期望值打時同速輪流誰先：每次打下去換一邊起頭（ctx.flip）、之後每回合再輪流
 // （不然一律我方先，評估會偏向我方；只看回合單雙也不行，樹搜尋往下打大多從同一個回合開始，會固定偏向一方）
 // split＝期望值打時第一次遇到同速（雙方都出招、先制等級一樣、速度一樣，同 simTurn 的 tied），兩種先後都打到底取平均（只分岔這一次，之後照輪流）：
@@ -2536,7 +2539,7 @@ function simReplace(st, picks, rnd) {
 // 重播：愛管侍對河馬獸，推演到後面雙方的戟脊龍同速）。樹搜尋推演很多次、先後本來就會輪流平均，不分岔
 function simRollout(ctx, st, rnd = null, split = false) {
   const f = ctx.flip = (ctx.flip || 0) ^ 1;
-  return simPlayout(ctx, st, rnd, st.turn + SIM_LOOK, f, split && !rnd);
+  return simPlayout(ctx, st, rnd, st.turn + (ctx.look || SIM_LOOK), f, split && !rnd);
 }
 const simTieAhead = (ctx, st, acts) => acts.every(a => a.t === 'mv' || a.t === 'rech') && simAct(st, 0).hp > 0 && simAct(st, 1).hp > 0
   && [0, 1].map(s => acts[s].t === 'rech' ? 0 : simPri(st, simAct(st, s), acts[s].k)).reduce((a, b) => a === b)
@@ -2559,10 +2562,10 @@ function simPlayout(ctx, st, rnd, end, f, split) {
 }
 // 這個階段一方能做的：phase 'turn' 是 simOpts；'replace'（有人倒下要補位）是倒下那方的後排，另一方 pass
 const simPhaseOpts = (ctx, st, s, phase) => phase === 'turn' ? simOpts(ctx, st, s) : simNeed(st, s) ? simBench(st, s).map(i => ({ t: 'sw', i })) : [{ t: 'pass' }];
-// ---------- 樹搜尋（往下打到分出勝負） ----------
+// ---------- 樹搜尋 ----------
 // 雙方同時出招的蒙地卡羅樹搜尋（decoupled UCT、開放迴圈）：每次從目前局面複製一份沿樹往下，每一層雙方各自用 UCB1 挑選擇
 // （平均分數 + SIM_UCB_C × √(ln 這層次數 ÷ 這個選擇的次數)，沒試過的先試），照亂數打這一回合（或補位）；走到樹上沒有的局面就新增一層，
-// 再用簡單規則以期望值打到分出勝負（最多 SIM_LOOK 回合；用亂數打雜訊太大），把分數（simValue 換成 0～1；對手用 1 減它）加回路上每一層雙方選的選擇。
+// 再用簡單規則以期望值往下打（simRollout：決策最多 SIM_LOOK 回合、simView 打到分出勝負；用亂數打雜訊太大），把分數（simValue 換成 0～1；對手用 1 減它）加回路上每一層雙方選的選擇。
 // 傷害亂數、急所、麻痺等在樹裡每次重抽，同一層對應的局面每次可能不同（開放迴圈），所以每層只記「選擇 → 次數、總分」，能選的選擇每次重算。
 // iters 次後用根節點上「我方出 X、對手出 Y」各組合的平均分數解混合策略（simMix），雙方照比例抽一種（沒給 rnd 取機率最高的）。
 // 比較（2026-11-11，隨機兩隊各打兩場交換決策方式）：照被試次數決定出招、或打到底也用亂數時，和往前算一回合差不多強；
@@ -2636,10 +2639,14 @@ function simStart(sides, log, intim = [0, 1]) {
 }
 // 這個局面接下來是哪個階段：'over' 分出勝負（或打滿回合）、'replace' 有人倒下要補位、'turn' 選這回合的招式
 const simPhase = st => simOver(st) || st.turn >= SIM_MAX_TURN ? 'over' : simNeed(st, 0) || simNeed(st, 1) ? 'replace' : 'turn';
-// 樹狀圖的一層：局面 st 每一格「我方出 X × 對手出 Y」用樹搜尋平均試（共 iters 次），回傳 simSearch 的 stats 加上 phase
+// 樹狀圖的一層：局面 st 每一格「我方出 X × 對手出 Y」用樹搜尋平均試（共 iters 次），回傳 simSearch 的 stats 加上 phase；
+// 要顯示每格勝率，推演打到分出勝負（ctx.look＝SIM_LOOK_FULL，算完換回來）
 function simView(ctx, st, iters) {
   const phase = simPhase(st);
-  return phase === 'over' ? { phase } : { phase, ...simSearch(ctx, st, phase, iters, null, true, true).stats };
+  if (phase === 'over') return { phase };
+  const look = ctx.look;
+  ctx.look = SIM_LOOK_FULL;
+  try { return { phase, ...simSearch(ctx, st, phase, iters, null, true, true).stats }; } finally { ctx.look = look; }
 }
 // 樹狀圖往下一步：照期望值打 acts 這一回合（或補位）；pin[s]＝第 s 方被迫換人（打完換人、拋下狠話、被吹走）時實際換上的（沒給、或那隻不能換上就照簡單規則／後排第一隻）。
 // 回傳 { st 新局面, log 這一步的紀錄, forced [我方, 對手]：這一步被迫換了人的話，是開始時還站著、可能換上來的（不含原本該在場上那隻），沒有是 null }（不改到原本的 st）
