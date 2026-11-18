@@ -2464,9 +2464,17 @@ function simGreedyAct(ctx, st, s) {
 // 強化攻擊／特攻／速度：對手打我不到剩下 HP 的 35%、自己還沒強化超過 +3 時 0.6（只強化防禦的 0.3）；回復：HP 一半以下、對手一下打不掉一半時 0.7；
 // 祈願：HP 六成以下 0.4；異常、哈欠、寄生種子：我兩下打不倒對手時 0.5（睡眠類 0.65、寄生 0.4）；撒菱類：對手還有後排、我不怕被打時 0.45；
 // 牆：對手打得痛（兩成以上）時 0.4；吼叫、黑霧：對手強化合計 +2 以上時 0.8；蓄力同強化防禦；生命水滴同回復但 0.4；自我暗示、速度互換見下面；
-// 其他 0（只有往前算一回合時才會選）
+// 守住類只在特性加速時用（見下）；其他 0（只有往前算一回合時才會選）
 function simGreedySup(st, s, M, T, k, dt, dm) {
   const x = SIM_SUP[k], safe = dt < M.hp * 0.35;
+  // 守住類（不含挺住）：特性加速、這回合會被比我快的對手打倒、+1 後就比對手快 → 守住拿加速（上一回合剛守住過的不算）。
+  // 對手先動就打倒我，我打得倒牠也沒用，所以放在「打得倒就不用輔助招」前面。2026-11-18 tools/sim_play.js：推演裡超級火焰雞不會守住，
+  // 換上來的超級烈咬陸鯊被推演成三回合掃光（實打 AI 勝率 20%）
+  if (x.kind === 'prot') {
+    if (x.how === 'endure' || M.v.stall || M.b.ab !== 'speed-boost' || dt < M.hp) return 0;
+    const a = simSpe(st, M), b = simSpe(st, T), up = simSpe(st, { ...M, st: { ...M.st, spe: Math.min(6, M.st.spe + 1) } });
+    return simFaster(st, b, a) && simFaster(st, up, b) ? 2.5 : 0;
+  }
   if (dm >= T.hp) return 0;
   switch (x.kind) {
     case 'boost': case 'soul': case 'retreat': case 'drum': case 'stock': {
