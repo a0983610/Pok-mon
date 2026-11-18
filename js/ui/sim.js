@@ -14,7 +14,8 @@ const SIM_ALGOS = [
 ];
 // 樹狀圖每一層總共試幾次（每一格平均分到）
 const SIM_TREE_ITERS = 3000;
-const sim = { sel: null, lead: -1, evo: -1, k: 10, algo: 'std', run: null, res: null, tree: null };
+// hid＝推演樹狀圖看不到對手招式（simViewHid；勾選框切換，同一頁開新的推演也沿用，不存網址）
+const sim = { sel: null, lead: -1, evo: -1, k: 10, algo: 'std', run: null, res: null, tree: null, hid: false };
 const simAlgo = id => SIM_ALGOS.find(a => a.id === id) || SIM_ALGOS[1];
 // 預估時間的文字：秒數不到 1 分鐘寫秒，不然寫分鐘
 const simEta = ms => ms < 60000 ? `${Math.max(1, Math.round(ms / 1000))} 秒` : `${Math.round(ms / 60000)} 分鐘`;
@@ -314,7 +315,7 @@ function simSetGuess(t, slot) {
 function simReform(M, key, item) {
   const N = simMon(key, { ...(defaultSet(key, 's') || emptySet()), moves: [...M.moves, '', '', '', ''].slice(0, 4) }, MON[key].base ? '' : item, 1, 's');
   return Object.assign(N, { hp: M.hp <= 0 ? 0 : Math.max(1, Math.round(N.max * M.hp / M.max)), status: M.status, tox: M.tox, slp: M.slp, frz: M.frz, st: { ...M.st }, v: { ...M.v },
-    chg: M.chg, hide: M.hide, rech: M.rech, in: M.in, kos: M.kos, out: M.out, last: M.last, ft: M.ft, slot: M.slot, gs: M.gs,
+    chg: M.chg, hide: M.hide, rech: M.rech, in: M.in, kos: M.kos, out: M.out, last: M.last, ft: M.ft, slot: M.slot, gs: M.gs, seen: M.seen,
     pp: Object.fromEntries(N.moves.map(k => [k, M.pp[k] ?? N.pp[k]])) });
 }
 // 對手還沒上場（猜的）的幾隻跟著上過場的修正：一場只能超級進化一隻（有上過場的超級進化了，猜的超級進化改原型、沒道具）；
@@ -352,6 +353,8 @@ function simApplyEdit(t) {
     if (it && !MON[M.key].base) M.item = it.value === '-' ? '' : it.value;
     const ms = [0, 1, 2, 3].map(n => el('data-emv', `${q}.${n}`)).filter(Boolean).map(s => s.value).filter((k, n, a) => k && MOVES[k] && a.indexOf(k) === n);
     if (ms.length && ms.join() !== M.moves.join()) {
+      // 改成的招式裡原本沒有的是實戰看到的（看不到對手招式時不再猜）；改掉的就不算看過
+      M.seen = [...(M.seen || []).filter(k => ms.includes(k)), ...ms.filter(k => !M.moves.includes(k) && !(M.seen || []).includes(k))];
       M.pp = Object.fromEntries(ms.map(k => [k, M.pp[k] ?? MOVES[k][5] ?? Infinity]));
       M.moves = ms;
     }
@@ -369,9 +372,20 @@ function simCalcTree() {
   setTimeout(() => {
     const cur = t.path[t.path.length - 1];
     if (sim.tree !== t || cur.view) return;
-    cur.view = simView(t.ctx, cur.st, SIM_TREE_ITERS);
+    cur.view = (sim.hid ? simViewHid : simView)(t.ctx, cur.st, SIM_TREE_ITERS);
     renderSimTree();
   });
+}
+// 看不到對手招式時點到對手猜的招式 k：對手場上那隻實際出了這招，把它換進牠的招式（換掉還沒看到、這隻使用率最低的；不到 4 招就加上），
+// 回傳改好的局面複本（往下一步時 simMoveIn 會把它記成看到的）
+function simRevealMove(st, k) {
+  const c = simClone(st), M = simAct(c, 1);
+  if (M.tf || M.moves.includes(k)) return c;
+  const use = new Map(useOf(M.key, 's')?.moves || []), seen = M.seen || [];
+  const drop = M.moves.length < 4 ? null : M.moves.filter(x => !seen.includes(x)).sort((a, b) => (use.get(a) || 0) - (use.get(b) || 0))[0];
+  M.moves = [...M.moves.filter(x => x !== drop), k];
+  M.pp = Object.fromEntries(M.moves.map(x => [x, M.pp[x] ?? MOVES[x][5] ?? Infinity]));
+  return c;
 }
 // 一個選擇的中文：招式名、換上誰、休息、什麼都不做
 function simOptZh(o, side) {
@@ -456,16 +470,20 @@ function renderSimTree() {
   else {
     const cls = x => x == null ? '' : x >= 0.6 ? 'm2' : x <= 0.4 ? 'mh' : 'm1';
     body = `<p class="muted small b-intro">${v.phase === 'replace' ? '有人倒下，選換上誰。' : '這一回合雙方各自出什麼。'}格子是「我方出左邊、對手出上面」之後雙方都照樹搜尋打下去的我方勝率，`
-      + '名字後面的 % 是雙方建議的出法比例（同時出招，混著出才不會被猜中）。點雙方實際出的那一格往下一步（傷害照平均算，實戰不一樣就按「改成實戰的結果」）。</p>'
+      + (v.hid ? '對手名字下面的 % 是牠的建議出法比例，「有這招」是猜牠帶這招的機率（對手出過的招以外照 OP.GG 使用率猜 4 組、每組各打 1/4 次合起來）；'
+        + '我方 ★ 是 4 組平均勝率最高的選擇。點到對手猜的招式＝對手實際出了這招，會換進牠的招式。'
+        : '名字後面的 % 是雙方建議的出法比例（同時出招，混著出才不會被猜中）。')
+      + '點雙方實際出的那一格往下一步（傷害照平均算，實戰不一樣就按「改成實戰的結果」）。</p>'
       + `<div class="mwrap cover"><table class="matrix vs"><thead><tr><th class="corner">我方 ↓<br>對手 →</th>`
-      + v.opts[1].map((o, j) => `<th>${simOptZh(o, st.sd[1])}<br><span class="meta">${pct(v.p[1][j])}</span></th>`).join('') + '</tr></thead><tbody>'
-      + v.opts[0].map((o, i) => `<tr><th>${simOptZh(o, st.sd[0])} <span class="meta">${pct(v.p[0][i])}</span></th>`
+      + v.opts[1].map((o, j) => `<th>${simOptZh(o, st.sd[1])}<br><span class="meta">${pct(v.p[1][j])}${v.hid && v.has[j] < 1 ? `・有這招 ${pct(v.has[j])}` : ''}</span></th>`).join('') + '</tr></thead><tbody>'
+      + v.opts[0].map((o, i) => `<tr><th>${simOptZh(o, st.sd[0])} <span class="meta">${v.hid ? (v.p[0][i] ? '★' : '') : pct(v.p[0][i])}</span></th>`
         + v.opts[1].map((_, j) => { const x = v.win[i][j]; return `<td class="${cls(x)}"><button class="vs-go" data-cell="${i}.${j}" title="試了 ${v.n[i][j]} 次">${x == null ? '—' : pct(x)}</button></td>`; }).join('')
         + '</tr>').join('') + '</tbody></table></div>';
   }
   const head = t.live ? `一步一步推演<span class="muted small">（我方帶 ${simTeamText(t.path[0].st.sd[0].mons)}；對手先發 ${MON[t.oppKeys[t.lead]].zh}）</span>`
     : `看怎麼打<span class="muted small">（對手帶 ${t.title}）</span>`;
-  box.innerHTML = `<div class="res-head">${head}<button class="mini" data-tclose>關閉</button></div>`
+  box.innerHTML = `<div class="res-head">${head}<label class="small"><input type="checkbox" data-thid${sim.hid ? ' checked' : ''}> 看不到對手招式</label>`
+    + '<button class="mini" data-tclose>關閉</button></div>'
     + (t.live ? simGuessHTML(t) : '')
     + `<div class="t-row">${steps.map((s, n) => n < steps.length - 1 ? `<button class="mini" data-back="${n}" title="回到這一步">${s}</button>` : `<b class="small">${s}</b>`).join('<span class="muted">→</span>')}</div>`
     + (cur.log.length ? `<div class="small">${cur.log.map(l => `<div>${l.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</div>`).join('')}</div>` : '')
@@ -508,6 +526,14 @@ $('#sResult').addEventListener('click', e => {
   simOpenTree(+b.dataset.tree);
   $('#sTree').scrollIntoView({ block: 'start' });
 });
+// 看不到對手招式：切換就清掉這條推演每一步算好的結果，重算目前這一步（回到前面的步驟時再算）
+$('#sTree').addEventListener('change', e => {
+  const b = e.target.closest('[data-thid]'), t = sim.tree;
+  if (!b || !t) return;
+  sim.hid = b.checked;
+  t.path.forEach(p => { p.view = null; });
+  simCalcTree();
+});
 $('#sTree').addEventListener('click', e => {
   const t = sim.tree;
   if (!t) return;
@@ -532,7 +558,10 @@ $('#sTree').addEventListener('click', e => {
   if (back) { t.path.length = +back.dataset.back + 1; t.edit = false; simCalcTree(); return; }
   const c = at('[data-cell]');
   if (!c || !cur.view?.opts) return;
-  const [i, j] = c.dataset.cell.split('.').map(Number), acts = [cur.view.opts[0][i], cur.view.opts[1][j]], next = simStep(t.ctx, cur.st, acts);
+  const [i, j] = c.dataset.cell.split('.').map(Number), acts = [cur.view.opts[0][i], cur.view.opts[1][j]];
+  // 看不到對手招式時點到猜的招：對手實際出了這招，先換進牠的招式（存回這一步，被迫換人重打這一步時也有這招）
+  if (cur.view.hid && acts[1].t === 'mv' && !simAct(cur.st, 1).moves.includes(acts[1].k)) cur.st = simRevealMove(cur.st, acts[1].k);
+  const next = simStep(t.ctx, cur.st, acts);
   t.path.push({ st: next.st, view: null, log: next.log, acts, forced: next.forced, pin: null });
   t.edit = false;
   simCalcTree();

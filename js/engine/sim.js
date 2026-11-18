@@ -2742,19 +2742,23 @@ function simSampleMoves(key, fmt, seen, rnd, how) {
 // 2026-11-17 tools/sim_ai.js（快速、實際招式照使用率抽、500 組）：看得到 vs top 51.5%；prob vs top 52.4%；同樣取最高分時 prob 贏 top 54.1%；
 // 改成平均各組的出法比例再抽則輸 top（44.5%），所以 prob 平均的是分數。抽招式用 rnd，沒給用固定種子（同局面每次一樣）。回傳第 s 方的選擇
 const SIM_HID_N = 4;
+// 局面 c（要是複本，會直接改）裡第 1−s 方每隻還站著、沒變身的招式換成 simSampleMoves 的（PP：用過的照實際剩下、沒用過的全滿）
+function simGuessOpp(c, s, fmt, rnd, how) {
+  c.sd[1 - s].mons.forEach(O => {
+    if (O.tf || O.hp <= 0) return;
+    const mv = simSampleMoves(O.key, fmt, O.seen || [], rnd, how);
+    if (!mv.length) return;
+    O.moves = mv;
+    O.pp = Object.fromEntries(mv.map(k => [k, O.pp[k] ?? MOVES[k][5] ?? Infinity]));
+  });
+}
 function simDecideHid(ctx, st, phase, rnd, s, algo = 'ply1', iters = 400, how = 'prob', n = SIM_HID_N) {
   const opts = simPhaseOpts(ctx, st, s, phase);
   if (opts.length === 1) return opts[0];
   const K = how === 'top' ? 1 : n, r = rnd || simRng(0x51ed27 ^ st.turn), at = new Map(opts.map((o, i) => [simKey(o), i])), p = opts.map(() => 0), val = opts.map(() => 0);
   for (let g = 0; g < K; g++) {
     const c = simClone(st);
-    c.sd[1 - s].mons.forEach(O => {
-      if (O.tf || O.hp <= 0) return;
-      const mv = simSampleMoves(O.key, ctx.fmt, O.seen || [], r, how);
-      if (!mv.length) return;
-      O.moves = mv;
-      O.pp = Object.fromEntries(mv.map(k => [k, O.pp[k] ?? MOVES[k][5] ?? Infinity]));
-    });
+    simGuessOpp(c, s, ctx.fmt, r, how);
     const out = algo === 'tree' ? simSearch(ctx, c, phase, Math.max(1, Math.round(iters / K)), rnd, true) : simDecide(ctx, c, phase, null, true);
     if (!out.stats) { p[at.get(simKey(out[s]))] += 1; continue; }
     // rv＝第 s 方各選項對這組對手出法比例的分數（第 s 方角度，越大越好）
@@ -2762,6 +2766,38 @@ function simDecideHid(ctx, st, phase, rnd, s, algo = 'ply1', iters = 400, how = 
     x.opts[s].forEach((o, i) => { const j = at.get(simKey(o)); if (j != null) { p[j] += x.p[s][i]; val[j] += rv[i]; } });
   }
   return how === 'prob' ? opts[val.indexOf(Math.max(...val))] : opts[simDraw(p, rnd)];
+}
+// 看不到對手招式的樹狀圖一層（推演樹狀圖、對戰中推薦；第 0 方＝我方看不到對手的招式）：對手招式照使用率抽 n 組（simGuessOpp 'prob'，固定種子），
+// 每組 simView 跑 iters／n 次（總次數不變），合併成 simView 的格式再多 hid: true、has：
+// opts[1]＝各組對手選擇的聯集（照第一次出現的順序），has[j]＝有這個選擇的組的比例；n、v、win 是各組加總／照次數加權（沒有這個選擇的組不算）；
+// p[1]＝各組對手出法比例的平均（沒有的組算 0）；p[0]＝各組「我方每個選擇對該組對手出法比例的勝率」平均最高的那個 1、其他 0
+// （同 simDecideHid 'prob'：平均各組的出法比例再抽實測比較差，所以不給混合比例）
+function simViewHid(ctx, st, iters, n = SIM_HID_N) {
+  const phase = simPhase(st);
+  if (phase === 'over') return { phase };
+  const r = simRng(0x51ed27 ^ st.turn), views = [];
+  for (let g = 0; g < n; g++) { const c = simClone(st); simGuessOpp(c, 0, ctx.fmt, r, 'prob'); views.push(simView(ctx, c, Math.max(1, Math.round(iters / n)))); }
+  const A = simPhaseOpts(ctx, st, 0, phase), ai = new Map(A.map((o, i) => [simKey(o), i])), B = [], bj = new Map();
+  views.forEach(v => v.opts[1].forEach(o => { const k = simKey(o); if (!bj.has(k)) { bj.set(k, B.length); B.push(o); } }));
+  const grid = () => A.map(() => B.map(() => 0)), cnt = grid(), sv = grid(), sw = grid(), sk = grid();
+  const has = B.map(() => 0), p1 = B.map(() => 0), val = A.map(() => 0);
+  views.forEach(v => {
+    const jm = v.opts[1].map(o => bj.get(simKey(o))), w = (i, jj) => v.win[i][jj] ?? v.v[i][jj];
+    jm.forEach((j, jj) => { has[j] += 1 / n; p1[j] += v.p[1][jj] / n; });
+    v.opts[0].forEach((o, i) => {
+      const a = ai.get(simKey(o));
+      if (a == null) return;
+      jm.forEach((j, jj) => {
+        const c = v.n[i][jj];
+        cnt[a][j] += c; sv[a][j] += v.v[i][jj] * c;
+        if (v.win[i][jj] != null) { sw[a][j] += v.win[i][jj] * c; sk[a][j] += c; }
+      });
+      val[a] += jm.reduce((t, _, jj) => t + v.p[1][jj] * w(i, jj), 0) / n;
+    });
+  });
+  const best = val.indexOf(Math.max(...val));
+  return { phase, hid: true, has, opts: [A, B], n: cnt, v: cnt.map((row, a) => row.map((c, j) => c ? sv[a][j] / c : 0.5)),
+    win: cnt.map((row, a) => row.map((_, j) => sk[a][j] ? sw[a][j] / sk[a][j] : null)), p: [A.map((_, i) => i === best ? 1 : 0), p1] };
 }
 // 打一場：sides＝[我方, 對手]，每方 { mons 帶出場的（simMySide／simOppScenarios 的 mons，先發排第一）}（會複製一份，不改到 sides）；
 // rnd 亂數；log＝要不要逐回合紀錄。
