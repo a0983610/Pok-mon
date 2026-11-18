@@ -167,7 +167,8 @@ function monBlock(E, ctx, st, s, i) {
   const M = st.sd[s].mons[i], act = st.sd[s].act === i;
   if (M.hp <= 0) return [`  [${i}] ${nameOf(E, M)}：倒下`];
   const boost = Object.entries(M.st).filter(([, v]) => v).map(([k, v]) => `${STAT_ZH[k] || k}${v > 0 ? '+' : ''}${v}`).join(' ');
-  const stt = M.status ? (E.SIM_STATUS_ZH[M.status] || M.status) + (M.status === 'slp' ? `（還要睡 ${M.slp}）` : M.status === 'tox' ? `（計數 ${M.tox}，每回合扣的越來越多）`
+  // 睡眠：每次輪到出招減 1（早起減 2），減完還大於 0 才繼續睡（同 simMove）
+  const stt = M.status ? (E.SIM_STATUS_ZH[M.status] || M.status) + (M.status === 'slp' ? `（第 ${M.b.ab === 'early-bird' ? Math.ceil(M.slp / 2) : M.slp} 次輪到出招時醒來並行動）` : M.status === 'tox' ? `（計數 ${M.tox}，每回合扣的越來越多）`
     : M.status === 'frz' ? `（計數 ${M.frz}：每次輪到出招減 1，減到 0 一定融化，沒到 0 時每次 1/4 機率融化）` : '') : '';
   const bs = E.MON[M.fk || M.key]?.bs || E.MON[M.key].bs, mega = !!E.MON[M.key].base;
   const L = [`  [${i}] ${act ? '★場上' : '後排'} ${nameOf(E, M)}（${E.simTypes(M).map(t => tz(E, t)).join('／')}）HP ${Math.max(0, M.hp)}/${M.max}（${pct(M.hp, M.max)}%）`
@@ -240,7 +241,12 @@ function show(r, G) {
   const cant = r.phase === 'turn' ? cantText(E, st, r.O[0]) : '';
   if (cant) out.push(cant);
   // 換人選項標換上場會吃的傷害（隱形岩、撒菱…）
-  const lab = o => { const t = optLabel(E, st, 0, o); if (o.t !== 'sw') return t; const h = entryHurt(E, st, 0, o.i); return h ? `${t}（進場吃 ${pct(h, st.sd[0].mons[o.i].max)}%）` : t; };
+  const lab = o => {
+    const t = optLabel(E, st, 0, o);
+    if (o.t !== 'sw') return t;
+    const h = entryHurt(E, st, 0, o.i), B = st.sd[0].mons[o.i];
+    return h >= B.hp ? `${t}（進場就會被打倒）` : h ? `${t}（進場吃 ${pct(h, B.max)}%）` : t;
+  };
   out.push('【可選】' + r.O[0].map((o, n) => `${n}) ${lab(o)}`).join('　'));
   out.push(`下指令：node tools/sim_play.js go ${G.file} 選項編號 [p隊伍編號] 理由`);
   out.push('（選擇編號是整局的局面編號；只有 AI 要選的局面（例如 AI 補位）不會給你看，所以編號會跳）');
@@ -412,7 +418,11 @@ async function main() {
     const n = +a[0];
     if (!Number.isInteger(n) || !r.O[0][n]) throw new Error(`選項編號要是 0～${r.O[0].length - 1}，收到「${a[0]}」`);
     let rest = a.slice(1), pin = null;
-    if (/^p\d$/.test(rest[0] || '')) { pin = +rest[0].slice(1); rest = rest.slice(1); }
+    if (/^p\d+$/.test(rest[0] || '')) {
+      pin = +rest[0].slice(1); rest = rest.slice(1);
+      const P = r.st.sd[0].mons[pin];
+      if (!P || P.hp <= 0 || r.st.sd[0].act === pin) throw new Error(`p 後面要寫後排還站著的隊伍編號（畫面上 [0]～[${r.st.sd[0].mons.length - 1}] 方括號裡的數字），收到「p${pin}」`);
+    }
     Object.assign(r.D, { a: engine().simKey(r.O[0][n]), ...(pin != null && { pin }), ...(rest.length && { why: rest.join(' ') }) });
     save(file, G);
     advance(file, G);
