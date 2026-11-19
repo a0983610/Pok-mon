@@ -1,15 +1,16 @@
 // 計算引擎：資料與純邏輯，不碰 DOM（畫面在 js/ui/）
 // ---------- 角色：依 Showdown 常用招式與特性判斷 ----------
 // USAGE[寶可夢 key][s 單打／d 雙打] = { moves／abils／items: [[招式／特性／道具 key, 使用率%]...],
-//   mates 隊友、win 勝於、lose 敗於: [家族 key...]（前幾名，見 mons-data.js 的說明），
+//   mates 隊友、win 勝於、lose 敗於: [家族 key...]（前幾名，見 mons-data.js 的說明）、mateP／loseP: 同 mates／lose 加上 %（[[家族 key, %]...]，圖鑑用）、
 //   spreads: [[[HP, 攻擊, 防禦, 特攻, 特防, 速度 的能力點數], 使用率%]...]、natures: [[[↑能力索引, ↓能力索引]（不加減是 [0, 0]）, 使用率%]...]、
-//   sets: [[[6 項能力點數…, ↑能力索引, ↓能力索引], 使用率%]...]（點數＋性格的組合）、megas: [[超級進化 key, 佔全家族使用率%]...]（只有原型有） }
+//   sets: [[[6 項能力點數…, ↑能力索引, ↓能力索引], 使用率%]...]（點數＋性格的組合）、megas: [[超級進化 key, 佔全家族使用率%]...]（只有原型有）、
+//   pct: 這個型態的使用率%（出現在幾 % 的隊伍；沒有自己的統計是 null） }
 const parseUse = s => s ? s.split(' ').map(x => { const [k, p] = x.split(':'); return [k, +p]; }) : [];
-const parseKeys = s => s ? s.split(' ') : [];
 const parseNums = s => parseUse(s).map(([k, p]) => [k.split('.').map(Number), p]);
-const USAGE = Object.fromEntries(Object.entries(USAGE_RAW).map(([k, [sm, dm, sa, da, si, di, st, dt, sw, dw, sl, dl, ss, ds, sn, dn, sx, dx, sg, dg]]) =>
-  [k, { s: { moves: parseUse(sm), abils: parseUse(sa), items: parseUse(si), mates: parseKeys(st), win: parseKeys(sw), lose: parseKeys(sl), spreads: parseNums(ss), natures: parseNums(sn), sets: parseNums(sx), megas: parseUse(sg) },
-        d: { moves: parseUse(dm), abils: parseUse(da), items: parseUse(di), mates: parseKeys(dt), win: parseKeys(dw), lose: parseKeys(dl), spreads: parseNums(ds), natures: parseNums(dn), sets: parseNums(dx), megas: parseUse(dg) } }]));
+const parseFmt = ([m, a, i, t, w, l, sp, n, x, g, pc]) => ({ moves: parseUse(m), abils: parseUse(a), items: parseUse(i),
+  mates: parseUse(t).map(([k]) => k), win: parseUse(w).map(([k]) => k), lose: parseUse(l).map(([k]) => k), mateP: parseUse(t), loseP: parseUse(l),
+  spreads: parseNums(sp), natures: parseNums(n), sets: parseNums(x), megas: parseUse(g), pct: pc ? +pc : null });
+const USAGE = Object.fromEntries(Object.entries(USAGE_RAW).map(([k, r]) => [k, { s: parseFmt(r.filter((_, j) => j % 2 === 0)), d: parseFmt(r.filter((_, j) => j % 2 === 1)) }]));
 // 功能標籤：清單裡的招式或特性使用率達 ROLE_PCT% 就標上。sup＝輔助類：這類招式（含擊掌奇襲、冰凍之風這種
 // 威力低、主要拿來輔助的攻擊招式）和特性都算「輔助招」，用來判斷這隻偏輸出還是偏輔助；守住、替身等不算任何一類
 const ROLE_PCT = 30;

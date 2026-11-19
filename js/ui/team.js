@@ -509,7 +509,7 @@ function pickTeamMon(key) {
 }
 $('#monsDate').textContent = MONS_DATE + ' 擷取';
 $('#usageSrc').textContent = `${USAGE_SRC.month}，分數 ${USAGE_SRC.cutoff} 以上；單打 ${USAGE_SRC.s[0]} ${USAGE_SRC.s[1].toLocaleString()} 場、雙打 ${USAGE_SRC.d[0]} ${USAGE_SRC.d[1].toLocaleString()} 場`;
-// 單打／雙打：隊伍分析的排名依據、出戰選角的帶幾隻、對戰中場上幾隻和傷害計算的常用招式、範圍招式共用。
+// 單打／雙打：隊伍分析的排名依據、出戰選角的帶幾隻、對戰中場上幾隻和傷害計算的常用招式、範圍招式、圖鑑的使用數據共用。
 // 配招還是原本形式的預設（挑寶可夢時填的 defaultSet，沒改過）就換成新形式的預設；自己改過的保留
 function setFmt(e) {
   const b = e.target.closest('button[data-fmt]');
@@ -517,7 +517,7 @@ function setFmt(e) {
   const old = team.fmt, fmt = b.dataset.fmt;
   if (fmt !== old) team.sets = team.sets.map((s, i) => team.mons[i] && s && JSON.stringify(s) === JSON.stringify(defaultSet(team.mons[i], old)) ? defaultSet(team.mons[i], fmt) : s);
   team.fmt = fmt;
-  renderTeam(); renderBring(); renderBattle(); renderCalc();
+  renderTeam(); renderBring(); renderBattle(); renderCalc(); renderDex();
 }
 $('#tFmt').addEventListener('click', setFmt);
 $('#tSlots').addEventListener('click', e => {

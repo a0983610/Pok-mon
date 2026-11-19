@@ -295,6 +295,28 @@ table.matrix { border-collapse: separate; border-spacing: 0; margin: 0 auto; }
 .qpick button:hover { background: var(--surface-2); }
 .qpick .chip { font-size: 11px; padding: 0 6px; }
 .qpick .meta { font-size: 12px; font-weight: 500; }
+.qpick button[aria-pressed="true"] { border-color: var(--focus); background: var(--hl); }
+
+/* ---------- 圖鑑 ---------- */
+.dx-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; font-size: 18px; font-weight: 800; }
+.dx-head .meta { font-size: 13px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dx-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 0 28px; }
+@media (max-width: 760px) { .dx-grid { grid-template-columns: minmax(0, 1fr); } }
+.dx-sub { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; font-weight: 700; margin: 14px 0 6px; }
+.dx-uh .seg { margin-left: auto; }
+.dx-st { display: grid; grid-template-columns: 3em 2.4em minmax(0, 1fr); align-items: center; gap: 4px 8px; font-size: 14px; font-variant-numeric: tabular-nums; }
+.dx-st b { text-align: right; }
+.dx-bar { height: 10px; border-radius: 999px; background: var(--zebra); border: 1px solid var(--border); overflow: hidden; }
+.dx-bar i { display: block; height: 100%; background: #b08d16; }
+.dx-bar.sp i { background: #3b6fd8; }
+.dx-bar.spe i { background: var(--se); }
+.dx-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 3px 0; font-size: 14px; line-height: 1.6; }
+.dx-row .meta, .dx-chips .meta { font-size: 12px; color: var(--muted); }
+.dx-l { min-width: 4.5em; color: var(--muted); font-weight: 700; }
+.dx-l + span, .dx-l + .dx-chips { flex: 1 1 0; min-width: 0; }
+.dx-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.dx-learn { margin-top: 10px; }
+.dx-go { margin-top: 14px; }
 
 /* ---------- 傷害計算 ---------- */
 .c-vs { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px 16px; align-items: start; }
@@ -416,7 +438,7 @@ footer a { color: inherit; }
     </svg>
     <div>
       <h1>寶可夢冠軍 屬性克制表</h1>
-      <div class="sub">Pokémon Champions · 18 種屬性相剋 · 配招分析 · 隊伍分析 · 出戰選角 · 對戰中 · 傷害計算 · 模擬對戰</div>
+      <div class="sub">Pokémon Champions · 18 種屬性相剋 · 配招分析 · 隊伍分析 · 出戰選角 · 對戰中 · 傷害計算 · 模擬對戰 · 圖鑑</div>
     </div>
   </header>
 
@@ -428,6 +450,7 @@ footer a { color: inherit; }
     <button role="tab" data-tab="battle" aria-selected="false">對戰中</button>
     <button role="tab" data-tab="calc" aria-selected="false">傷害計算</button>
     <button role="tab" data-tab="sim" aria-selected="false">模擬對戰</button>
+    <button role="tab" data-tab="dex" aria-selected="false">圖鑑</button>
   </nav>
 
   <!-- 克制表 -->
@@ -647,6 +670,18 @@ footer a { color: inherit; }
     </div>
   </section>
 
+  <!-- 圖鑑 -->
+  <section id="p-dex" role="tabpanel" hidden>
+    <div class="card">
+      <div class="look-top">
+        <p class="muted small b-intro">點一隻寶可夢看種族值、特性、屬性相剋、Showdown 天梯的使用數據（特性、道具、招式、配點、常見隊友、剋星）與學得到的招式；隊友和剋星點了可以接著看那隻。</p>
+        <div class="top-actions"><button class="btn ghost" data-copy>複製連結</button></div>
+      </div>
+      <div class="pick sm" id="dPick" aria-label="用屬性篩選寶可夢"></div>
+      <div id="dList"></div>
+    </div>
+    <div class="card b-card" id="dCard"></div>
+  </section>
 
   <footer>
     資料：Pokémon Champions 使用與主系列第六世代（《X／Y》）起相同的 18 屬性相剋倍率；
@@ -678,6 +713,7 @@ footer a { color: inherit; }
 <script src="js/ui/calc.js"></script>
 <script src="js/ui/battle.js"></script>
 <script src="js/ui/sim.js"></script>
+<script src="js/ui/dex.js"></script>
 <script src="js/ui/state.js"></script>
 <script src="js/main.js"></script>
 </body>

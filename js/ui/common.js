@@ -22,7 +22,7 @@ const MCLS = { 4: 'm4', 2: 'm2', 1: 'm1', 0.5: 'mh', 0.25: 'mq', 0.125: 'mq', 0:
 const mtag = m => `<span class="mtag ${MCLS[m]}">${fmt(m)}</span>`;
 
 // ---------- 分頁 ----------
-const TABS = ['table', 'build', 'team', 'bring', 'battle', 'calc', 'sim'];
+const TABS = ['table', 'build', 'team', 'bring', 'battle', 'calc', 'sim', 'dex'];
 let curTab = 'table';
 function showTab(name) {
   curTab = name;
@@ -35,6 +35,7 @@ function showTab(name) {
   if (name === 'battle') renderBattle();
   if (name === 'calc') renderCalc();
   if (name === 'sim') renderSim();
+  if (name === 'dex') renderDex();
   saveState();
 }
 $('.tabs').addEventListener('click', e => {

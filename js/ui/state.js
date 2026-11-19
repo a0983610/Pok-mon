@@ -16,6 +16,7 @@
 //   bd＝畫皮被揭穿了的格子（我方.對手，各自 + 接）
 //   模擬對戰：sb＝我方自己點的帶出場格子（先發排第一，. 分隔；照出戰選角建議時不寫）、sv＝超級進化的格子（自己點過才寫）、
 //   sk＝對手每種帶法打幾場（10 不寫）、sa＝決策方式 fast／fine（標準 std 不寫）
+//   圖鑑：dx＝看的寶可夢 key
 const STATE_KEY = 'pkmn-champions-state';
 // 各格的值用逗號接起來，尾端空白的不寫
 const joinTrim = a => { const s = a.slice(); while (s.length && !s[s.length - 1]) s.pop(); return s.join(','); };
@@ -83,6 +84,7 @@ function stateQuery() {
   }
   if (sim.k !== SIM_KS[0]) q.push('sk=' + sim.k);
   if (sim.algo !== 'std') q.push('sa=' + sim.algo);
+  if (dex.key) q.push('dx=' + dex.key);
   return q.join('&');
 }
 const stateHash = () => { const q = stateQuery(); return '#' + curTab + (q ? '?' + q : ''); };
@@ -206,6 +208,7 @@ function loadState(q) {
   Object.assign(sim, { sel: sb, lead: sb?.[0] ?? -1, evo: /^[0-5]$/.test(kv.sv || '') ? +kv.sv : -1 });
   sim.k = SIM_KS.includes(+kv.sk) ? +kv.sk : SIM_KS[0];
   sim.algo = SIM_ALGOS.some(a => a.id === kv.sa) ? kv.sa : 'std';
+  dex.key = MON[kv.dx] ? kv.dx : '';
 }
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-copy]');

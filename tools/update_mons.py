@@ -275,15 +275,16 @@ def sd_stats(data, sid, fam, mv_ids, ab_ids, it_ids, miss):
             nats[n] = nats.get(n, 0) + q
         top = lambda d, n=None: [(k, round(q)) for k, q in sorted(d.items(), key=lambda x: -x[1]) if round(q) >= 1][:n]
         out[key] = {
-            'usage': e['usage'],
+            'usage': e['usage'], 'pct': '%.2f' % (e['usage'] * 100),
             'moves': pick(e['Moves'], mv_ids, 'move'), 'abils': pick(e['Abilities'], ab_ids, 'abil'), 'items': pick(e['Items'], it_ids, 'item'),
             'spreads': ' '.join('%s:%d' % ('.'.join(map(str, k)), p) for k, p in top(sps, SP_N)),
             'natures': ' '.join('%d.%d:%d' % (k[0], k[1], p) for k, p in top(nats)),
             'sets': ' '.join('%s:%d' % ('.'.join(map(str, k)), p) for k, p in top(sets, SP_N)),
         }
         raw[key] = e
-    # 隊友：同隊次數，依家族加總；敗於（剋星）＝Checks and Counters：遇到時這隻被打倒或被逼換下的比例 p 減 4 倍標準差 d
-    # （Smogon 排剋星用的分數）大於 0 的，依家族取最高分；勝於＝反過來，這隻出現在誰的剋星裡。都不含自己家族，依次數／分數高到低取前 LIST_N 個家族
+    # 隊友：同隊次數，依家族加總，% 是同隊率（同隊次數 ÷ 這隻的次數）；敗於（剋星）＝Checks and Counters：遇到時這隻被打倒或被逼換下的比例 p
+    # 減 4 倍標準差 d（Smogon 排剋星用的分數）大於 0 的，依家族取最高分，% 是那筆的 p；勝於＝反過來，這隻出現在誰的剋星裡（% 是對方被打倒或逼換下的 p）。
+    # 都不含自己家族，依次數／分數高到低取前 LIST_N 個家族，寫成「key:%」
     win = {}
     for key, e in raw.items():
         for name, c in e['Checks and Counters'].items():
@@ -291,19 +292,22 @@ def sd_stats(data, sid, fam, mv_ids, ab_ids, it_ids, miss):
             sc = c['p'] - 4 * c['d']
             if k and sc > 0:
                 w = win.setdefault(k, {})
-                w[fam[key]] = max(w.get(fam[key], 0), sc)
+                if sc > w.get(fam[key], (0, 0))[0]:
+                    w[fam[key]] = (sc, c['p'] * 100)
     for key, e in raw.items():
+        tot = sum(e['Abilities'].values()) or 1
         mates, lose = {}, {}
         for name, v in e['Teammates'].items():
             k = sid.get(alnum(name))
             if k and fam[k] != fam[key]:
-                mates[fam[k]] = mates.get(fam[k], 0) + v
+                s = mates.get(fam[k], (0, 0))[0] + v
+                mates[fam[k]] = (s, s / tot * 100)
         for name, c in e['Checks and Counters'].items():
             k = sid.get(alnum(name))
             sc = c['p'] - 4 * c['d']
-            if k and sc > 0 and fam[k] != fam[key]:
-                lose[fam[k]] = max(lose.get(fam[k], 0), sc)
-        rank = lambda d: ' '.join(k for k, _ in sorted(d.items(), key=lambda x: -x[1])[:LIST_N])
+            if k and sc > 0 and fam[k] != fam[key] and sc > lose.get(fam[k], (0, 0))[0]:
+                lose[fam[k]] = (sc, c['p'] * 100)
+        rank = lambda d: ' '.join('%s:%d' % (k, round(p)) for k, (_, p) in sorted(d.items(), key=lambda x: -x[1][0])[:LIST_N])
         out[key].update(mates=rank(mates), lose=rank(lose), win=rank({k: v for k, v in win.get(key, {}).items() if k != fam[key]}))
     return out
 
@@ -477,7 +481,7 @@ def main(path, only_stats=False):
                      'megas': ' '.join('%s:%d' % (k, round(u / tot * 100)) for k, u in sorted(forms.items(), key=lambda x: -x[1])
                                        if k != key and round(u / tot * 100) >= 1)}
             cols[f] = c
-        row = [cols[f].get(k, '') for k in ('moves', 'abils', 'items', 'mates', 'win', 'lose', 'spreads', 'natures', 'sets', 'megas') for f in FMTS]
+        row = [cols[f].get(k, '') for k in ('moves', 'abils', 'items', 'mates', 'win', 'lose', 'spreads', 'natures', 'sets', 'megas', 'pct') for f in FMTS]
         if any(row):
             use[key] = row
     # 超級進化的特性與超級石一定收（超級石：說明寫「超級進化的持有物」的道具，網頁 stoneOf 照說明找每種超級進化帶的那顆）
@@ -519,15 +523,16 @@ def main(path, only_stats=False):
                'const MONS_RAW = [\n%s\n];\n'
                '// 常用統計：寶可夢 key → [單打招式, 雙打招式, 單打特性, 雙打特性, 單打道具, 雙打道具,\n'
                '//   單打隊友, 雙打隊友, 單打勝於, 雙打勝於, 單打敗於, 雙打敗於, 單打能力點數, 雙打能力點數, 單打性格, 雙打性格,\n'
-               '//   單打點數＋性格, 雙打點數＋性格, 單打超級進化比例, 雙打超級進化比例]。\n'
+               '//   單打點數＋性格, 雙打點數＋性格, 單打超級進化比例, 雙打超級進化比例, 單打使用率, 雙打使用率]。\n'
                '//   招式／道具／點數／性格是這個型態自己的（Showdown 的超級進化有自己的統計，原型只算沒帶超級石的）；\n'
                '//   特性：超級進化放原型的常用特性（出場時還沒超級進化；超級進化後的固定特性在 MONS_RAW）；\n'
                '//   招式／特性／道具每項是「key:使用率%%」以空白分隔、依使用率高到低，低於 %d%% 的不收；\n'
-               '//   隊友／勝於／敗於是家族（原型）key 以空白分隔，不含自己家族，取前 %d 個：隊友依同隊次數，敗於＝這隻的剋星（Checks and Counters：遇到時這隻被打倒或被逼換下的比例\n'
-               '//   減 4 倍標準差，大於 0 的依分數排），勝於＝反過來這隻是誰的剋星；原型的這三項看家族裡使用率最高的型態；\n'
+               '//   隊友／勝於／敗於每項是「家族（原型）key:%%」以空白分隔，不含自己家族，取前 %d 個：隊友依同隊次數（%% 是同隊率），\n'
+               '//   敗於＝這隻的剋星（Checks and Counters：遇到時這隻被打倒或被逼換下的比例 p 減 4 倍標準差，大於 0 的依分數排，%% 是 p），\n'
+               '//   勝於＝反過來這隻是誰的剋星（%% 是對方被打倒或逼換下的比例）；原型的這三項看家族裡使用率最高的型態；\n'
                '//   能力點數每項是「HP.攻擊.防禦.特攻.特防.速度:使用率%%」、點數＋性格每項是「HP.攻擊.防禦.特攻.特防.速度.↑能力.↓能力:使用率%%」，各取前 %d 種；\n'
                '//   性格每項是「↑能力.↓能力:使用率%%」（1 攻擊、2 防禦、3 特攻、4 特防、5 速度，不加減的寫 0.0）；這三種依使用率高到低，0%% 的不收；\n'
-               '//   超級進化比例只有原型有：「超級進化 key:佔全家族使用率%%」，0%% 的不收。沒有統計的是空字串\n'
+               '//   超級進化比例只有原型有：「超級進化 key:佔全家族使用率%%」，0%% 的不收；使用率是這個型態出現在幾 %% 的隊伍（小數 2 位）。沒有統計的是空字串\n'
                'const USAGE_RAW = {\n%s\n};\n'
                '// 招式（任一隻常用的）：key → [中文名, 屬性, 分類（physical 物理／special 特殊／status 變化）, 威力（null＝沒有）, 效果,\n'
                '//   PP, 命中率（null＝必中）, 先制等級, 目標範圍（OP.GG target，如 selected-pokemon 單體、all-opponents 對手全體）, 其他]；\n'
