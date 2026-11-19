@@ -18,12 +18,16 @@
 // 後面加「+prob」「+top」＝看不到對手招式（simDecideHid）：prob 照使用率抽 4 組、各選項分數平均取最高（+prob8 抽 8 組）、
 // top 當成使用率最高的 4 招（網頁現在的做法），
 // 例如 ply1+prob、tree:400+top；沒加＝看得到對手實際帶的招式。只有 vs 能用。
+// 「+L40」＝推演最多再打 40 回合（ctx.look；沒加＝SIM_LOOK 3 回合），例如 tree:400+L40。
+// 「+bsim」＝6 選 3 時用模擬選帶法（bringSim，同網頁出戰選角的「用模擬比較帶法」；+bsim8＝每種對手帶法打 8 場，沒寫數字 16 場），
+// 沒加＝照出戰選角第 1 名帶。只有 vs 隊伍 6 能用，例如 vs ply1+bsim ply1（只差帶法，出招一樣）。
+// 「+bsimx」＝保守版：猜的對手帶法拿掉對手出戰選角的第 1 名組合（vs 的另一方照第 1 名帶時，猜的裡面就沒有牠實際帶的）。
 const fs = require('fs'), vm = require('vm'), path = require('path'), os = require('os'), { execFileSync } = require('child_process');
 const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
 const R = path.resolve(__dirname, '..');
 const FILES = ['base-stats.js', 'mons-data.js', 'js/engine/core.js', 'js/engine/roles.js', 'js/engine/damage.js', 'js/engine/sim.js'];
 const NAMES = ['MONS', 'MON', 'MOVES', 'SIM_MAX_TURN', 'simMon', 'simItems', 'simStart', 'simTurn', 'simReplace', 'simOver', 'simNeed', 'simWinner',
-  'simCtx', 'simDecide', 'simSearch', 'simGreedyPick', 'simRng', 'simKey', 'simBaseKey', 'simDecideHid', 'simSampleMoves', 'defaultSet', 'bringPlan'];
+  'simCtx', 'simDecide', 'simSearch', 'simGreedyPick', 'simRng', 'simHash', 'simKey', 'simBaseKey', 'simDecideHid', 'simSampleMoves', 'defaultSet', 'bringPlan'];
 // 各方決策用的亂數（和打的亂數分開，兩場交換決策時同一方的亂數不變）
 const SALT = [0x5bd1e995, 0x27d4eb2f, 0x165667b1, 0x3c6ef372];
 
@@ -49,28 +53,71 @@ function engine(ref = '') {
 // 決策：spec 見檔案開頭；decide(ctx, st, phase, rnd, { stats, s }) 回傳陣列，[s] 是第 s 方的選擇
 // （看得到的回傳 [第 0 方, 第 1 方]；stats＝附上根節點的評分，見 simDecide／simSearch。看不到對手招式的只有 [s]）
 function decider(spec) {
-  const at = spec.lastIndexOf('@'), ref = at >= 0 ? spec.slice(0, at) : '', [core, hid = ''] = spec.slice(at + 1).split('+'), [algo, n] = core.split(':');
-  const how = hid.replace(/\d+$/, ''), K = +hid.replace(/^\D+/, '') || undefined;
-  if (algo !== 'ply1' && algo !== 'tree' || hid && how !== 'prob' && how !== 'top')
-    throw new Error(`看不懂的決策「${spec}」：寫 ply1、tree:800，可加 git 版本@（例如 HEAD@ply1）、+prob／+top（看不到對手招式）`);
+  const at = spec.lastIndexOf('@'), ref = at >= 0 ? spec.slice(0, at) : '', [core, ...mods] = spec.slice(at + 1).split('+'), [algo, n] = core.split(':');
+  let how = '', K, look, bsim = 0, bx = false, bad = algo !== 'ply1' && algo !== 'tree';
+  for (const m of mods) {
+    const [, w, d] = m.match(/^([A-Za-z]+)(\d*)$/) || [];
+    if (w === 'prob' || w === 'top') { how = w; K = +d || undefined; } else if (w === 'L' && +d > 0) look = +d;
+    else if (w === 'bsim' || w === 'bsimx') { bsim = +d || BSIM_K; bx = w === 'bsimx'; } else bad = true;
+  }
+  if (bad) throw new Error(`看不懂的決策「${spec}」：寫 ply1、tree:800，可加 git 版本@（例如 HEAD@ply1）、+prob／+top（看不到對手招式）、+L40（推演回合）、+bsim（用模擬選帶法）`);
   const E = engine(ref), iters = +n || 200;
   const decide = how ? (ctx, st, phase, rnd, o) => { const a = []; a[o.s] = E.simDecideHid(ctx, st, phase, rnd, o.s, algo, iters, how, K); return a; }
     : algo === 'tree' ? (ctx, st, phase, rnd, o) => E.simSearch(ctx, st, phase, iters, rnd, o.stats) : (ctx, st, phase, rnd, o) => E.simDecide(ctx, st, phase, rnd, o.stats);
-  return { spec, ref, algo, hid: how, E, decide };
+  return { spec, ref, algo, hid: how, look, bsim, bx, E, decide };
 }
+// 決策用的計算快取（+L 的推演回合放在 ctx.look）
+const ctxOf = d => ({ ...d.E.simCtx('s'), ...(d.look && { look: d.look }) });
 
 // ---------- 組隊、打一場 ----------
 // 出戰選角（bringPlan）第 1 名的帶法：keys（6 隻）對上對手 opp（6 隻；看不到對手帶誰，雙方配招都照 Showdown 常見）帶哪幾隻
 // （隊伍索引，先發排第一；同 simMyPlan）。隊伍裡超級進化最多 1 隻，不會遇到「只能進化一隻」
+const planOf = (E, keys, opp) => E.bringPlan(keys.map(k => ({ defs: E.MON[k].types, key: k })), opp.map(k => E.MON[k]), 's');
+const leadFirst = (c, lead) => [lead, ...c.idx.filter(j => j !== lead)];
 function bringIdx(E, keys, opp) {
-  const plan = E.bringPlan(keys.map(k => ({ defs: E.MON[k].types, key: k })), opp.map(k => E.MON[k]), 's'), lead = plan.pick.js[0];
-  return [lead, ...plan.combos[0].idx.filter(j => j !== lead)];
+  const plan = planOf(E, keys, opp);
+  return leadFirst(plan.combos[0], plan.pick.js[0]);
 }
-// 6 選 3 的一組（six＝雙方 6 隻）：雙方照出戰選角帶 3 隻。回傳 T＝雙方帶出場的寶可夢 key（先發排第一）、I＝帶出場的道具（照 6 隻分配、同一隊不重複）。
+// 用模擬選帶法（同網頁出戰選角的「用模擬比較帶法」，js/ui/bring.js 的 bSimCands／bSimStart）：第 s 方的候補＝出戰選角第 1 名組合換三種先發
+// ＋第 2～BSIM_C 名組合（先發照 leadOf）；對手的帶法＝把對手也當成用出戰選角選（看得到我方 6 隻、配招都照 Showdown 常見）的前 BSIM_SC 種（先發照 leadOf）。
+// 每個候補對每種對手帶法打 K 場（雙方快速 ply1、我方當第 0 方；第 r 種帶法第 i 場的亂數每個候補都一樣＝成對比較），
+// 挑得分率（贏 1、平手 0.5）最高的，同分取前面的（第 1 名組合與先發優先）。回傳 { js 帶的隊伍索引（先發排第一）, at 選了第幾個候補（0＝和第 1 名一樣） }。
+// 注意：vs 的另一方照第 1 名帶時，牠實際的帶法就是這裡對手帶法的第 1 種（網頁猜對手也是同一個方法；對人時不一定猜得中）；
+// skip＝保守版，對手帶法改取第 2～BSIM_SC+1 種（不含對手的第 1 名組合）
+const BSIM_C = 4, BSIM_SC = 5, BSIM_K = 16;
+function bringSim(E, six, s, K, seed, skip) {
+  const mine = six[s], opp = six[1 - s], items = six.map(keys => E.simItems(keys, 's'));
+  const mp = planOf(E, mine, opp), top = mp.combos[0], lead0 = mp.pick.js[0], op = planOf(E, opp, mine);
+  const cands = [lead0, ...top.idx.filter(j => j !== lead0)].map(l => leadFirst(top, l)).concat(mp.combos.slice(1, BSIM_C).map(c => leadFirst(c, mp.leadOf(c).js[0])));
+  const scs = op.combos.slice(+!!skip, BSIM_SC + !!skip).map(c => leadFirst(c, op.leadOf(c).js[0]));
+  // 這次選角的場次共用計算快取（我方固定第 0 方、每隻的配招道具固定）；每場複製一份 ctx 物件，推演的同速輪流（ctx.flip）不帶到下一場
+  const shared = E.simCtx('s');
+  const score = cands.map(js => {
+    let t = 0;
+    scs.forEach((oj, r) => {
+      for (let i = 0; i < K; i++) {
+        const gs = E.simHash(`bring:${seed}:${s}:${r}:${i}`);
+        const mk = st => { const ctx = { ...shared }, rnd = E.simRng(gs ^ SALT[0]);
+          return { decide: phase => { const a = E.simDecide(ctx, st, phase, rnd); return [a[0], a[1]]; }, pick: (c, x, hit) => E.simGreedyPick(ctx, c, x, hit) }; };
+        const w = play([js.map(j => mine[j]), oj.map(j => opp[j])], gs, false, mk, undefined, [js.map(j => items[s][j]), oj.map(j => items[1 - s][j])]).w;
+        t += w === 0 ? 1 : w === 1 ? 0 : 0.5;
+      }
+    });
+    return t;
+  });
+  const at = score.indexOf(Math.max(...score));
+  return { js: cands[at], at };
+}
+// 第 s 方帶出場的：K＝0 照出戰選角第 1 名，K > 0 用模擬選（bringSim，每種對手帶法 K 場；skip 見 bringSim）。回傳 { keys 寶可夢 key（先發排第一）, items 道具（照 6 隻分配、同一隊不重複）, at }
+function bringOf(six, s, K, seed, skip) {
+  const E = engine(), items = E.simItems(six[s], 's'), b = K ? bringSim(E, six, s, K, seed, skip) : { js: bringIdx(E, six[s], six[1 - s]), at: 0 };
+  return { keys: b.js.map(j => six[s][j]), items: b.js.map(j => items[j]), at: b.at };
+}
+// 6 選 3 的一組（six＝雙方 6 隻）：雙方照出戰選角第 1 名帶 3 隻。回傳 T＝雙方帶出場的寶可夢 key（先發排第一）、I＝帶出場的道具。
 // 出戰選角一方約 0.1 秒，在 worker 收到那組時才算
 function bring6(six) {
-  const E = engine(), idx = six.map((keys, s) => bringIdx(E, keys, six[1 - s])), items = six.map(keys => E.simItems(keys, 's'));
-  return { T: idx.map((js, s) => js.map(j => six[s][j])), I: idx.map((js, s) => js.map(j => items[s][j])) };
+  const b = [0, 1].map(s => bringOf(six, s, 0));
+  return { T: b.map(x => x.keys), I: b.map(x => x.items) };
 }
 // n 組隨機兩隊：size 6＝各 6 隻（six，帶誰見 bring6）；size 3＝直接各 3 隻（T，先發排第一；play 照 3 隻分配道具）
 function teams(n, seed, top, size = 6) {
@@ -99,7 +146,7 @@ function play(T, seed, log, mk, sets, I) {
 // vs：第 s 方用 D[s] 選（各自的計算快取與亂數；打完換人換誰也用自己的簡單規則）
 // ms[s]：第 s 方選擇花的時間累計（毫秒）
 const mkVs = (D, seed, ms) => st => {
-  const ctx = D.map(d => d.E.simCtx('s')), rnd = [0, 1].map(s => engine().simRng(seed ^ SALT[s]));
+  const ctx = D.map(ctxOf), rnd = [0, 1].map(s => engine().simRng(seed ^ SALT[s]));
   const timed = s => phase => { const t0 = performance.now(), a = D[s].decide(ctx[s], st, phase, rnd[s], { s })[s]; ms[s] += performance.now() - t0; return a; };
   const dec = [timed(0), timed(1)];
   return { decide: phase => [dec[0](phase), dec[1](phase)], pick: (c, s, hit) => D[s].E.simGreedyPick(ctx[s], c, s, hit) };
@@ -138,7 +185,7 @@ function compare(st, phase, S, Tt, teach, g, out) {
   }
 }
 const mkDiff = (S, teach, seed, g, out) => st => {
-  const sctx = S.E.simCtx('s'), tctx = teach.E.simCtx('s'), srnd = engine().simRng(seed ^ SALT[0]), trnd = engine().simRng(seed ^ SALT[2]);
+  const sctx = ctxOf(S), tctx = ctxOf(teach), srnd = engine().simRng(seed ^ SALT[0]), trnd = engine().simRng(seed ^ SALT[2]);
   return {
     decide: phase => {
       const a = S.decide(sctx, st, phase, srnd, { stats: true });
@@ -152,15 +199,24 @@ const mkDiff = (S, teach, seed, g, out) => st => {
 // ---------- worker：收到一組，打完回傳 ----------
 if (!isMainThread) {
   const { mode, specs } = workerData, D = specs.map(decider);
-  parentPort.on('message', c0 => {
-    const c = c0.six ? { ...c0, ...bring6(c0.six) } : c0;
+  parentPort.on('message', c => {
     if (mode === 'vs') {
-      // 第一場 A 是第 0 方，第二場交換；A 的分數：贏 1、平手 0.5
-      const ms = [[0, 0], [0, 0]], g = [[D[0], D[1]], [D[1], D[0]]].map((pair, i) => play(c.T, c.seed, false, mkVs(pair, c.seed, ms[i]), c.sets, c.I));
+      // 第一場 A 是第 0 方，第二場交換；A 的分數：贏 1、平手 0.5。6 選 3 時各方照自己這場用的決策帶（+bsim 用模擬選，同一方同一種帶法兩場共用）
+      const ms = [[0, 0], [0, 0]], bs = new Map(), bt = { n: 0, diff: 0, ms: 0 };
+      const bringFor = (s, d) => {
+        const id = [s, d.bsim, d.bx].join();
+        if (!bs.has(id)) { const t0 = performance.now(), b = bringOf(c.six, s, d.bsim, c.seed, d.bx); if (d.bsim) Object.assign(bt, { n: bt.n + 1, diff: bt.diff + (b.at > 0), ms: bt.ms + performance.now() - t0 }); bs.set(id, b); }
+        return bs.get(id);
+      };
+      const g = [[D[0], D[1]], [D[1], D[0]]].map((pair, i) => {
+        const b = c.six && pair.map((d, s) => bringFor(s, d));
+        return play(b ? b.map(x => x.keys) : c.T, c.seed, false, mkVs(pair, c.seed, ms[i]), c.sets, b && b.map(x => x.items));
+      });
       const scA = [g[0].w === 0 ? 1 : g[0].w === 1 ? 0 : 0.5, g[1].w === 1 ? 1 : g[1].w === 0 ? 0 : 0.5];
       // A 第一場是第 0 方、第二場是第 1 方
-      parentPort.postMessage({ id: c.id, sc: scA, turns: g.map(x => x.turns), ms: [ms[0][0] + ms[1][1], ms[0][1] + ms[1][0]] });
+      parentPort.postMessage({ id: c.id, sc: scA, turns: g.map(x => x.turns), ms: [ms[0][0] + ms[1][1], ms[0][1] + ms[1][0]], bt });
     } else {
+      if (c.six) Object.assign(c, bring6(c.six));
       const out = [], E = engine(), r = play(c.T, c.seed, true, mkDiff(D[0], D[1], c.seed, c.id, out), undefined, c.I), zh = ks => ks.map(k => E.MON[k].zh);
       out.push({ type: 'game', g: c.id, T: c.T.map(zh), ...(c.six && { six: c.six.map(zh) }), w: r.w, turns: r.turns, log: r.log });
       parentPort.postMessage({ id: c.id, out });
@@ -197,15 +253,19 @@ async function main() {
   if (mode === 'vs') {
     const [A, B] = a, [N, SEED, TOP, SETS, SIZE] = [+(a[2] || 200), +(a[3] || 7), +(a[4] || 60), a[5] || 'def', +(a[6] || 6)];
     if (!A || !B || !['def', 'prob'].includes(SETS) || ![3, 6].includes(SIZE)) throw new Error('用法：node tools/sim_ai.js vs 決策A 決策B [組數 200] [種子 7] [排名前幾名 60] [配招 def／prob] [隊伍 6／3]');
-    const cases = teams(N, SEED, TOP, SIZE).map(c => ({ ...c, sets: SETS })), sc = [], turns = [], ms = [0, 0];
+    if (SIZE === 3 && [A, B].some(sp => decider(sp).bsim)) throw new Error('+bsim（用模擬選帶法）只有隊伍 6 能用');
+    const cases = teams(N, SEED, TOP, SIZE).map(c => ({ ...c, sets: SETS })), sc = [], turns = [], ms = [0, 0], bt = { n: 0, diff: 0, ms: 0 };
     console.log(`A＝${A}、B＝${B}：單打前 ${TOP} 名隨機兩隊${SIZE === 6 ? '（各 6 隻，出戰選角帶 3 隻）' : '（各 3 隻）'} ${N} 組，每組交換決策各打一場${SETS === 'prob' ? '；實際招式照使用率抽' : ''}`);
-    const sec = await runAll('vs', [A, B], cases, m => { sc.push((m.sc[0] + m.sc[1]) / 2); turns.push(...m.turns); ms[0] += m.ms[0]; ms[1] += m.ms[1]; });
+    const sec = await runAll('vs', [A, B], cases, m => {
+      sc.push((m.sc[0] + m.sc[1]) / 2); turns.push(...m.turns); ms[0] += m.ms[0]; ms[1] += m.ms[1]; bt.n += m.bt.n; bt.diff += m.bt.diff; bt.ms += m.bt.ms;
+    });
     const all = sc.length, mean = sc.reduce((t, x) => t + x, 0) / all, sd = Math.sqrt(sc.reduce((t, x) => t + (x - mean) ** 2, 0) / Math.max(1, all - 1));
     const res = { win: 0, lose: 0, draw: 0 };
     sc.forEach(x => { res[x > 0.5 ? 'win' : x < 0.5 ? 'lose' : 'draw']++; });
     console.log(`A 得分率 ${(mean * 100).toFixed(1)}% ± ${(sd / Math.sqrt(all) * 100).toFixed(1)}（標準誤）；兩場合計 A 較好 ${res.win} 組、B 較好 ${res.lose} 組、平分 ${res.draw} 組；` +
       `平均 ${(turns.reduce((t, x) => t + x, 0) / turns.length).toFixed(1)} 回合（${sec.toFixed(0)} 秒）`);
     console.log(`選擇花的時間（單一執行緒、每場平均）：A ${(ms[0] / turns.length).toFixed(0)} 毫秒、B ${(ms[1] / turns.length).toFixed(0)} 毫秒`);
+    if (bt.n) console.log(`用模擬選帶法 ${bt.n} 次，和出戰選角第 1 名（組合＋先發）不同 ${bt.diff} 次（${(bt.diff / bt.n * 100).toFixed(0)}%）；每次平均 ${(bt.ms / bt.n / 1000).toFixed(1)} 秒（單一執行緒）`);
   } else if (mode === 'diff') {
     const OUT = a[0], [N, TEACH, SEED, TOP, SIZE] = [+(a[1] || 100), a[2] || 'tree:800', +(a[3] || 7), +(a[4] || 60), +(a[5] || 6)];
     if (!OUT || ![3, 6].includes(SIZE)) throw new Error('用法：node tools/sim_ai.js diff 輸出檔 [場數 100] [老師 tree:800] [種子 7] [排名前幾名 60] [隊伍 6／3]');
