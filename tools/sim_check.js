@@ -30,7 +30,7 @@ vm.createContext(ctxG);
 vm.runInContext(['base-stats.js', 'mons-data.js', 'js/engine/core.js', 'js/engine/roles.js', 'js/engine/damage.js', 'js/engine/sim.js']
   .map(f => fs.readFileSync(path.join(R, f), 'utf8')).join('\n;\n') + `
 ;globalThis.E = { MONS, MON, MOVES, ITEMS, ABILS, ABIL_ZH, SIM_FIRST, SIM_SUP, SIM_PRI, SIM_TWICE, simMon, simStart, simTurn, simOver, simWinner, simAct, simCtx, simGreedyPick,
-  simCanUse, statOf, natOf, stoneOf, isStone, useOf, defaultSet, SIM_HEALMV, simSound, simBench, simNeed, simReplace, simOpts, simImpr, simLastResortNo };`, ctxG);
+  simCanUse, statOf, natOf, stoneOf, isStone, useOf, defaultSet, SIM_HEALMV, simSound, simBench, simNeed, simReplace, simOpts, simImpr, simLastResortNo, SIM_GRAV };`, ctxG);
 const E = ctxG.E;
 const alnum = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -121,6 +121,7 @@ function ourAct(st, s, k) {
   if (M.v.rage) return { t: 'mv', k: M.v.rage.k };
   const ok = x => M.pp[x] > 0 && !(M.v.taunt && E.SIM_SUP[x]) && M.v.dis?.k !== x && !(E.SIM_TWICE.has(x) && M.last === x)
     && !(M.v.hblock && E.SIM_HEALMV.has(x)) && !(M.v.tchop && E.simSound(x)) && !E.simImpr(st, s, x) && !(x === 'last-resort' && E.simLastResortNo(M))
+    && !(M.v.torment && M.last === x) && !(st.grav && E.SIM_GRAV.has(x))
     && !(M.v.enc && M.moves.includes(M.v.encK) && M.pp[M.v.encK] > 0 && M.v.encK !== x)
     && !(M.lock && M.item === 'choice-scarf' && M.moves.includes(M.lock) && M.lock !== x);
   // 擊掌奇襲類上場第一回合以後兩邊都改出備用招（模擬的 simOpts 本來就不列，Showdown 能選但一定失敗；同 sdChoice）

@@ -22,7 +22,7 @@ const SIM_FIXED = { 'seismic-toss': () => 50, 'night-shade': () => 50, 'super-fa
 // 復仇同金屬爆炸（都還、×1.5；Showdown comeuppance damageCallback）
 const SIM_REACT = { counter: { cat: 'physical', x: 2 }, 'mirror-coat': { cat: 'special', x: 2 }, 'metal-burst': { cat: '', x: 1.5 }, comeuppance: { cat: '', x: 1.5 } };
 // 威力看場上狀況、damageCalc 算不了（資料沒有威力）的攻擊招式：威力在 simVarBp 算好再交給 damageCalc（o.bp）；圍攻每下威力不同，見 simBeatUp（o.bps）
-const SIM_VARBP = new Set(['gyro-ball', 'reversal', 'flail', 'fling', 'beat-up']);
+const SIM_VARBP = new Set(['gyro-ball', 'reversal', 'flail', 'fling', 'beat-up', 'electro-ball']);
 // 投擲的威力（Showdown items 的 fling.basePower，資料裡有的道具；超級石都是 80 另外算，沒列的不能丟）；效果另見 simMove
 const SIM_FLING = { 'air-balloon': 10, 'babiri-berry': 10, 'big-root': 10, 'binding-band': 30, 'black-belt': 30, 'black-glasses': 30, 'bright-powder': 10, charcoal: 30,
   'charti-berry': 10, 'chesto-berry': 10, 'choice-scarf': 10, 'chople-berry': 10, 'colbur-berry': 10, 'damp-rock': 60, 'eject-button': 30, 'electric-seed': 10,
@@ -93,6 +93,13 @@ const SIM_SEC = {
   'triple-arrows': [{ c: 50, d: { def: -1 } }, { c: 30, fl: 1 }], 'trop-kick': [{ c: 100, d: { atk: -1 } }], 'upper-hand': [{ c: 100, fl: 1 }],
   'volt-tackle': [{ c: 10, s: 'par' }], 'water-pulse': [{ c: 20, cf: 1 }], 'waterfall': [{ c: 20, fl: 1 }], 'zap-cannon': [{ c: 100, s: 'par' }],
   'zen-headbutt': [{ c: 20, fl: 1 }],
+  // 2026-11-19 換成 Showdown 使用率後新進常用招式表的（冠軍版 mod 沒改）；三重攻擊 20% 隨機灼傷／麻痺／冰凍（triattack secondary onHit sample）
+  'axe-kick': [{ c: 30, cf: 1 }], 'breaking-swipe': [{ c: 100, d: { atk: -1 } }], 'chilling-water': [{ c: 100, d: { atk: -1 } }],
+  'inferno': [{ c: 100, s: 'brn' }], 'low-sweep': [{ c: 100, d: { spe: -1 } }], 'pounce': [{ c: 100, d: { spe: -1 } }],
+  'skitter-smack': [{ c: 100, d: { spa: -1 } }], 'steel-wing': [{ c: 10, me: { def: 1 } }], 'tri-attack': [{ c: 20, s: ['brn', 'par', 'frz'] }],
+  'zing-zap': [{ c: 30, fl: 1 }],
+  // 詭異咒語：對手上一招的 PP −3（spite；Showdown eeriespell secondary onHit：對手還站著、有上一招才扣，沒那麼多就扣到 0）
+  'eerie-spell': [{ c: 100, spite: 3 }],
   // 鹽醃（冠軍版 mods/champions：之後每回合結束扣最大 HP 的 1/16，水、鋼屬性 1/8；換下場解除，見 simEnd）
   'salt-cure': [{ c: 100, salt: 1 }],
   // 精神噪音：2 回合回復封鎖（hb；Showdown healblock，精神噪音給的 duration 2）；地獄突刺：2 回合不能用聲音招式（tc；throatchop）；
@@ -114,14 +121,14 @@ const SIM_THAW = new Set(['matcha-gotcha', 'scald', 'scorching-sands']);
 // 每一下都判定命中的連續攻擊（Showdown multiaccuracy；特性連續攻擊只判定第一下）
 const SIM_MULTIACC = new Set(['population-bomb', 'triple-axel']);
 // 沒打中（沒命中、被守住、沒有效果、對手在地底等）自己扣最大 HP 的一半（Showdown hasCrashDamage／onMoveFail；特性魔法防守不受）
-const SIM_CRASH = new Set(['high-jump-kick', 'supercell-slam']);
+const SIM_CRASH = new Set(['high-jump-kick', 'supercell-slam', 'axe-kick']);
 // 使用限制（Showdown）：擊掌奇襲、迎頭一擊只有上場後第一回合能用（onTry）；大爆炸、自爆、薄霧炸裂用了就倒下（selfdestruct always）；
 // 破壞光線等打中後下一回合不能動（recharge）；日光束、日光刃、電光束、挖洞、潛靈奇襲先蓄力一回合（charge；
 // 日光束、日光刃晴天、電光束下雨時不用蓄力，見 SIM_CHARGE_WX；挖洞、潛靈奇襲蓄力時打不到；電光束特攻 +1）；預知未來兩回合後才打中；急速折返等打完換人（selfSwitch）；
 // 龍尾、巴投打中後強制對手換人（forceSwitch）；高速旋轉、晶光轉轉打中後清掉自己這邊的撒菱類（onAfterHit）
 const SIM_FIRST = new Set(['fake-out', 'first-impression']);
 const SIM_BOOM = new Set(['explosion', 'self-destruct', 'misty-explosion']);
-const SIM_RECHARGE = new Set(['hyper-beam', 'giga-impact', 'hydro-cannon', 'rock-wrecker', 'meteor-assault']);
+const SIM_RECHARGE = new Set(['hyper-beam', 'giga-impact', 'hydro-cannon', 'rock-wrecker', 'meteor-assault', 'blast-burn']);
 const SIM_CHARGE = new Set(['solar-beam', 'solar-blade', 'electro-shot', 'dig', 'phantom-force']);
 const SIM_HIDE = new Set(['dig', 'phantom-force']);
 const SIM_PIVOT = new Set(['u-turn', 'volt-switch', 'flip-turn']);
@@ -176,6 +183,8 @@ function simAbFail(k, M, T) {
     case 'role-play': return a === t || SIM_NOTRACE.has(t) || SIM_NOSUPP.has(a) || SIM_NOSUPP.has(t);
     case 'simple-beam': return SIM_NOSUPP.has(t) || t === 'simple' || t === 'truant';
     case 'gastro-acid': return SIM_NOSUPP.has(t) || !!T.v.gastro;
+    // 煩惱種子（Showdown worryseed onTryImmunity：懶惰、不眠；onTryHit：cantsuppress）
+    case 'worry-seed': return SIM_NOSUPP.has(t) || t === 'insomnia' || t === 'truant';
   }
   return false;
 }
@@ -207,7 +216,7 @@ const SIM_ALL1 = { atk: 1, def: 1, spa: 1, spd: 1, spe: 1 };
 const SIM_FOE = { tgt: 1, f: 1, r: 1 };
 // 打場上全體的輔助招（Showdown target 'all'：天氣、場地、戲法空間、黑霧、滅亡之歌、冷笑話）：對手特性壓迫感時照樣多扣 1 PP（見 simMove）
 const SIM_PRESS_ALL = new Set(['chilly-reception', 'electric-terrain', 'grassy-terrain', 'misty-terrain', 'psychic-terrain', 'haze', 'perish-song',
-  'rain-dance', 'snowscape', 'sunny-day', 'trick-room']);
+  'rain-dance', 'snowscape', 'sunny-day', 'trick-room', 'court-change', 'gravity', 'magic-room', 'fairy-lock']);
 const SIM_SUP = {
   'swords-dance': { kind: 'boost', b: { atk: 2 } }, 'nasty-plot': { kind: 'boost', b: { spa: 2 } }, 'calm-mind': { kind: 'boost', b: { spa: 1, spd: 1 } },
   'dragon-dance': { kind: 'boost', b: { atk: 1, spe: 1 } }, 'quiver-dance': { kind: 'boost', b: { spa: 1, spd: 1, spe: 1 } },
@@ -277,21 +286,43 @@ const SIM_SUP = {
   entrainment: { kind: 'entrain', ...SIM_FOE }, 'simple-beam': { kind: 'simple', ...SIM_FOE }, 'role-play': { kind: 'roleplay', tgt: 1, sub: 1 },
   'gastro-acid': { kind: 'gastro', ...SIM_FOE }, imprison: { kind: 'imprison' }, stockpile: { kind: 'stock', b: { def: 1, spd: 1 } }, acupressure: { kind: 'acu' },
   swagger: { kind: 'swagger', ...SIM_FOE },
+  // 2026-11-19 換成 Showdown 使用率後新進常用招式表的（Showdown data/moves.ts，冠軍版 mod 只改了輸電能用、大快朵頤選得到）：
+  //   swagger 另有 d（吹捧：特攻 +1 再混亂）｜simple 另有 ab（煩惱種子：對手變成不眠，睡著的醒來）｜spicy 辣椒精華：對手攻擊 +2、防禦 −2｜
+  //   gswap 防守互換：交換雙方防禦、特防的能力變化｜psplit 力量平分、防守平分：雙方 ks 這幾項能力值平均（v.raw，換下場恢復）｜
+  //   rtype 鏡面屬性：變成對手的屬性｜court 換場：雙方場地狀態（撒菱類、牆、順風、神秘守護）對調｜gravity 重力 5 回合｜mroom 魔法空間 5 回合（再用一次就結束）｜
+  //   flock 妖精之鎖：到下一回合結束雙方都不能換人｜ingrain 扎根：每回合結束回 1/16、不能換人、不會被吹走、在地面上｜flux 磁場操控：特性正電／負電才防禦、特防 +1｜
+  //   electrify 輸電：對手這回合的招式變電屬性｜torment 無理取鬧：對手不能連續用同一招｜cheeks 大快朵頤：吃掉身上的樹果、防禦 +2｜
+  //   attract 迷人：異性的對手著迷（見 simAttract）。夢話在 simMove 直接處理（要叫出別的招）
+  'rock-polish': { kind: 'boost', b: { spe: 2 } }, 'scary-face': { kind: 'debuff', d: { spe: -2 }, ...SIM_FOE },
+  screech: { kind: 'debuff', d: { def: -2 }, sub: 1, ...SIM_FOE }, 'cotton-spore': { kind: 'debuff', d: { spe: -2 }, pw: 1, ...SIM_FOE },
+  sing: { kind: 'status', x: 'slp', sub: 1, ...SIM_FOE }, flatter: { kind: 'swagger', d: { spa: 1 }, ...SIM_FOE },
+  'worry-seed': { kind: 'simple', ab: 'insomnia', ...SIM_FOE }, 'spicy-extract': { kind: 'spicy', d: { atk: 2, def: -2 }, ...SIM_FOE },
+  'guard-swap': { kind: 'gswap', tgt: 1, f: 1, sub: 1 }, 'power-split': { kind: 'psplit', ks: [1, 3], tgt: 1, f: 1 }, 'guard-split': { kind: 'psplit', ks: [2, 4], tgt: 1, f: 1 },
+  'reflect-type': { kind: 'rtype', tgt: 1, f: 1, sub: 1 }, 'court-change': { kind: 'court' }, gravity: { kind: 'gravity' }, 'magic-room': { kind: 'mroom' },
+  'fairy-lock': { kind: 'flock' }, ingrain: { kind: 'ingrain' }, 'magnetic-flux': { kind: 'flux', b: { def: 1, spd: 1 } }, electrify: { kind: 'electrify', tgt: 1, f: 1 },
+  torment: { kind: 'torment', sub: 1, ...SIM_FOE }, 'stuff-cheeks': { kind: 'cheeks', b: { def: 2 } }, attract: { kind: 'attract', sub: 1, ...SIM_FOE },
+  'sleep-talk': { kind: 'sleeptalk' },
 };
+// 重力時不能用的招式（Showdown flags.gravity，資料裡有的）
+const SIM_GRAV = new Set(['flying-press', 'high-jump-kick', 'magnet-rise']);
+// 夢話叫不出來的（Showdown flags.nosleeptalk 或 charge，資料裡有的）
+const SIM_NOSLEEPTALK = new Set(['beak-blast', 'belch', 'copycat', 'dig', 'phantom-force', 'sleep-talk', 'solar-beam', 'solar-blade', 'electro-shot']);
 // 廣域防守擋的招式（Showdown target 是 allAdjacent／allAdjacentFoes 的：攻擊招式同 damage.js 的 SPREAD，輔助招只有吐絲；
 // 逐招對過 Showdown，OP.GG 的目標範圍把刷刷茶炮標成單體，不能用）
-const SIM_WIDE = new Set([...SPREAD, 'string-shot']);
+const SIM_WIDE = new Set([...SPREAD, 'string-shot', 'cotton-spore']);
 // 讀改特性的招式要看對手真正的特性：破格出招時不把對手的特性拿掉（見 simMove）
 const SIM_REAL_AB = new Set(['transform', 'skill-swap', 'entrainment', 'simple-beam', 'role-play', 'gastro-acid']);
 // 仿效叫不出來的（Showdown flags.failcopycat）、號令叫不出來的（flags.failinstruct；蓄力招另外也不行）
 const SIM_NOCOPY = new Set(['baneful-bunker', 'beak-blast', 'kings-shield', 'protect', 'spiky-shield', 'circle-throw', 'copycat', 'counter', 'covet', 'destiny-bond',
-  'detect', 'dragon-tail', 'endure', 'feint', 'follow-me', 'helping-hand', 'rage-powder', 'roar', 'switcheroo', 'transform', 'trick', 'whirlwind']);
-const SIM_NOINSTRUCT = new Set(['beak-blast', 'kings-shield', 'copycat', 'dig', 'instruct', 'meteor-assault', 'outrage', 'phantom-force', 'solar-beam', 'solar-blade', 'thrash', 'transform']);
+  'detect', 'dragon-tail', 'endure', 'feint', 'follow-me', 'helping-hand', 'rage-powder', 'roar', 'switcheroo', 'transform', 'trick', 'whirlwind',
+  'belch', 'sleep-talk', 'thief']);
+const SIM_NOINSTRUCT = new Set(['beak-blast', 'kings-shield', 'copycat', 'dig', 'instruct', 'meteor-assault', 'outrage', 'phantom-force', 'solar-beam', 'solar-blade', 'thrash', 'transform',
+  'belch', 'sleep-talk']);
 // 聲音的輔助招（Showdown flags.sound，FLAG.sound 只收攻擊招式）：地獄突刺時不能用、對手隔音擋得住
-const SIM_SOUND_ST = new Set(['roar', 'perish-song', 'parting-shot', 'clangorous-soul', 'howl', 'dragon-cheer']);
+const SIM_SOUND_ST = new Set(['roar', 'perish-song', 'parting-shot', 'clangorous-soul', 'howl', 'dragon-cheer', 'screech', 'sing']);
 const simSound = k => FLAG.sound.has(k) || SIM_SOUND_ST.has(k);
 // 接棒傳給換上來的（Showdown copyVolatileFrom：能力變化，加上沒有 noCopy 的暫時狀態；斷尾只傳替身；胃液傳過去讓換上來的特性失效，見 simSwitch）
-const SIM_BATON = ['sub', 'focus', 'seed', 'curse', 'conf', 'perish', 'mrise', 'taunt', 'bind', 'octo', 'charge', 'hblock', 'tchop', 'gastro'];
+const SIM_BATON = ['sub', 'focus', 'seed', 'curse', 'conf', 'perish', 'mrise', 'taunt', 'bind', 'octo', 'charge', 'hblock', 'tchop', 'gastro', 'ingrain'];
 // 對變小的對手必中、威力 ×2 的招式（Showdown 冠軍版 flags.minimize）
 const SIM_MINI = new Set(['body-slam', 'dragon-rush', 'flying-press', 'heat-crash', 'heavy-slam', 'supercell-slam']);
 // 回復類招式（Showdown flags.heal）：回復封鎖（v.hblock，精神噪音）時不能用
@@ -457,7 +488,8 @@ const simSide0 = mons => ({ act: 0, mons, haz: { sr: 0, spikes: 0, tspikes: 0, w
 const simCloneV = v => { const o = {}; for (const k in v) { const x = v[k]; o[k] = x && typeof x === 'object' ? (Array.isArray(x) ? x.slice() : { ...x }) : x; } return o; };
 const simCloneMon = m => ({ ...m, st: { ...m.st }, v: simCloneV(m.v), pp: { ...m.pp } });
 const simClone = st => ({ sd: st.sd.map(x => ({ ...x, mons: x.mons.map(simCloneMon), haz: { ...x.haz }, scr: { ...x.scr }, wish: x.wish && { ...x.wish } })),
-  turn: st.turn, fut: st.fut.map(f => ({ ...f })), idle: st.idle, seq: st.seq, wx: st.wx && { ...st.wx }, ter: st.ter && { ...st.ter }, troom: st.troom && { ...st.troom }, lastMv: st.lastMv, log: null });
+  turn: st.turn, fut: st.fut.map(f => ({ ...f })), idle: st.idle, seq: st.seq, wx: st.wx && { ...st.wx }, ter: st.ter && { ...st.ter }, troom: st.troom && { ...st.troom },
+  grav: st.grav, mroom: st.mroom, flock: st.flock, lastMv: st.lastMv, log: null });
 // 場上現在的屬性（變幻自如、自由者換過的，見 simProtean；這回合用了羽棲的拿掉飛行，只有飛行的變一般，Showdown roost onType／getTypes）；
 // 能力值用的型態（戰鬥切換換過的，見 simStance）；萬聖夜、森林詛咒加上的屬性（v.add）接在最後（Showdown getTypes 的 addedType），noAdd＝不含加上的
 const simTypes = (M, noAdd = false) => {
@@ -469,6 +501,8 @@ const simTypes = (M, noAdd = false) => {
 const simSetTypes = (M, ty) => { if (ty) M.v.types = ty; else delete M.v.types; delete M.v.add; };
 // 速度能力值（不含能力變化、道具特性；速度互換換過的照 v.spe，Showdown storedStats.spe）
 const simRawSpe = M => M.v.spe ?? (([sp, nat]) => statOf(MON[simFk(M)].bs[5], sp, 5, nat))(invAt(M.b, 5, M.b.speInv));
+// 攻擊、防禦、特攻、特防（i＝1～4）的能力值，不含能力變化：力量平分、防守平分換過的照 v.raw（Showdown storedStats），沒有照種族值、點數、性格
+const simStored = (M, i) => M.v.raw?.[i] ?? (([sp, nat]) => statOf(MON[simFk(M)].bs[i], sp, i, nat))(invAt(M.b, i, i === 1 || i === 3 ? M.b.atkInv : M.b.defInv));
 // 道具用掉、被拿掉（輕裝：之後沒有道具時速度 ×2，換下場消失；Showdown unburden onAfterUseItem／onTakeItem）
 // 道具沒了：用掉的記在 lastItem（換下場也留著；收穫、回收利用用，Showdown useItem／eatItem 的 lastItem），take＝被拿走的（拍落、偷走、交換，Showdown takeItem 不記）
 const simLoseItem = (M, take = false) => { if (!take) M.lastItem = M.item; M.item = ''; if (M.b.ab === 'unburden') M.v.unb = true; };
@@ -476,8 +510,21 @@ const simLoseItem = (M, take = false) => { if (!take) M.lastItem = M.item; M.ite
 const simFk = M => M.fk || M.hk || M.key;
 // M 被綁住類綁著、用的那隻還在場上（離場或倒下就不算，見 SIM_BIND）
 const simBound = (st, M) => !!M.v.bind && st.sd[M.v.bind.s].act === M.v.bind.i && simAct(st, M.v.bind.s).hp > 0;
-// 在地面上（撒菱、毒菱、黏黏網用）：不是飛行屬性、沒有飄浮、沒帶氣球（Showdown isGrounded）
-const simGround = M => M.item === 'iron-ball' || !!M.v.smack || (!M.v.mrise && !simTypes(M).includes('flying') && M.b.ab !== 'levitate' && M.item !== 'air-balloon');
+// 在地面上（撒菱、毒菱、黏黏網用）：不是飛行屬性、沒有飄浮、沒帶氣球（Showdown isGrounded：重力、扎根、黑色鐵球、擊落一定在地面上）
+const simGround = (st, M) => !!st.grav || !!M.v.ingrain || M.item === 'iron-ball' || !!M.v.smack
+  || (!M.v.mrise && !simTypes(M).includes('flying') && M.b.ab !== 'levitate' && M.item !== 'air-balloon');
+// 給 damageCalc 的「一定在地面上」（擊落、重力、扎根；黑色鐵球 damageCalc 自己看）
+const simGrounded = (st, M) => !!M.v.smack || !!st.grav || !!M.v.ingrain;
+// 道具：魔法空間時場上的道具先收在 mri、item 是空的（效果都不發動，見 simMri）；拍落、交換、偷這類看的是真正的道具
+const simRealItem = M => M.mri ?? M.item;
+// 道具被拿走（拍落、偷走、交換給出去）、拿到道具（魔法空間時收進 mri）
+const simTake = M => { if (M.mri !== undefined) { M.mri = ''; if (M.b.ab === 'unburden') M.v.unb = true; } else simLoseItem(M, true); };
+const simGive = (M, it) => { if (M.mri !== undefined) M.mri = it; else M.item = it; };
+// 魔法空間（Showdown magicroom、Pokemon.ignoringItem）：on＝開始（場上那隻的道具收起來）、false＝結束或換下場（拿回來）
+function simMri(M, on) {
+  if (on && M.mri === undefined) { M.mri = M.item; M.item = ''; }
+  else if (!on && M.mri !== undefined) { M.item = M.mri; delete M.mri; }
+}
 // ---------- 天氣與場地 ----------
 // st.wx／st.ter＝{ t 哪一種, n 還剩幾回合 }（沒有是 null）。規則照 Pokémon Showdown（冠軍版 mod 沒改）：開了 5 回合，開的那隻帶對應的岩石
 // （SIM_WX_ROCK）或場地延長器 8 回合（conditions.ts／moves.ts durationCallback）；已經是同一種時失敗、回合數不重算（field.ts setWeather／setTerrain）；
@@ -500,8 +547,8 @@ function simForecast(st) {
     const M = simAct(st, s), t = { sun: 'fire', rain: 'water', snow: 'ice' }[simWx(st)];
     if (M.hp <= 0 || M.b.ab !== 'forecast' || M.tf || simFk(M) !== 'castform') return;
     // 換型態（formeChange → setSpecies）：加上的屬性清掉、速度互換換來的速度也變回這個型態的
-    if (t) { if (M.v.fc && M.v.types?.[0] === t) return; simSetTypes(M, [t]); delete M.v.spe; M.v.fc = true; simLog(st, `${simName(st, s)}的${abilZh('forecast')}：變成${TYPES[IDX[t]].zh}屬性`); }
-    else if (M.v.fc) { simSetTypes(M); delete M.v.spe; delete M.v.fc; simLog(st, `${simName(st, s)}的${abilZh('forecast')}：變回一般屬性`); }
+    if (t) { if (M.v.fc && M.v.types?.[0] === t) return; simSetTypes(M, [t]); delete M.v.spe; delete M.v.raw; M.v.fc = true; simLog(st, `${simName(st, s)}的${abilZh('forecast')}：變成${TYPES[IDX[t]].zh}屬性`); }
+    else if (M.v.fc) { simSetTypes(M); delete M.v.spe; delete M.v.raw; delete M.v.fc; simLog(st, `${simName(st, s)}的${abilZh('forecast')}：變回一般屬性`); }
   });
 }
 // 清掉場地（場地回合到了、鐵滾輪、冰旋）
@@ -532,9 +579,11 @@ const simWxOf = (st, M) => M.b.ab === 'mega-sol' ? 'sun' : simWx(st);
 // M 出招 k 實際的屬性（氣象球照天氣、大地波動照場地、皮膚類把一般招式變屬性、濕潤之聲把聲音招式變水，同 damageCalc；掙扎沒有屬性）
 function simMoveType(st, M, k) {
   if (k === SIM_STRUGGLE) return '';
+  // 這回合被輸電：一律電屬性（Showdown electrify onModifyType，掙扎除外）
+  if (M.v.elec === st.turn) return 'electric';
   const wx = simWxOf(st, M), ter = simTer(st), ty = MOVES[k][1];
   if (k === 'weather-ball') return wx ? WB_TYPE[wx] : ty;
-  if (k === 'terrain-pulse') return ter && simGround(M) ? TERRAIN_TYPE[ter] : ty;
+  if (k === 'terrain-pulse') return ter && simGround(st, M) ? TERRAIN_TYPE[ter] : ty;
   if (k === 'raging-bull' && RB_TYPE[simFk(M)]) return RB_TYPE[simFk(M)];
   if (k === 'aura-wheel') return M.v.hangry ? 'dark' : 'electric';
   return ATE[M.b.ab] && ty === 'normal' ? ATE[M.b.ab] : M.b.ab === 'liquid-voice' && FLAG.sound.has(k) ? 'water' : ty;
@@ -542,10 +591,10 @@ function simMoveType(st, M, k) {
 // 這一招的先制等級：SIM_PRI 或輔助招的 p；特性惡作劇之心讓輔助招 +1（Showdown prankster）；青草滑梯在青草場地、自己在地面上時 +1（grassyglide onModifyPriority）
 // 疾風之翼：HP 全滿時飛行屬性招式 +1（Showdown galewings onModifyPriority）
 const simPri = (st, M, k) => (SIM_PRI[k] ?? SIM_SUP[k]?.p ?? 0) + (SIM_SUP[k] && M.b.ab === 'prankster' ? 1 : 0)
-  + (k === 'grassy-glide' && simTer(st) === 'grassy' && simGround(M) ? 1 : 0)
+  + (k === 'grassy-glide' && simTer(st) === 'grassy' && simGround(st, M) ? 1 : 0)
   + (M.b.ab === 'gale-wings' && M.hp >= M.max && k !== SIM_STRUGGLE && simMoveType(st, M, k) === 'flying' ? 1 : 0);
 // 精神場地擋先制（Showdown psychicterrain onTryHit：先制等級 > 0 打對手的招式、對手在地面上又沒在蓄力躲起來）；攻擊招式 damageCalc 已經擋了，這裡給打對手的輔助招用
-const simPsyBlock = (st, M, T, k) => simTer(st) === 'psychic' && simGround(T) && !T.hide && simPri(st, M, k) > 0;
+const simPsyBlock = (st, M, T, k) => simTer(st) === 'psychic' && simGround(st, T) && !T.hide && simPri(st, M, k) > 0;
 // s 這方的 M 出招式 k，對手那邊這回合的廣域防守擋範圍招式（SIM_WIDE）、快速防守擋先制等級大於 0 的（Showdown wideguard／quickguard onTryHit，
 // 經過 checkMoveBypassesProtect：守住擋不住的招式也擋不住，由呼叫端判斷）；回傳擋下的那招（沒擋回傳 ''）
 const simGuard = (st, s, M, k) => { const g = st.sd[1 - s]; return g.wg === st.turn && SIM_WIDE.has(k) ? 'wide-guard' : g.qg === st.turn && simPri(st, M, k) > 0 ? 'quick-guard' : ''; };
@@ -564,8 +613,10 @@ function simAcc(st, M, T, k, moved) {
     || (tw && wx === 'rain') || (k === 'blizzard' && wx === 'snow') || (SIM_MINI.has(k) && T.v.mini)) return 100;
   // 修正多半沒有：特性、道具都不相關時不建陣列（樹搜尋的推演每回合呼叫很多次）
   let a = a0;
-  if (SIM_ACC_AB.has(M.b.ab) || SIM_ACC_AB.has(T.b.ab) || M.item === 'wide-lens' || M.item === 'zoom-lens' || T.item === 'bright-powder') {
+  if (SIM_ACC_AB.has(M.b.ab) || SIM_ACC_AB.has(T.b.ab) || M.item === 'wide-lens' || M.item === 'zoom-lens' || T.item === 'bright-powder' || st.grav) {
     const mods = [];
+    // 重力：命中 ×6840/4096（Showdown gravity onModifyAccuracy，一擊必殺不在這裡算）
+    if (st.grav) mods.push(6840);
     if ((T.b.ab === 'sand-veil' && wx === 'sand') || (T.b.ab === 'snow-cloak' && wx === 'snow')) mods.push(3277);
     if (M.b.ab === 'compound-eyes') mods.push(5325);
     if (M.b.ab === 'hustle' && simCat(k) === 'physical') mods.push(3277);
@@ -601,7 +652,15 @@ function simVarBp(st, A, D, k, last) {
     case 'avalanche': bp = x2(A.v.got?.turn === st.turn); break;
     // 出招當下（live）看存起來的 pf；回合之間（往前算、選招時）看上一回合（＝st.turn）的紀錄
     case 'temper-flare': case 'stomping-tantrum': { const m = A.v.mt; bp = x2(!!m && (m.live ? m.pf : m.t === st.turn && m.ok === false)); break; }
-    case 'acrobatics': bp = x2(!A.item && !MON[A.key].base); break;
+    // 雜技看身上真正有沒有道具（魔法空間時道具還在身上，不加倍；Showdown acrobatics 看 pokemon.item）
+    case 'acrobatics': bp = x2(!simRealItem(A) && !MON[A.key].base); break;
+    // 惡意追擊：對手這回合受過傷害 ×2（Showdown hurtThisTurn，見 simHurt 的 v.hurt）；洩憤：自己這回合能力被降過 ×2（statsLoweredThisTurn，見 simBoost 的 v.down）；
+    // 硬撐：自己有睡眠以外的異常狀態 ×2（灼傷也不減半，見 simCalc）
+    case 'assurance': bp = x2(D.v.hurt === st.turn); break;
+    case 'lash-out': bp = x2(A.v.down === st.turn); break;
+    case 'facade': bp = x2(!!A.status && A.status !== 'slp'); break;
+    // 電球：⌊自己速度 ÷ 對手速度⌋ 是 0／1／2／3／4 以上時威力 40／60／80／120／150（Showdown electroball basePowerCallback，含能力變化、順風、麻痺等）
+    case 'electro-ball': bp = [40, 60, 80, 120, 150][Math.min(4, Math.floor(simSpe(st, A) / Math.max(1, simSpe(st, D))))]; break;
     case 'payback': bp = x2(last && D.in !== st.turn); break;
     // 隨機光：30% 威力 ×2（Showdown fickebeam onBasePower；simMove 出招時照亂數抽在 v.fickle，期望值模式不算）
     case 'fickle-beam': bp = x2(!!A.v.fickle); break;
@@ -629,7 +688,8 @@ function simCalc(ctx, st, A, D, k, crit, last = false) {
   const dSide = st.sd[+D.id[0]], bp = simVarBp(st, A, D, k, last), bps = k === 'beat-up' ? simBeatUp(st, A) : undefined;
   // 電光束蓄力時已經特攻 +1，damageCalc 又會在出招前 +1，所以先扣回來
   const spa = A.st.spa - (CHARGE_SPA.has(k) ? 1 : 0), full = D.hp >= D.max;
-  const burn = A.status === 'brn' || (A.b.ab === 'guts' && !!A.status), walls = Object.keys(dSide.scr);
+  // 硬撐灼傷時攻擊不減半（Showdown getDamage：move.id !== 'facade'）
+  const burn = (A.status === 'brn' && k !== 'facade') || (A.b.ab === 'guts' && !!A.status), walls = Object.keys(dSide.scr);
   const pinch = !!PINCH_AB[A.b.ab] && A.hp <= A.max / 3, fallen = A.v.fallen || 0;
   const ak = simFk(A), dk = simFk(D), aTy = simTypes(A), dTy = simTypes(D), pt = !!A.v.pt, ff = !!A.v.ff, gl = !!D.v.glaive, dg = simDisguised(D, A), hg = !!A.v.hangry;
   // 神奇鱗片看 D 有沒有異常；監視看 D 是不是這回合才換上來（D.in）；節拍器（道具）看 A 連用了幾次（v.metro，見 simMove）
@@ -639,16 +699,21 @@ function simCalc(ctx, st, A, D, k, crit, last = false) {
   // 撲擊看自己的防禦變化、欺詐看對手的攻擊變化，都要進快取的鍵
   // 天氣、場地（simWx、simTer）照 damageCalc 算：晴雨強化減弱、沙暴岩石特防、下雪冰防禦、氣象球、場地強化與減弱、精神場地擋先制、鐵滾輪沒場地失敗…
   const wx = simWx(st), ter = simTer(st);
+  // 一定在地面上（擊落、重力、扎根：simGrounded）、這回合被輸電（招式變電屬性）、力量平分／防守平分換掉的能力值（v.raw）、
+  // D 身上真正有沒有道具（魔法空間時道具收起來，拍落照樣加成，見 simRealItem）
+  const agr = simGrounded(st, A), dgr = simGrounded(st, D), el = A.v.elec === st.turn && k !== SIM_STRUGGLE, ni = !simRealItem(D), ar = A.v.raw, dr = D.v.raw;
+  const rk = x => x ? `${x[1]}.${x[2]}.${x[3]}.${x[4]}` : '';
   // 鍵用樣板字串直接接（比陣列 join 快），一定是布林值的欄位寫成 0／1（鍵越短查表越快：查表佔 simCalc 一半以上的時間）；只在 ctx.memo 裡比對
   const key = `${A.id}|${ak}|${A.b.ab}|${aTy.join('.')}|${+pt}${+ff}${+hg}${+so}|${mt}|${rv}|${A.item}|${A.st.atk}|${spa}|${A.st.def}|${+burn}|${D.id}|${dk}|${D.b.ab}|${dTy.join('.')}|`
-    + `${+gl}${+dg}${+dst}${+mi}${+!!D.v.mrise}${+!!D.v.smack}${+full}${+pinch}|${D.item}|${D.st.def}|${D.st.spd}|${D.st.atk}|${walls.join('.')}|${k}|${crit}|${bp}|${bps?.join('.')}|${fallen}|${last}|${wx}|${ter}`;
+    + `${+gl}${+dg}${+dst}${+mi}${+!!D.v.mrise}${+dgr}${+agr}${+el}${+ni}${+full}${+pinch}|${D.item}|${D.st.def}|${D.st.spd}|${D.st.atk}|${walls.join('.')}|${k}|${crit}|${bp}|${bps?.join('.')}|${fallen}|${last}|${wx}|${ter}|${rk(ar)}|${rk(dr)}`;
   let r = ctx.memo.get(key);
   if (!r) {
     const a = A.b, d = D.b;
-    r = damageCalc({ key: ak, types: aTy, ptUsed: pt, flashFire: ff, hangry: hg, stakeout: so, metro: mt, rival: rv, inv: a.atkInv, sp: a.sp, nat: a.nat, st: { atk: A.st.atk, spa, def: A.st.def }, item: A.item, ab: a.ab, pinch, fallen },
-      { key: dk, types: dTy, glaive: gl, disguise: dg, status: dst, mini: mi, float: !!D.v.mrise, grounded: !!D.v.smack, hp: d.hp, inv: d.defInv, sp: d.sp, nat: d.nat, st: { def: D.st.def, spd: D.st.spd, atk: D.st.atk }, item: D.item, noItem: !D.item, ab: d.ab,
-        cur: full ? undefined : D.hp, atkInv: d.atkInv },
-      k, { fmt: ctx.fmt, weather: wx, crit, terrain: ter, hh: false, walls, burn, bp, bps, last, noKo: true });
+    r = damageCalc({ key: ak, types: aTy, ptUsed: pt, flashFire: ff, hangry: hg, stakeout: so, metro: mt, rival: rv, inv: a.atkInv, sp: a.sp, nat: a.nat, st: { atk: A.st.atk, spa, def: A.st.def }, item: A.item, ab: a.ab, pinch, fallen,
+      grounded: agr, raw: ar },
+      { key: dk, types: dTy, glaive: gl, disguise: dg, status: dst, mini: mi, float: !!D.v.mrise, grounded: dgr, hp: d.hp, inv: d.defInv, sp: d.sp, nat: d.nat, st: { def: D.st.def, spd: D.st.spd, atk: D.st.atk }, item: D.item, noItem: ni, ab: d.ab,
+        cur: full ? undefined : D.hp, atkInv: d.atkInv, raw: dr },
+      k, { fmt: ctx.fmt, weather: wx, crit, terrain: ter, hh: false, walls, burn, bp, bps, last, noKo: true, type: el ? 'electric' : undefined });
     r = r.skip || !r.eff ? { eff: 0 } : { eff: r.eff, type: r.type, cat: r.cat, crit: r.crit, rolls: r.rolls, endured: r.endured, berry: r.berry };
     ctx.memo.set(key, r);
   }
@@ -661,7 +726,7 @@ function simCalc(ctx, st, A, D, k, crit, last = false) {
 function simFixed(ctx, st, A, D, k, exp) {
   const ty = MOVES[k][1], rc = SIM_REACT[k];
   // 屬性免疫；地面招式（地裂）另外打不到帶氣球、特性飄浮的（Showdown runImmunity('Ground')；破格無視飄浮；帶黑色鐵球的在地面上，飛行屬性也打得到）
-  const iron = ty === 'ground' && (D.item === 'iron-ball' || !!D.v.smack);
+  const iron = ty === 'ground' && (D.item === 'iron-ball' || simGrounded(st, D));
   if (!eff(ty, iron ? simTypes(D).filter(t => t !== 'flying') : simTypes(D))
     || (ty === 'ground' && !iron && (D.item === 'air-balloon' || D.v.mrise || (D.b.ab === 'levitate' && A.b.ab !== 'mold-breaker')))) return { eff: 0 };
   let d, acc = 0;
@@ -734,7 +799,9 @@ const simHit = (ctx, st, A, D, k, crit, exp, last) => SIM_LOSE_TYPE[k] && !simTy
   ? { eff: 0, fail: `已經沒有${TYPES[IDX[SIM_LOSE_TYPE[k]]].zh}屬性` }
   : simDamp(A, D, k) ? { eff: 0, fail: '濕氣' }
   : k === 'fling' && !simFlingBp(A.v.fling || A.item) ? { eff: 0, fail: '沒有可以丟的道具' }
-  : k === 'poltergeist' && !D.item && !MON[D.key].base ? { eff: 0, fail: '對手沒有道具' }
+  : k === 'poltergeist' && !simRealItem(D) && !MON[D.key].base ? { eff: 0, fail: '對手沒有道具' }
+  // 打嗝：這場還沒吃過樹果就失敗（Showdown belch onTry ateBerry；冠軍版選得到，見 simAte 的 M.ate）
+  : k === 'belch' && !A.ate ? { eff: 0, fail: '這場還沒吃過樹果' }
   : SIM_FIXED[k] || SIM_REACT[k] || SIM_OHKO.has(k) ? simFixed(ctx, st, A, D, k, exp) : simCalc(ctx, st, A, D, k, crit, last);
 // 打中時的期望傷害（各下的 16 個亂數取平均加總；每下判定命中的招式第二下起乘上命中的機率；氣勢披帶、結實撐住時最多打到剩 1；
 // 畫皮還在時第一下改算揭穿的 1/8）；輔助招是 0
@@ -766,11 +833,13 @@ function simSpeed(ctx, st, M) {
 // 戲法空間（st.troom）時慢的先（Showdown：speed 換成 10000 − speed，同速照舊）
 const simFaster = (st, a, b) => st.troom ? a < b : a > b;
 const simOrder = st => simFaster(st, simSpe(st, simAct(st, 1)), simSpe(st, simAct(st, 0))) ? [1, 0] : [0, 1];
-// 扣血、回血（間接的：反作用力、撒菱、殘血…；magic＝特性魔法防守能擋；Showdown damage／heal 取整、至少 1）；扣完看文柚果
+// 扣血、回血（間接的：反作用力、撒菱、殘血…；magic＝特性魔法防守能擋；Showdown damage／heal 取整、至少 1）；扣完看文柚果。
+// v.hurt＝這回合受過傷害（惡意追擊；Showdown spreadDamage 的 hurtThisTurn）：magic false 的是 Showdown directDamage（替身、腹鼓、詛咒、混亂、掙扎反作用力、斷尾），不記
 function simHurt(st, s, M, v, why, magic = true) {
   if (M.hp <= 0 || v <= 0 || (magic && M.b.ab === 'magic-guard')) return 0;
   const d = Math.min(M.hp, Math.max(1, Math.floor(v)));
   M.hp -= d;
+  if (magic) M.v.hurt = st.turn;
   simFaint(st, M);
   simLog(st, `${simName(st, s, M)}${why} −${simPct(d, M.max)}%（剩 ${simPct(M.hp, M.max)}%）${M.hp <= 0 ? '，倒下' : ''}`);
   simSitrus(st, s, M);
@@ -812,7 +881,9 @@ const simCanEat = (st, s) => { const O = simAct(st, 1 - s); return !(O.hp > 0 &&
 // 吃了樹果 it 之後（Showdown eatItem → EatItem 事件；lastItem 在 simLoseItem 記了）：頰囊回最大 HP 的 1/3；
 // 反芻在下一回合結束再吃一次（v.cud，見 simEnd；吃回來的不再觸發反芻）
 // pouched＝頰囊已經算過了（連續攻擊中途吃的，見 simMove 的 midPouch）
+// M.ate＝這場吃過樹果（打嗝；Showdown ateBerry，換下場也記得）
 function simAte(st, s, M, it, again = false, pouched = false) {
+  M.ate = true;
   if (M.b.ab === 'cheek-pouch' && !pouched) simHeal(st, s, M, M.max / 3, `的${abilZh('cheek-pouch')}`);
   if (M.b.ab === 'cud-chew' && !again) M.v.cud = { it, n: 2 };
 }
@@ -846,8 +917,9 @@ function simBoost(st, s, M, d, foe, mirrored = false) {
     if (M.st[k] < was && foe != null && ['defiant', 'competitive'].includes(M.b.ab)) { flush(); simBoost(st, s, M, M.b.ab === 'defiant' ? { atk: 2 } : { spa: 2 }); }
   }
   flush();
-  // 這回合能力有上升過（Showdown statsRaisedThisTurn；魅誘之聲、妒火看）
+  // 這回合能力有上升過（Showdown statsRaisedThisTurn；魅誘之聲、妒火看）、有降低過（statsLoweredThisTurn；洩憤看）
   if (done.some(([, v]) => v > 0)) M.v.up = st.turn;
+  if (done.some(([, v]) => v < 0)) M.v.down = st.turn;
   if (M.item === 'white-herb' && Object.values(M.st).some(v => v < 0)) {
     Object.keys(M.st).forEach(k => { if (M.st[k] < 0) M.st[k] = 0; });
     simLoseItem(M);
@@ -859,7 +931,7 @@ function simBoost(st, s, M, d, foe, mirrored = false) {
 // 天氣場地（Showdown）：晴天不會冰凍（sunnyday onImmunity frz）、晴天時特性葉片防守不會陷入異常（leafguard）；
 // 在地面上（沒在蓄力躲起來）時電氣場地不會睡著、薄霧場地不會陷入任何異常（electricterrain／mistyterrain onSetStatus）
 function simCanStatus(st, M, x, src) {
-  const ty = simTypes(M), ab = M.b.ab, wx = simWx(st), ter = simTer(st), gr = simGround(M) && !M.hide;
+  const ty = simTypes(M), ab = M.b.ab, wx = simWx(st), ter = simTer(st), gr = simGround(st, M) && !M.hide;
   if (M.hp <= 0 || M.status || ab === 'purifying-salt') return false;
   // 神秘守護（Showdown safeguard onSetStatus）：對手造成的不會（對手特性穿透照樣）
   if (simSafe(st, M, src)) return false;
@@ -900,12 +972,15 @@ function simSwitch(st, s, i, rnd, late = false, pass = null) {
   // 全能變身（Showdown zerotohero onSwitchOut）：帕路秋甘換下場就變成全能形態，之後一直是（hk，見 simFk）
   if (O.hp > 0 && O.b.ab === 'zero-to-hero' && !O.tf && O.key === 'palafin' && !O.hk && MON['palafin-hero']) O.hk = 'palafin-hero';
   simUntransform(O);
+  // 魔法空間收起來的道具，換下場就拿回來（換上來的那隻再收起來，在踩撒菱之前：氣球沒用）
+  simMri(O, false);
   Object.assign(O, { st: SIM_ST0(), lock: '', chg: '', hide: false, rech: false, v: {}, last: '', hits: 0 });
   delete O.fk;
   if (O.b0) { O.b = O.b0; delete O.b0; }
   side.act = i;
   const M = side.mons[i];
   Object.assign(M, { in: st.turn, out: true, tox: 0 });
+  if (st.mroom) simMri(M, true);
   simLog(st, `${s ? '對手' : '我方'}換上${MON[M.key].zh}（HP ${simPct(M.hp, M.max)}%）`);
   if (keep) {
     if (keep.st) M.st = keep.st;
@@ -922,7 +997,7 @@ function simSwitch(st, s, i, rnd, late = false, pass = null) {
     side.hwish = false;
     simLog(st, `${simName(st, s, M)}受到治癒之願，回滿`);
   }
-  const h = side.haz, ty = simTypes(M), ground = simGround(M);
+  const h = side.haz, ty = simTypes(M), ground = simGround(st, M);
   // 隱形岩：最大 HP × 岩石屬性倍率 / 8；撒菱：1～3 層 1/8、1/6、1/4；毒菱：1 層中毒、2 層劇毒，毒屬性踩到就收掉、鋼屬性沒事；黏黏網：速度 −1
   if (h.sr) simHurt(st, s, M, M.max * eff('rock', ty) / 8, '被隱形岩打到');
   if (h.spikes && ground) simHurt(st, s, M, [0, 3, 4, 6][h.spikes] * M.max / 24, '踩到撒菱');
@@ -971,6 +1046,8 @@ function simTransform(st, s, M, T) {
   simSetTypes(M, T.v.types?.slice());
   if (T.v.add) M.v.add = T.v.add;
   if (T.v.spe != null) M.v.spe = T.v.spe; else delete M.v.spe;
+  // 力量平分類換過的能力值也照抄（同 storedStats）
+  if (T.v.raw) M.v.raw = { ...T.v.raw }; else delete M.v.raw;
   return true;
 }
 const simUntransform = M => { if (M.tf) { Object.assign(M, { key: M.tf.key, id: M.tf.id, b: M.tf.b, moves: M.tf.moves, pp: M.tf.pp }); delete M.tf; } };
@@ -1014,6 +1091,9 @@ function simIntimidate(st, s, M) {
   const done = [['atk', e[0]], ['spa', e[1]]].filter(([, v]) => v)
     .map(([k, v]) => { const was = T.st[k]; T.st[k] = Math.max(-6, Math.min(6, was + v)); return [k, T.st[k] - was]; }).filter(([, v]) => v);
   simLog(st, `${who}${done.map(([k, v]) => `${SIM_STAT_ZH[k]} ${v > 0 ? '+' : '−'}${Math.abs(v)}`).join('、') || '能力已經到底'}`);
+  // 同 simBoost 的 v.up／v.down（Showdown 威嚇走 boost：statsRaisedThisTurn／statsLoweredThisTurn）
+  if (done.some(([, v]) => v > 0)) T.v.up = st.turn;
+  if (done.some(([, v]) => v < 0)) T.v.down = st.turn;
   if (T.item === 'white-herb' && Object.values(T.st).some(v => v < 0)) {
     Object.keys(T.st).forEach(k => { if (T.st[k] < 0) T.st[k] = 0; });
     simLoseItem(T);
@@ -1066,9 +1146,9 @@ function simFutile(st, s, k) {
     // 極光幕要下雪（Showdown auroraveil onTry：field.isWeather snowscape）
     case 'screen': return !!side.scr[k] || (k === 'aurora-veil' && simWx(st) !== 'snow');
     case 'field': return (x.w in SIM_WX_ROCK ? st.wx : st.ter)?.t === x.w && !(x.pivot && simBench(st, s).length);
-    case 'phaze': return !simBench(st, 1 - s).length || (SIM_ANCHOR.has(tb) && M.b.ab !== 'mold-breaker');
+    case 'phaze': return !simBench(st, 1 - s).length || (SIM_ANCHOR.has(tb) && M.b.ab !== 'mold-breaker') || !!T.v.ingrain;
     case 'haze': return [M, T].every(P => Object.values(P.st).every(v => !v));
-    case 'debuff': return capped(T, x.d) || ['clear-body', 'white-smoke', 'full-metal-body'].includes(tb)
+    case 'debuff': return capped(T, x.d) || ['clear-body', 'white-smoke', 'full-metal-body'].includes(tb) || (!!x.pw && (simTypes(T).includes('grass') || tb === 'overcoat'))
       || (tb === 'hyper-cutter' && Object.keys(x.d).every(k => k === 'atk')) || (tb === 'big-pecks' && Object.keys(x.d).every(k => k === 'def'));
     case 'shot': return capped(T, x.d) && !simBench(st, s).length;
     case 'transform': return !!M.tf || !!T.tf;
@@ -1092,9 +1172,11 @@ function simFutile(st, s, k) {
     case 'stock': return (M.v.stock || 0) >= 3;
     case 'acu': return Object.values(M.st).every(v => v >= 6);
     // 虛張聲勢：混亂不了、攻擊也加不上去
-    case 'swagger': return (!!T.v.conf || tb === 'own-tempo' || simSafe(st, T, M) || (simTer(st) === 'misty' && simGround(T))) && (tb === 'contrary' ? T.st.atk <= -6 : T.st.atk >= 6);
+    // 吹捧（x.d）：特攻 +1 再混亂
+    case 'swagger': { const [q, v] = Object.entries(x.d || { atk: 2 })[0];
+      return (!!T.v.conf || tb === 'own-tempo' || simSafe(st, T, M) || (simTer(st) === 'misty' && simGround(st, T))) && ((tb === 'contrary' ? -v : v) > 0 ? T.st[q] >= 6 : T.st[q] <= -6); }
     case 'revive': return !side.mons.some(m => m.hp <= 0);
-    case 'trick': return !!T.v.sub || (tb === 'sticky-hold' && M.b.ab !== 'mold-breaker') || (!M.item && !T.item) || !!MON[M.key].base || !!MON[T.key].base;
+    case 'trick': return !!T.v.sub || (tb === 'sticky-hold' && M.b.ab !== 'mold-breaker') || (!simRealItem(M) && !simRealItem(T)) || !!MON[M.key].base || !!MON[T.key].base;
     case 'octo': return !!T.v.octo || simTypes(T).includes('ghost');
     case 'topsy': return !Object.values(T.st).some(Boolean);
     case 'disable': return simAroma(M, T) || !T.last || !T.moves.includes(T.last) || !(T.pp[T.last] > 0) || !!T.v.dis;
@@ -1104,6 +1186,24 @@ function simFutile(st, s, k) {
     case 'skillswap': return SIM_NOSWAP.has(M.b.ab) || SIM_NOSWAP.has(tb);
     case 'copycat': return !st.lastMv || SIM_NOCOPY.has(st.lastMv) || !simCanUse(st.lastMv) || st.lastMv === SIM_STRUGGLE;
     case 'instruct': return !T.last || SIM_NOINSTRUCT.has(T.last) || SIM_CHARGE.has(T.last) || !T.moves.includes(T.last) || !(T.pp[T.last] > 0);
+    // 辣椒精華：兩項都動不了；防守互換：雙方防禦、特防的能力變化一樣；鏡面屬性：對手沒有屬性（也沒有加上的）
+    case 'spicy': return capped(T, x.d);
+    case 'gswap': return M.st.def === T.st.def && M.st.spd === T.st.spd;
+    case 'rtype': return !simTypes(T, true).length && !T.v.add;
+    // 換場：雙方都沒有可以對調的場地狀態
+    case 'court': return bare && [side, tSide].every(sd => !Object.keys(sd.scr).length && !sd.tw && !sd.sg);
+    case 'gravity': return !!st.grav;
+    case 'flock': return !!st.flock;
+    case 'ingrain': return !!M.v.ingrain;
+    case 'flux': return !['plus', 'minus'].includes(M.b.ab) || capped(M, x.b);
+    case 'torment': return simAroma(M, T) || !!T.v.torment;
+    // 大快朵頤：身上沒有樹果、或防禦已經到頂（Showdown onTry isBerry；onHit 加不上去就失敗、樹果不吃；魔法空間也吃得到：eatItem 不看 ignoringItem）
+    case 'cheeks': return !simRealItem(M)?.endsWith('-berry') || capped(M, x.b);
+    // 迷人：已經著迷、遲鈍、芳香幕，或雙方性別已知又不是一公一母（無性別一定不行）
+    case 'attract': { const a = simGender(M, null), b = simGender(T, null);
+      return !!T.v.attract || (tb === 'oblivious' && M.b.ab !== 'mold-breaker') || simAroma(M, T) || a === 'N' || b === 'N' || (!!a && !!b && a === b); }
+    // 夢話：沒睡著（或睡眠中但沒有叫得出來的招）
+    case 'sleeptalk': return (M.status !== 'slp' && M.b.ab !== 'comatose') || !M.moves.some(q => !SIM_NOSLEEPTALK.has(q));
     default: return false;
   }
 }
@@ -1125,15 +1225,18 @@ function simOpts(ctx, st, s) {
   if (M.chg) return [{ t: 'mv', k: M.chg }];
   if (M.v.rage) return [{ t: 'mv', k: M.v.rage.k }];
   const ks = M.v.enc && M.moves.includes(M.v.encK) && M.pp[M.v.encK] > 0 ? [M.v.encK] : M.lock && M.item === 'choice-scarf' && M.moves.includes(M.lock) ? [M.lock] : M.moves;
+  // 被無理取鬧：上一次用的招不能再選（Showdown torment onDisableMove）；重力時 SIM_GRAV 的招不能選（gravity onDisableMove）
   const can = ks.filter(k => M.pp[k] > 0 && !(M.v.taunt && SIM_SUP[k]) && M.v.dis?.k !== k && !(SIM_TWICE.has(k) && M.last === k)
-    && !(M.v.hblock && SIM_HEALMV.has(k)) && !(M.v.tchop && simSound(k)) && !simImpr(st, s, k) && !(k === 'last-resort' && simLastResortNo(M)));
+    && !(M.v.hblock && SIM_HEALMV.has(k)) && !(M.v.tchop && simSound(k)) && !simImpr(st, s, k) && !(k === 'last-resort' && simLastResortNo(M))
+    && !(M.v.torment && M.last === k) && !(st.grav && SIM_GRAV.has(k)));
   let mv = !can.length ? [{ t: 'mv', k: SIM_STRUGGLE }]
     : can.filter(k => (!SIM_FIRST.has(k) || M.in === st.turn) && !simFutile(st, s, k)).map(k => ({ t: 'mv', k }));
   // 不能換人：背水一戰；對手場上那隻特性踩影（Showdown shadowtag：自己也是踩影、幽靈屬性不受影響；打完換人、被吹走照樣換）
   const tagged = T.hp > 0 && T.b.ab === 'shadow-tag' && M.b.ab !== 'shadow-tag' && !simTypes(M).includes('ghost');
   // 被綁住類綁著、被蛸固纏住、被縫影縫住（用的那隻還在場上；幽靈屬性不受影響）
   const held = x => !!x && st.sd[x.s].act === x.i && simAct(st, x.s).hp > 0;
-  const bound = (simBound(st, M) || held(M.v.octo) || held(M.v.shackle)) && !simTypes(M).includes('ghost');
+  // 扎根、妖精之鎖（Showdown onTrapPokemon tryTrap：幽靈屬性不受影響）也不能換
+  const bound = (simBound(st, M) || held(M.v.octo) || held(M.v.shackle) || !!M.v.ingrain || !!st.flock) && !simTypes(M).includes('ghost');
   // 特性逃跑：上面這些都困不住（冠軍版：Showdown mods/champions runaway onTrapPokemon，#12303；Serebii「Now functions in battle」）
   const sw = (M.v.trap || tagged || bound) && M.b.ab !== 'run-away' ? [] : simBench(st, s).map(i => ({ t: 'sw', i }));
   if (st.idle >= SIM_IDLE) {
@@ -1171,7 +1274,7 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
   const acc = simAcc(st, M, T, k, !oWill);
   if (acc < 100 && rnd && rnd() * 100 >= acc) { bad(); return say(`，但沒有命中（命中率 ${acc}%）`); }
   // 心靈香草（Showdown mentalherb：著迷、再來一次、挑釁、無理取鬧、定身、回復封鎖）
-  const herb = () => { if (T.item === 'mental-herb') { delete T.v.taunt; delete T.v.enc; delete T.v.encK; delete T.v.dis; delete T.v.hblock; simLoseItem(T); simLog(st, `${tn}用心靈香草解除了`); } };
+  const herb = () => { if (T.item === 'mental-herb') { delete T.v.taunt; delete T.v.enc; delete T.v.encK; delete T.v.dis; delete T.v.hblock; delete T.v.torment; simLoseItem(T); simLog(st, `${tn}用心靈香草解除了`); } };
   switch (x.kind) {
     case 'boost': case 'charge': case 'focus':
       if (simFutile(st, s, k)) return fail('沒有效果');
@@ -1252,8 +1355,8 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
     case 'sap': {
       if (T.st.atk <= -6) return fail('對手攻擊已經最低');
       // 回復量＝對手含能力變化的攻擊能力值（Showdown getStat('atk', false, true)）
-      // 對手攻擊值照能力值用的型態（戰鬥切換的刀劍形態、全能形態，simFk）
-      const [sp, nat] = invAt(T.b, 1, T.b.atkInv), atk = stageStat(statOf(MON[simFk(T)].bs[1], sp, 1, nat), T.st.atk);
+      // 對手攻擊值照能力值用的型態（戰鬥切換的刀劍形態、全能形態，simFk；力量平分換過的照換過的，simStored）
+      const atk = stageStat(simStored(T, 1), T.st.atk);
       say('');
       const v = M.item === 'big-root' ? pokeRound(atk * 5324 / 4096) : atk;
       if (T.b.ab === 'liquid-ooze') simHurt(st, s, M, v, `吸到${tn}的${abilZh('liquid-ooze')}`); else simHeal(st, s, M, v, '吸取力量');
@@ -1315,6 +1418,8 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
       if (!bench.length) return fail('對手沒有可以換的');
       // 吸盤（Showdown suctioncups onDragOut；破格無視）
       if (SIM_ANCHOR.has(T.b.ab) && M.b.ab !== 'mold-breaker') return fail(`${tn}的${abilZh(T.b.ab)}`);
+      // 扎根的吹不走（Showdown ingrain onDragOut）
+      if (T.v.ingrain) return fail(`${tn}扎根了`);
       say('');
       simSwitch(st, 1 - s, simPhazeTo(st, 1 - s, rnd), rnd);
       return;
@@ -1324,6 +1429,8 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
       [M, T].forEach(P => { P.st = SIM_ST0(); });
       return;
     case 'debuff':
+      // 粉末（棉孢子）：草屬性、特性防塵不受
+      if (x.pw && (simTypes(T).includes('grass') || T.b.ab === 'overcoat')) return fail('沒有效果');
       say('');
       if (!simBoost(st, 1 - s, T, x.d, s)) simLog(st, `${tn}的能力沒有變化`);
       return;
@@ -1401,12 +1508,13 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
     case 'trick': {
       if (T.v.sub) return fail(`${tn}有替身`);
       if (T.b.ab === 'sticky-hold' && M.b.ab !== 'mold-breaker') return fail(`${tn}的${abilZh('sticky-hold')}`);
-      if (!M.item && !T.item) return fail('雙方都沒有道具');
+      if (!simRealItem(M) && !simRealItem(T)) return fail('雙方都沒有道具');
       if (MON[M.key].base || MON[T.key].base) return fail('超級進化的道具換不了');
-      const [a, b] = [M.item, T.item];
-      simLoseItem(M, true); simLoseItem(T, true);
-      Object.assign(M, { item: b, lock: '' });
-      Object.assign(T, { item: a, lock: '' });
+      // 魔法空間時照樣交換（換到的照樣收起來，見 simTake／simGive）
+      const [a, b] = [simRealItem(M), simRealItem(T)];
+      simTake(M); simTake(T);
+      simGive(M, b); simGive(T, a);
+      M.lock = ''; T.lock = '';
       say(`：交換了道具（自己拿到${b ? ITEMS[b]?.[0] || b : '空手'}、${tn}拿到${a ? ITEMS[a]?.[0] || a : '空手'}）`);
       // 換到的樹果條件已經符合就馬上吃（Showdown Update）
       simBerryNow(st, s, M); simBerryNow(st, 1 - s, T);
@@ -1432,9 +1540,9 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
       side.sg = 5;
       return say('：5 回合內這一方不會被對手弄成異常、混亂');
     case 'recycle':
-      if (M.item || !M.lastItem) return fail('沒有可以拿回的道具');
-      M.item = M.lastItem; M.lastItem = '';
-      say(`：拿回了${ITEMS[M.item]?.[0] || M.item}`);
+      if (simRealItem(M) || !M.lastItem) return fail('沒有可以拿回的道具');
+      simGive(M, M.lastItem); M.lastItem = '';
+      say(`：拿回了${ITEMS[simRealItem(M)]?.[0] || simRealItem(M)}`);
       return simBerryNow(st, s, M);
     case 'mrise':
       if (M.v.mrise || M.item === 'iron-ball') return fail('沒有效果');
@@ -1497,8 +1605,10 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
     case 'entrain': case 'simple': case 'roleplay': {
       if (simAbFail(k, M, T)) return fail('特性換不了');
       say('');
-      // 找夥伴：對手變成自己的特性；單純光束：對手變成單純；扮演：自己變成對手的特性
-      if (x.kind === 'roleplay') simNewAb(st, s, M, simRealAb(T)); else simNewAb(st, 1 - s, T, x.kind === 'simple' ? 'simple' : simRealAb(M));
+      // 找夥伴：對手變成自己的特性；單純光束：對手變成單純（煩惱種子 x.ab：不眠）；扮演：自己變成對手的特性
+      if (x.kind === 'roleplay') simNewAb(st, s, M, simRealAb(T)); else simNewAb(st, 1 - s, T, x.kind === 'simple' ? x.ab || 'simple' : simRealAb(M));
+      // 煩惱種子：睡著的醒來（Showdown worryseed onHit：setAbility 之後 cureStatus）
+      if (x.ab === 'insomnia' && T.status === 'slp') { T.status = ''; simLog(st, `${tn}醒來了`); }
       return;
     }
     case 'gastro':
@@ -1529,13 +1639,116 @@ function simSupport(st, s, k, oa, oWill, rnd, pick, bounced) {
       return;
     }
     case 'swagger': {
-      // 虛張聲勢（Showdown swagger：先 boosts 再 volatileStatus）：對手攻擊 +2、再混亂（神秘守護擋混亂）；兩樣都沒發生才算失敗
+      // 虛張聲勢（Showdown swagger：先 boosts 再 volatileStatus）：對手攻擊 +2、再混亂（神秘守護擋混亂）；兩樣都沒發生才算失敗。吹捧同樣，能力變化照 x.d（特攻 +1）
       say('');
-      const up = simBoost(st, 1 - s, T, { atk: 2 }, s), cf = !simSafe(st, T, M) && simConfuse(st, 1 - s, T, rnd);
+      const up = simBoost(st, 1 - s, T, x.d || { atk: 2 }, s), cf = !simSafe(st, T, M) && simConfuse(st, 1 - s, T, rnd);
       if (!up && !cf) { bad(); simLog(st, `${tn}沒有變化`); }
       return;
     }
+    // 以下是 2026-11-19 換成 Showdown 使用率後新進常用招式表的（見 SIM_SUP）
+    case 'spicy':
+      // 辣椒精華：對手攻擊 +2、防禦 −2（對手造成的，恆淨之軀擋降、鏡甲反彈降的那項）
+      say('');
+      if (!simBoost(st, 1 - s, T, x.d, s)) { bad(); simLog(st, `${tn}的能力沒有變化`); }
+      return;
+    case 'gswap': {
+      // 防守互換（Showdown guardswap setBoost：直接換，不看唱反調、恆淨之軀等）
+      const [a, b] = [{ def: M.st.def, spd: M.st.spd }, { def: T.st.def, spd: T.st.spd }];
+      M.st = { ...M.st, ...b }; T.st = { ...T.st, ...a };
+      return say(`：和${tn}交換了防禦、特防的能力變化`);
+    }
+    case 'psplit': {
+      // 力量平分、防守平分（Showdown powersplit／guardsplit：雙方 storedStats 平均取整，不含能力變化；換下場、換型態就恢復，見 v.raw）
+      const nm = ['HP', '攻擊', '防禦', '特攻', '特防', '速度'], was = x.ks.map(i => [simStored(M, i), simStored(T, i)]);
+      const avg = was.map(([a, b]) => Math.floor((a + b) / 2));
+      M.v.raw = { ...M.v.raw, ...Object.fromEntries(x.ks.map((i, n) => [i, avg[n]])) };
+      T.v.raw = { ...T.v.raw, ...Object.fromEntries(x.ks.map((i, n) => [i, avg[n]])) };
+      return say(`：和${tn}平分${x.ks.map((i, n) => `${nm[i]}（${was[n][0]}／${was[n][1]}→${avg[n]}）`).join('、')}`);
+    }
+    case 'rtype': {
+      // 鏡面屬性（Showdown reflecttype）：變成對手不含加上的屬性，加上的也照抄；對手沒有屬性時只有加上的就變一般
+      const ty = simTypes(T, true);
+      if (!ty.length && !T.v.add) return fail(`${tn}沒有屬性`);
+      simSetTypes(M, ty.length ? ty.slice() : ['normal']);
+      if (T.v.add) M.v.add = T.v.add;
+      return say(`：變成${simTypes(M).map(t => TYPES[IDX[t]].zh).join('＋')}屬性`);
+    }
+    case 'court': {
+      // 換場（Showdown courtchange：雙方的撒菱類、牆、順風、神秘守護對調，回合數照帶過去）；都沒有就失敗
+      if (simFutile(st, s, k)) return fail('雙方都沒有場地狀態');
+      const [a, b] = st.sd;
+      [a.haz, b.haz] = [b.haz, a.haz]; [a.scr, b.scr] = [b.scr, a.scr]; [a.tw, b.tw] = [b.tw, a.tw]; [a.sg, b.sg] = [b.sg, a.sg];
+      return say('：雙方的場地狀態對調了');
+    }
+    case 'gravity':
+      // 重力（Showdown gravity 5 回合）：大家都在地面上（simGround）、命中 ×1.67（simAcc）、SIM_GRAV 的招式不能用；電磁飄浮馬上結束
+      if (st.grav) return fail('已經是重力');
+      st.grav = 5;
+      say('：5 回合內重力變強');
+      [M, T].forEach(P => { if (P.v.mrise) { delete P.v.mrise; simLog(st, `${simName(st, +P.id[0], P)}的電磁飄浮被重力解除`); } });
+      return;
+    case 'mroom':
+      // 魔法空間（Showdown magicroom 5 回合，再用一次就結束）：場上的道具都沒有效果（收進 mri，見 simMri）
+      if (st.mroom) { simMroomEnd(st); return say('：魔法空間結束了'); }
+      st.mroom = 5;
+      [M, T].forEach(P => simMri(P, true));
+      return say('：5 回合內道具沒有效果');
+    case 'flock':
+      // 妖精之鎖（Showdown fairylock duration 2）：到下一回合結束雙方都不能換人（見 simOpts）
+      if (st.flock) return fail('已經鎖住了');
+      st.flock = 2;
+      return say('：到下一回合結束雙方都不能換人');
+    case 'ingrain':
+      // 扎根（Showdown ingrain）：每回合結束回 1/16（simEnd）、不能換人（simOpts）、不會被吹走、在地面上（simGround）；接棒傳得過去
+      if (M.v.ingrain) return fail('已經扎根了');
+      M.v.ingrain = true;
+      return say('：扎根了');
+    case 'flux':
+      // 磁場操控（Showdown magneticflux：單打只看自己，特性正電／負電才防禦、特防 +1）
+      if (!['plus', 'minus'].includes(M.b.ab)) return fail('沒有特性正電／負電');
+      say('');
+      if (!simBoost(st, s, M, x.b)) { bad(); simLog(st, `${me}的能力沒有變化`); }
+      return;
+    case 'electrify':
+      // 輸電（Showdown electrify onTryHit：對手這回合已經出過招就失敗）：對手這回合的招式變電屬性（v.elec，見 simMoveType、simCalc）
+      if (!oWill) return fail('對手已經行動');
+      T.v.elec = st.turn;
+      return say(`：${tn}這回合的招式變成電屬性`);
+    case 'torment':
+      // 無理取鬧（Showdown torment，換下場解除、心靈香草解除、芳香幕擋）：對手不能連續用同一招（見 simOpts）
+      if (simAroma(M, T)) return fail(`${tn}的${abilZh('aroma-veil')}`);
+      if (T.v.torment) return fail('已經無理取鬧了');
+      T.v.torment = true;
+      say(`：${tn}不能連續用同一招`);
+      return herb();
+    case 'cheeks': {
+      // 大快朵頤（Showdown stuffcheeks：先防禦 +2，加不上去就失敗、樹果不吃；再吃掉身上的樹果，eatItem(true) 緊張感擋不住）
+      const it = simRealItem(M);
+      if (!it?.endsWith('-berry')) return fail('沒有樹果');
+      say('');
+      if (!simBoost(st, s, M, x.b)) { bad(); return simLog(st, `${me}的防禦已經到頂，沒有吃樹果`); }
+      if (M.mri !== undefined) { M.lastItem = it; M.mri = ''; if (M.b.ab === 'unburden') M.v.unb = true; } else simLoseItem(M);
+      return simEatBerry(st, s, M, it);
+    }
+    case 'attract':
+      // 迷人（Showdown attract：一公一母才有效，遲鈍、芳香幕擋；穿透替身）：照 simAttract（期望值模式不知道性別，不會著迷）
+      simAttract(st, 1 - s, T, M, rnd);
+      if (!T.v.attract) return fail('沒有效果');
+      return say('');
   }
+}
+// 吃下樹果 it 的效果（大快朵頤強制吃；Showdown 各樹果的 onEat）：文柚果回 1/4、木子果治好異常與混亂、零餘果叫醒；抗性樹果吃了沒有效果
+function simEatBerry(st, s, M, it) {
+  simLog(st, `${simName(st, s, M)}吃了${ITEMS[it]?.[0] || it}`);
+  if (it === 'sitrus-berry') simSitrusHeal(st, s, M, '文柚果');
+  else if (it === 'lum-berry') { M.status = ''; delete M.v.conf; }
+  else if (it === 'chesto-berry' && M.status === 'slp') M.status = '';
+  simAte(st, s, M, it);
+}
+// 魔法空間結束（回合到了、再用一次）：場上的道具拿回來，馬上看要不要吃樹果
+function simMroomEnd(st) {
+  st.mroom = 0;
+  [0, 1].forEach(s => { const M = simAct(st, s); simMri(M, false); if (M.hp > 0) simBerryNow(st, s, M); });
 }
 // s 這方的 M 用攻擊招式 k 打中 T 之後的追加效果（SIM_SEC；Showdown battle-actions.ts secondaries）：照機率抽（期望值模式只算機率 100% 的）；
 // 特性強行沒有追加效果（FLAG.secondary 的招式）；道具王者之證讓沒有畏縮效果的攻擊招式多 10% 畏縮（Showdown kingsrock，加在強行拿掉之後，所以強行也有）。
@@ -1561,12 +1774,18 @@ function simSecondary(st, s, M, T, k, oWill, rnd, subbed, up) {
     else if (x.syrup && !T.v.syrup) { T.v.syrup = { n: 4, s, i: st.sd[s].act }; simLog(st, `${simName(st, 1 - s, T)}沾上了糖漿`); }
     else if (x.trap && !T.v.shackle && M.hp > 0 && !simTypes(T).includes('ghost')) { T.v.shackle = { s, i: st.sd[s].act }; simLog(st, `${simName(st, 1 - s, T)}的影子被縫住，不能換人`); }
     else if (x.aria) T.v.aria = true;
+    // 詭異咒語：對手上一招（掙扎、沒 PP 的不算）的 PP 扣 x.spite，不夠扣到 0
+    else if (x.spite && T.last && T.pp[T.last] > 0) {
+      const n = Math.min(x.spite, T.pp[T.last]);
+      T.pp[T.last] -= n;
+      simLog(st, `${simName(st, 1 - s, T)}的${simMoveZh(T.last)} PP −${n}`);
+    }
   }
 }
 // M 陷入混亂（why 寫在「混亂了」前面）：已經混亂、我行我素、薄霧場地在地面上的不會（mistyterrain onTryAddVolatile）；
 // 2～5 次出招機會（Showdown random(2, 6)；期望值模式不會打到自己，次數取 3）；帶木子果的馬上吃掉解除（Showdown lumberry onUpdate 看 confusion）。回傳有沒有混亂
 function simConfuse(st, s, M, rnd, why = '') {
-  if (M.hp <= 0 || M.v.conf || M.b.ab === 'own-tempo' || (simTer(st) === 'misty' && simGround(M) && !M.hide)) return false;
+  if (M.hp <= 0 || M.v.conf || M.b.ab === 'own-tempo' || (simTer(st) === 'misty' && simGround(st, M) && !M.hide)) return false;
   M.v.conf = rnd ? 2 + Math.floor(rnd() * 4) : 3;
   simLog(st, `${simName(st, s, M)}${why}混亂了`);
   if (M.item === 'lum-berry' && simCanEat(st, s)) {
@@ -1624,6 +1843,7 @@ function simStruggle(st, s, M, T, rnd) {
     else if (T.v.endure && d >= T.hp) { d = T.hp - 1; held = '挺住'; }
     const dd = Math.min(d, T.hp);
     T.hp -= dd;
+    if (dd > 0) T.v.hurt = st.turn;
     simFaint(st, T);
     T.hits = (T.hits || 0) + 1;
     if (dd > 0) T.v.got = { turn: st.turn, cat: 'physical', dmg: dd };
@@ -1732,9 +1952,9 @@ function simStance(st, s, M, k) {
   const to = SIM_STANCE[k === 'kings-shield' ? 'shield' : 'blade'];
   if (simFk(M) === to) return;
   M.fk = to;
-  // 換型態（formeChange → setSpecies）：屬性變回圖鑑的（浸水、加上的屬性都清掉）、速度互換換來的速度變回這個型態的
+  // 換型態（formeChange → setSpecies）：屬性變回圖鑑的（浸水、加上的屬性都清掉）、速度互換、力量平分類換來的能力值變回這個型態的
   simSetTypes(M);
-  delete M.v.spe;
+  delete M.v.spe; delete M.v.raw;
   simLog(st, `${simName(st, s, M)}的${abilZh(M.b.ab)}：變成${MON[to].zh}`);
 }
 // s 這方的 M 用招式 k 打對手場上那隻；oa＝對手這回合的選擇、oWill＝對手這回合還會出招（突襲、快手還擊、守住類、再來一次看這個）；
@@ -1770,9 +1990,9 @@ function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
   if (k !== 'destiny-bond') delete M.v.db;
   if (M.status === 'slp') {
     M.slp -= M.b.ab === 'early-bird' ? 2 : 1;
-    if (M.slp > 0) return cant(`${me}睡著了`);
-    M.status = '';
-    simLog(st, `${me}醒來了`);
+    // 夢話睡著也能用（Showdown sleepUsable：睡眠照樣倒數）
+    if (M.slp > 0) { if (k !== 'sleep-talk') return cant(`${me}睡著了`); }
+    else { M.status = ''; simLog(st, `${me}醒來了`); }
   }
   // 冰凍（冠軍版 mods/champions/conditions.ts）：每次要出招先扣次數，每次 1/4 融化、第 3 次一定融化；用 SIM_DEFROST 的招式會自己融化
   if (M.status === 'frz') {
@@ -1786,6 +2006,8 @@ function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
     if (M.b.ab === 'steadfast') simBoost(st, s, M, { spe: 1 });
     return;
   }
+  // 重力（Showdown gravity onBeforeMove 優先度 6，在畏縮之後、混亂之前）：選招後才開重力的，SIM_GRAV 的招這回合也用不了
+  if (st.grav && SIM_GRAV.has(k)) return cant(`${me}因為重力不能用${mz}`);
   // 混亂（Showdown confusion）：每次要出招先扣次數，扣完就解除；沒解除時 1/3 打到自己（simConfDmg）
   if (M.v.conf) {
     if (!--M.v.conf) { delete M.v.conf; simLog(st, `${me}的混亂解除了`); }
@@ -1867,6 +2089,17 @@ function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
     simMbEnd(st);
     return simMove(ctx, st, 1 - s, c, { t: 'mv', k }, false, rnd, pick);
   }
+  // 夢話（Showdown sleeptalk：onTry 要睡著（或絕對睡眠）；從自己的招式隨機叫一招，SIM_NOSLEEPTALK 的除外；叫出來的招同仿效：
+  // 不再做出招前的檢查、不扣 PP、不改「上一招」）。期望值模式不抽，叫第一個叫得出來的
+  if (k === 'sleep-talk') {
+    const bad = why => { M.v.mt.ok = false; simLog(st, `${me}用${mz}，但失敗了（${why}）`); };
+    if (M.status !== 'slp' && M.b.ab !== 'comatose') return bad('沒有睡著');
+    const qs = M.moves.filter(q => !SIM_NOSLEEPTALK.has(q));
+    if (!qs.length) return bad('沒有叫得出來的招式');
+    const q = rnd ? qs[Math.floor(rnd() * qs.length)] : qs[0];
+    simLog(st, `${me}用${mz}：使出${simMoveZh(q)}`);
+    return simMove(ctx, st, s, q, oa, oWill, rnd, pick, true);
+  }
   if (SIM_SUP[k]) {
     // 雙打用的輔助招：沒有目標、onTry 就失敗的在 PrepareHit 之前結束，不發動變幻自如（Showdown useMoveInner；交換場地在 simSupport 裡發動）
     const x = SIM_SUP[k], prep = !x.nt && !x.np && x.kind !== 'aswitch' && !(x.kind === 'guard' && !oWill) && !(x.kind === 'stock' && (M.v.stock || 0) >= 3);
@@ -1889,6 +2122,8 @@ function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
   // 電光雙擊、燃盡：自己沒有那個屬性就失敗（Showdown onTryMove，在守住判定之前）
   if (SIM_LOSE_TYPE[k] && !simTypes(M).includes(SIM_LOSE_TYPE[k])) return fail(`已經沒有${TYPES[IDX[SIM_LOSE_TYPE[k]]].zh}屬性`);
   if (k === 'sucker-punch' && (!oWill || oa.t !== 'mv' || simCat(oa.k) === 'status')) return fail('對手沒有要出攻擊招式');
+  // 打嗝：這場還沒吃過樹果就失敗（Showdown belch onTry，在守住判定之前）
+  if (k === 'belch' && !M.ate) return fail('這場還沒吃過樹果');
   if (k === 'upper-hand' && (!oWill || oa.t !== 'mv' || simCat(oa.k) === 'status' || simPri(st, T, oa.k) <= 0)) return fail('對手沒有要出先制招式');
   // 珍藏：其他招式這場都用過才能用、只有這一招也失敗（Showdown lastresort onTry；選招時就擋掉了，見 simOpts，這裡擋的是叫出來的，如仿效、節拍器）
   if (k === 'last-resort' && simLastResortNo(M)) return fail('還有其他招式沒用過');
@@ -2030,6 +2265,7 @@ function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
         td = Math.min(dmg, T.hp);
         dealt = Math.max(0, dealt) + td;
         T.hp -= td;
+        if (td > 0) T.v.hurt = st.turn;
         simFaint(st, T);
         // 憤怒穴位：被急所打中還站著，攻擊直接拉到 +6（Showdown angerpoint onHit：boost atk +12；紀錄寫在傷害那行後面）
         const ang = anyCrit && T.hp > 0 && T.b.ab === 'anger-point' && T.st.atk < 6;
@@ -2058,7 +2294,7 @@ function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
         if (T.hp <= 0 && contact && T.b.ab === 'aftermath' && M.hp > 0 && M.b.ab !== 'damp') simHurt(st, s, M, M.max / 4, `受到${tn}的${abilZh('aftermath')}傷害`);
         // 擊落（Showdown smackdown volatile）：打中後到換下場前都在地面上（地面招式打得到，飄浮、氣球沒用，電磁飄浮解除；見 simGround、damageCalc 的 d.grounded）
         if (k === 'smack-down' && T.hp > 0 && !T.v.smack) {
-          if (!simGround(T)) simLog(st, `${tn}被擊落到地面`);
+          if (!simGround(st, T)) simLog(st, `${tn}被擊落到地面`);
           T.v.smack = true; delete T.v.mrise;
         }
         // 投擲的道具效果（Showdown fling：光之球麻痺、毒針中毒、王者之證畏縮；樹果、香草由對手吃下）
@@ -2067,7 +2303,7 @@ function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
         else if (fl === 'poison-barb') simStatus(st, 1 - s, T, 'psn', rnd, M);
         else if (fl === 'kings-rock') { if (oWill && T.b.ab !== 'inner-focus') T.v.flinch = true; }
         else if (fl === 'white-herb') { Object.keys(T.st).forEach(q => { if (T.st[q] < 0) T.st[q] = 0; }); simLog(st, `${tn}吃了白色香草`); }
-        else if (fl === 'mental-herb') { delete T.v.taunt; delete T.v.enc; delete T.v.encK; delete T.v.dis; delete T.v.hblock; delete T.v.attract; simLog(st, `${tn}吃了心靈香草`); }
+        else if (fl === 'mental-herb') { delete T.v.taunt; delete T.v.enc; delete T.v.encK; delete T.v.dis; delete T.v.hblock; delete T.v.attract; delete T.v.torment; simLog(st, `${tn}吃了心靈香草`); }
         else if (fl.endsWith('-berry')) {
           simLog(st, `${tn}吃了${ITEMS[fl]?.[0] || fl}`);
           if (fl === 'sitrus-berry') simSitrusHeal(st, 1 - s, T, '文柚果');
@@ -2075,9 +2311,10 @@ function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
           simAte(st, 1 - s, T, fl);
         }
         // 蟲咬、啄食（Showdown bugbite／pluck onHit）：自己還站著就搶走對手的樹果馬上吃（不看 HP、緊張感擋不住；黏著擋得住）
-        if ((k === 'bug-bite' || k === 'pluck') && M.hp > 0 && T.item?.endsWith('-berry') && T.b.ab !== 'sticky-hold') {
-          const it = T.item;
-          simLoseItem(T, true);
+        // （魔法空間時照樣搶得到、吃得到：Showdown 用 getItem／takeItem，不看 ignoringItem）
+        if ((k === 'bug-bite' || k === 'pluck') && M.hp > 0 && simRealItem(T)?.endsWith('-berry') && T.b.ab !== 'sticky-hold') {
+          const it = simRealItem(T);
+          simTake(T);
           simLog(st, `${me}搶走了${tn}的${ITEMS[it]?.[0] || it}吃掉`);
           if (it === 'sitrus-berry') simSitrusHeal(st, s, M, '文柚果');
           else if (it === 'lum-berry') { M.status = ''; delete M.v.conf; }
@@ -2117,12 +2354,19 @@ function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
       if (!subbed) {
         // 打完後的被打中效果（最後一下的接觸懲罰 pend、詛咒之軀等，見 simOnHit；前面幾下的接觸懲罰、辣椒噴發、碎裂鎧甲等每下的已經在上面發動）
         simOnHit(st, s, M, T, k, nt, rnd, contact, pend);
-        // 拍落（Showdown knockoff onAfterHit，在凸凸頭盔等 DamagingHit 之後）：自己還站著就打掉對手的道具（超級石、黏著拿不掉）
-        if (k === 'knock-off' && T.item && !MON[T.key].base && T.b.ab !== 'sticky-hold' && M.hp > 0) { simLog(st, `${me}打掉了${tn}的${ITEMS[T.item]?.[0] || T.item}`); simLoseItem(T, true); }
+        // 拍落（Showdown knockoff onAfterHit，在凸凸頭盔等 DamagingHit 之後）：自己還站著就打掉對手的道具（超級石、黏著拿不掉；魔法空間時照樣打掉）
+        const ti = simRealItem(T);
+        if (k === 'knock-off' && ti && !MON[T.key].base && T.b.ab !== 'sticky-hold' && M.hp > 0) { simLog(st, `${me}打掉了${tn}的${ITEMS[ti]?.[0] || ti}`); simTake(T); }
+        // 小偷（Showdown thief onAfterHit）：自己沒有道具（這下用掉寶石的不算）、還站著時，偷走對手的道具（超級石、黏著偷不到）；偷到的生命寶珠這下照扣（在生命寶珠之前）
+        else if (k === 'thief' && ti && !simRealItem(M) && !gem && M.hp > 0 && !MON[T.key].base && T.b.ab !== 'sticky-hold') {
+          simTake(T); simGive(M, ti); M.lock = '';
+          simLog(st, `${me}偷走了${tn}的${ITEMS[ti]?.[0] || ti}`);
+        }
         // 順手牽羊（Showdown pickpocket onAfterMoveSecondary；冠軍版強行照樣發動）：沒有道具時被接觸招式打中，偷走攻擊方的道具（黏著偷不到）
-        else if (contact && T.b.ab === 'pickpocket' && !T.item && T.hp > 0 && M.item && M.b.ab !== 'sticky-hold') {
-          T.item = M.item; simLoseItem(M, true);
-          simLog(st, `${tn}的${abilZh('pickpocket')}：偷走了${me}的${ITEMS[T.item]?.[0] || T.item}`);
+        else if (contact && T.b.ab === 'pickpocket' && !ti && T.hp > 0 && simRealItem(M) && M.b.ab !== 'sticky-hold') {
+          const mi = simRealItem(M);
+          simTake(M); simGive(T, mi);
+          simLog(st, `${tn}的${abilZh('pickpocket')}：偷走了${me}的${ITEMS[mi]?.[0] || mi}`);
         }
         // 怒火沖天（Showdown berserk onAfterMoveSecondary；冠軍版強行照樣發動）：這招讓 HP 從一半以上跌到一半以下時特攻 +1
         if (T.b.ab === 'berserk' && T.hp > 0 && T.hp <= T.max / 2 && T.hp + td > T.max / 2) simBoost(st, 1 - s, T, { spa: 1 });
@@ -2139,9 +2383,10 @@ function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
       if (!sf && M.item === 'life-orb' && dealt >= 0) simHurt(st, s, M, M.max / 10, '生命寶珠');
       // 魔術師（Showdown magician onAfterMoveSecondarySelf；強行不發動）：自己沒有道具時，打中後偷走對手的道具（超級石、黏著偷不到，寶石用掉的那下不偷）；
       // 在生命寶珠之後（這招出手時身上沒有道具，偷到的生命寶珠這下不扣）
-      if (!sf && !subbed && M.b.ab === 'magician' && !M.item && !gem && M.hp > 0 && T.item && !MON[T.key].base && T.b.ab !== 'sticky-hold') {
-        M.item = T.item; simLoseItem(T, true);
-        simLog(st, `${me}的${abilZh('magician')}：偷走了${tn}的${ITEMS[M.item]?.[0] || M.item}`);
+      if (!sf && !subbed && M.b.ab === 'magician' && !simRealItem(M) && !gem && M.hp > 0 && simRealItem(T) && !MON[T.key].base && T.b.ab !== 'sticky-hold') {
+        const ti = simRealItem(T);
+        simTake(T); simGive(M, ti);
+        simLog(st, `${me}的${abilZh('magician')}：偷走了${tn}的${ITEMS[ti]?.[0] || ti}`);
       }
       // 泡影的詠歎調（Showdown sparklingaria onAfterMove，在生命寶珠之後）：追加效果有中（v.aria）、自己還站著才治好對手的灼傷
       if (T.v.aria) {
@@ -2158,7 +2403,7 @@ function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
         delete M.v.seed;
         delete M.v.bind;
       }
-      if (SIM_PHAZE.has(k) && !subbed && T.hp > 0 && simBench(st, 1 - s).length && !simOver(st) && !(SIM_ANCHOR.has(T.b.ab) && M.b.ab !== 'mold-breaker')) simSwitch(st, 1 - s, simPhazeTo(st, 1 - s, rnd), rnd);
+      if (SIM_PHAZE.has(k) && !subbed && T.hp > 0 && simBench(st, 1 - s).length && !simOver(st) && !(SIM_ANCHOR.has(T.b.ab) && M.b.ab !== 'mold-breaker') && !T.v.ingrain) simSwitch(st, 1 - s, simPhazeTo(st, 1 - s, rnd), rnd);
       // 逃脫按鍵、紅牌（Showdown onAfterMoveSecondary；打在替身上的不算）：被攻擊打中還站著時，逃脫按鍵自己換下場（出招結束才換，見最後）、
       // 紅牌讓打的那方被換下場（後排隨機換上）；道具用掉，後排沒有就不發動
       if (!subbed && T.hp > 0 && st.sd[1 - s].act === it && !simOver(st)) {
@@ -2167,14 +2412,17 @@ function simMoveIn(ctx, st, s, k, oa, oWill, rnd, pick, called) {
         } else if (T.item === 'red-card' && M.hp > 0 && st.sd[s].act === ia && simBench(st, s).length) {
           simLog(st, `${tn}舉起了${ITEMS[T.item][0]}`); simLoseItem(T);
           // 紅牌照樣用掉，但打的那方是吸盤就不會被換下場（Showdown redcard forceSwitchFlag → dragOut 被 suctioncups 擋）
-          if (SIM_ANCHOR.has(M.b.ab)) simLog(st, `${me}的${abilZh(M.b.ab)}：沒有被換下場`); else simSwitch(st, s, simPhazeTo(st, s, rnd), rnd);
+          if (SIM_ANCHOR.has(M.b.ab)) simLog(st, `${me}的${abilZh(M.b.ab)}：沒有被換下場`);
+          else if (M.v.ingrain) simLog(st, `${me}扎根了，沒有被換下場`);
+          else simSwitch(st, s, simPhazeTo(st, s, rnd), rnd);
         }
       }
     }
   }
   delete M.v.fickle; delete M.v.fling;
   // 鐵蹄光線：打出傷害（含打在替身上）或沒打中（onMoveFail）都扣一半；打在畫皮上傷害 0 不扣（Showdown applyRecoilDamage 看 totalDamage）
-  if (k === 'steel-beam' && M.hp > 0 && dealt !== 0) simHurt(st, s, M, Math.round(M.max / 2), '自己受到傷害', false);
+  // （Showdown 是 this.damage，算這回合受過傷害：v.hurt）
+  if (k === 'steel-beam' && M.hp > 0 && dealt !== 0 && simHurt(st, s, M, Math.round(M.max / 2), '自己受到傷害', false)) M.v.hurt = st.turn;
   if (M.hp <= 0 && SIM_BOOM.has(k)) { M.hp = 0; simLog(st, `${me}倒下`); }
   // 危險迴避（Showdown emergencyexit：這招讓 HP 從一半以上跌到一半以下；已經要用逃脫按鍵換下場的不再發動）：出招結束時自己換下場
   if (!out && T.b.ab === 'emergency-exit' && st.sd[1 - s].act === it && T.hp > 0 && T.hp <= T.max / 2 && tHp0 > T.max / 2 && simBench(st, 1 - s).length && !simOver(st)) {
@@ -2242,6 +2490,7 @@ function simEnd(ctx, st, rnd) {
     }
     d = Math.min(T.hp, d);
     T.hp -= d;
+    if (d > 0) T.v.hurt = st.turn;
     simFaint(st, T);
     if (r.berry) { const it = T.item; simLoseItem(T); simAte(st, f.s, T, it); }
     T.hits = (T.hits || 0) + 1;
@@ -2259,10 +2508,16 @@ function simEnd(ctx, st, rnd) {
   });
   const each = f => [0, 1].forEach(s => { const M = simAct(st, s); if (M.hp > 0 && !simOver(st)) f(M, s); });
   // 青草場地（grassyterrain onResidual 5.2，在吃剩的東西 5.4 之前）：在地面上、沒在蓄力躲起來的回 1/16；濕潤之軀（hydration 5.3）下雨時治好異常
-  if (simTer(st) === 'grassy') each((M, s) => { if (simGround(M) && !M.hide) simHeal(st, s, M, M.max / 16, '受到青草場地回復'); });
+  if (simTer(st) === 'grassy') each((M, s) => { if (simGround(st, M) && !M.hide) simHeal(st, s, M, M.max / 16, '受到青草場地回復'); });
   each((M, s) => { if (M.b.ab === 'hydration' && M.status && simWx(st) === 'rain') { M.status = ''; simLog(st, `${simName(st, s)}靠${abilZh('hydration')}治好了`); } });
   each((M, s) => { if (M.b.ab === 'shed-skin' && M.status && rnd && rnd() < 0.33) { M.status = ''; simLog(st, `${simName(st, s)}靠蛻皮治好了`); } });
   each((M, s) => { if (M.item === 'leftovers') simHeal(st, s, M, M.max / 16, '吃剩的東西'); });
+  // 扎根（ingrain onResidualOrder 7：吃剩的東西 5.4 之後、寄生種子 8 之前）：回最大 HP 的 1/16（先取整）、大根莖 ×1.3（Showdown bigroot onTryHeal）
+  each((M, s) => {
+    if (!M.v.ingrain) return;
+    const h = Math.max(1, Math.floor(M.max / 16));
+    simHeal(st, s, M, M.item === 'big-root' ? pokeRound(h * 5324 / 4096) : h, '扎根回復');
+  });
   each((M, s) => {
     const O = simAct(st, 1 - s);
     if (!M.v.seed || O.hp <= 0) return;
@@ -2334,14 +2589,18 @@ function simEnd(ctx, st, rnd) {
     if (side.sg && !--side.sg) simLog(st, `${s ? '對手' : '我方'}的神秘守護結束了`);
   });
   if (st.troom && !--st.troom.n) { simLog(st, '戲法空間結束了'); st.troom = null; }
+  // 重力（27.2）、魔法空間（27.6）各自倒數；妖精之鎖（duration 2，沒有自己的順序）也在這裡倒數
+  if (st.grav && !--st.grav) simLog(st, '重力恢復了');
+  if (st.mroom && !--st.mroom) { simLog(st, '魔法空間結束了'); simMroomEnd(st); }
+  if (st.flock) st.flock--;
   // 場地（onFieldResidualOrder 27：牆之後、加速之前）：扣回合數，扣到 0 就結束
   if (st.ter && !--st.ter.n) simClearTer(st, '結束了');
   // 收穫（Showdown harvest onResidualOrder 28）：沒有道具、最後吃的是樹果時，晴天一定、不然 50% 長回來（照亂數抽，期望值模式只算晴天）；
   // 長回來的馬上看要不要吃（文柚果 HP 一半以下、木子果有異常）
   each((M, s) => {
-    if (M.b.ab !== 'harvest' || M.item || !M.lastItem?.endsWith('-berry') || !(simWx(st) === 'sun' || (rnd && rnd() < 0.5))) return;
-    M.item = M.lastItem; M.lastItem = '';
-    simLog(st, `${simName(st, s)}的${abilZh('harvest')}：${ITEMS[M.item][0]}長回來了`);
+    if (M.b.ab !== 'harvest' || simRealItem(M) || !M.lastItem?.endsWith('-berry') || !(simWx(st) === 'sun' || (rnd && rnd() < 0.5))) return;
+    simLog(st, `${simName(st, s)}的${abilZh('harvest')}：${ITEMS[M.lastItem][0]}長回來了`);
+    simGive(M, M.lastItem); M.lastItem = '';
     simBerryNow(st, s, M);
   });
   // 反芻（Showdown cudchew onResidual）：吃了樹果的下一回合結束再吃一次（文柚果再回、木子果再治；抗性樹果沒有效果）
@@ -2367,7 +2626,7 @@ function simEnd(ctx, st, rnd) {
   });
   // 飽了又餓（Showdown hungerswitch onResidualOrder 29）：莫魯貝可每回合結束在飽腹花紋、空腹花紋之間切換（v.hangry，換下場變回飽腹；氣場輪的屬性跟著變）
   // 換型態（formeChange → setSpecies）：屬性變回圖鑑的（浸水、加上的屬性都清掉）、速度互換換來的速度也恢復
-  each((M, s) => { if (M.b.ab === 'hunger-switch' && simFk(M) === 'morpeko') { M.v.hangry = !M.v.hangry; simSetTypes(M); delete M.v.spe; simLog(st, `${simName(st, s)}變成${M.v.hangry ? '空腹' : '飽腹'}花紋`); } });
+  each((M, s) => { if (M.b.ab === 'hunger-switch' && simFk(M) === 'morpeko') { M.v.hangry = !M.v.hangry; simSetTypes(M); delete M.v.spe; delete M.v.raw; simLog(st, `${simName(st, s)}變成${M.v.hangry ? '空腹' : '飽腹'}花紋`); } });
   st.sd.forEach(side => side.mons.forEach(m => {
     delete m.v.prot; delete m.v.endure; delete m.v.flinch; delete m.v.roost; delete m.v.beak;
     // 交換場地的 allyswitch 狀態同 stall：這回合沒用就消失

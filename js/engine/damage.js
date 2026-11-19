@@ -16,7 +16,7 @@ const stageStat = (s, st) => st >= 0 ? Math.floor(s * (2 + st) / 2) : Math.floor
 const SPREAD = new Set(['air-cutter', 'blizzard', 'boomburst', 'brutal-swing', 'bulldoze', 'burning-jealousy', 'clanging-scales', 'dazzling-gleam',
   'discharge', 'earthquake', 'electroweb', 'eruption', 'explosion', 'heat-wave', 'hyper-voice', 'icy-wind', 'lava-plume', 'make-it-rain',
   'matcha-gotcha', 'misty-explosion', 'mortal-spin', 'muddy-water', 'overdrive', 'parabolic-charge', 'rock-slide', 'self-destruct', 'sludge-wave',
-  'snarl', 'sparkling-aria', 'struggle-bug', 'surf', 'water-spout']);
+  'snarl', 'sparkling-aria', 'struggle-bug', 'surf', 'water-spout', 'breaking-swipe', 'petal-blizzard']);
 // 連續攻擊：[打幾下, 說明]（Smogon moves.ts 的 multihit）；2～5 下的照 Smogon 預設以 3 下計，三旋擊威力每下 20、40、60
 const VAR_HITS = '2～5 下，以 3 下計';
 const HITS = { 'dragon-darts': [2], 'dual-wingbeat': [2], 'twin-beam': [2], 'triple-axel': [3, '威力 20→40→60'], 'population-bomb': [10, '最多 10 下，以全中計'],
@@ -61,18 +61,20 @@ const FLAG = Object.fromEntries(Object.entries({
     + 'power-whip psychic-fangs psyshield-bash quick-attack rage-fist raging-bull rapid-spin razor-shell reversal sacred-sword shadow-claw '
     + 'shadow-punch shadow-sneak slash snap-trap solar-blade spirit-break steel-roller stomping-tantrum stone-axe storm-throw sucker-punch '
     + 'super-fang supercell-slam superpower temper-flare thrash throat-chop thunder-fang thunder-punch trailblaze triple-axel trop-kick u-turn '
-    + 'upper-hand volt-tackle waterfall wave-crash wild-charge wood-hammer x-scissor zen-headbutt',
+    + 'upper-hand volt-tackle waterfall wave-crash wild-charge wood-hammer x-scissor zen-headbutt'
+    // 2026-11-19 換成 Showdown 使用率後新進常用招式表的（各標記同樣照 Showdown 冠軍版 flags 對過）
+    + ' aqua-tail assurance axe-kick breaking-swipe facade lash-out low-sweep pounce skitter-smack steel-wing thief zing-zap',
   // 電光雙擊冠軍版是拳類（Serebii「Double Shock is now a Punching move」、Showdown mods/champions #12304「flagged in-game」）
   punch: 'bullet-punch double-shock drain-punch dynamic-punch fire-punch hammer-arm headlong-rush ice-hammer ice-punch jet-punch mach-punch '
     + 'meteor-mash rage-fist shadow-punch thunder-punch',
   bite: 'bite crunch fire-fang ice-fang jaw-lock poison-fang psychic-fangs thunder-fang',
   bullet: 'acid-spray aura-sphere beak-blast bullet-seed energy-ball focus-blast gyro-ball pollen-puff pyro-ball rock-blast rock-wrecker seed-bomb '
-    + 'shadow-ball sludge-bomb syrup-bomb weather-ball zap-cannon',
-  sound: 'alluring-voice boomburst bug-buzz clanging-scales hyper-voice overdrive psychic-noise round snarl sparkling-aria torch-song',
+    + 'shadow-ball sludge-bomb syrup-bomb weather-ball zap-cannon electro-ball',
+  sound: 'alluring-voice boomburst bug-buzz clanging-scales hyper-voice overdrive psychic-noise round snarl sparkling-aria torch-song eerie-spell',
   pulse: 'aura-sphere dark-pulse dragon-pulse terrain-pulse water-pulse',
   slicing: 'aerial-ace air-cutter air-slash aqua-cutter bitter-blade ceaseless-edge cross-poison dire-claw dragon-claw kowtow-cleave leaf-blade '
     + 'night-slash population-bomb psycho-cut razor-shell sacred-sword shadow-claw slash solar-blade stone-axe x-scissor',
-  recoil: 'brave-bird double-edge flare-blitz head-smash light-of-ruin volt-tackle wave-crash wild-charge wood-hammer high-jump-kick supercell-slam',
+  recoil: 'brave-bird double-edge flare-blitz head-smash light-of-ruin volt-tackle wave-crash wild-charge wood-hammer high-jump-kick supercell-slam axe-kick',
   secondary: 'acid-spray air-slash alluring-voice ancient-power apple-acid aqua-step aura-wheel barb-barrage bite bitter-malice blaze-kick blizzard '
     + 'body-slam bug-buzz bulldoze burning-jealousy ceaseless-edge charge-beam cross-poison crunch dark-pulse dire-claw discharge dragon-rush '
     + 'drum-beating dynamic-punch earth-power electroweb energy-ball extrasensory fake-out fiery-dance fire-blast fire-fang fire-punch flame-charge '
@@ -81,7 +83,8 @@ const FLAG = Object.fromEntries(Object.entries({
     + 'mud-shot muddy-water mystical-fire night-daze nuzzle play-rough poison-fang poison-jab psychic psychic-noise psyshield-bash pyro-ball '
     + 'rapid-spin razor-shell rock-slide rock-tomb salt-cure scald scorching-sands shadow-ball shell-side-arm sludge-bomb sludge-wave snarl '
     + 'sparkling-aria spirit-break spirit-shackle stone-axe struggle-bug syrup-bomb throat-chop thunder thunder-fang thunder-punch thunderbolt '
-    + 'torch-song trailblaze triple-arrows trop-kick upper-hand volt-tackle water-pulse waterfall zap-cannon zen-headbutt',
+    + 'torch-song trailblaze triple-arrows trop-kick upper-hand volt-tackle water-pulse waterfall zap-cannon zen-headbutt'
+    + ' axe-kick breaking-swipe chilling-water eerie-spell inferno low-sweep mud-slap pounce skitter-smack steel-wing tri-attack zing-zap',
   priority: 'accelerock aqua-jet bullet-punch extreme-speed fake-out feint first-impression ice-shard jet-punch mach-punch quick-attack shadow-sneak '
     + 'sucker-punch upper-hand vacuum-wave water-shuriken',
 }).map(([f, s]) => [f, new Set(s.split(' '))]));
@@ -246,8 +249,9 @@ function damageCalc(a, d, mk, o) {
   if (offBy && o.weather) notes.add(`${abilZh(offBy)}讓天氣沒有作用`);
   // 在地面上：不是飛行屬性、沒有飄浮、沒帶氣球（Smogon isGrounded；重力、黑色鐵球不在可選的道具裡，不用看）
   // 帶黑色鐵球、被擊落（d.grounded，對戰模擬給）的一定在地面上（Showdown isGrounded：地面招式打飛行屬性當效果普通、飄浮和氣球沒用）
+  // （對戰模擬另外給的「在地面上」：被擊落、重力、扎根，Showdown isGrounded；攻擊方的 a.grounded 同樣，場地加成看這個）
   const terr = o.terrain || '', iron = d.item === 'iron-ball' || !!d.grounded, balloon = !iron && DMG_ITEMS[d.item]?.balloon;
-  const aGround = a.item === 'iron-ball' || (!aTy.includes('flying') && aab !== 'levitate' && !DMG_ITEMS[a.item]?.balloon);
+  const aGround = a.item === 'iron-ball' || !!a.grounded || (!aTy.includes('flying') && aab !== 'levitate' && !DMG_ITEMS[a.item]?.balloon);
   // d.float＝電磁飄浮中（對戰模擬給）：不在地面上、地面招式打不到
   const dGround = iron || (!d.float && !dTy.includes('flying') && dab !== 'levitate' && !balloon);
   // 招式屬性：氣象球隨天氣（超級日光當晴天）、大地波動隨場地、皮膚類把一般招式變屬性（氣象球、大地波動不會）、濕潤之聲把聲音招式變水
@@ -262,6 +266,8 @@ function damageCalc(a, d, mk, o) {
   else if (mk === 'aura-wheel') type = a.hangry ? 'dark' : 'electric';
   else if (ATE[aab] && type === 'normal') ate = use(aab) && (type = ATE[aab]);
   else if (aab === 'liquid-voice' && FLAG.sound.has(mk)) type = use(aab) && 'water';
+  // o.type＝這回合被輸電（對戰模擬給）：招式變電屬性（Showdown electrify onModifyType 優先度 −2，在上面這些之後）
+  if (o.type) type = o.type;
   if (mk === 'rising-voltage' && terr === 'electric' && dGround) { power *= 2; notes.add(`${FIELD_ZH[terr]}威力 ×2`); }
   let [hits, hitNote] = o.bps ? [o.bps.length] : HITS[mk] || [1], pb = false;
   if (aab === 'skill-link' && hitNote === VAR_HITS) [hits, hitNote] = [5, use(aab) && `${abilZh(aab)}固定 5 下`];
@@ -306,7 +312,8 @@ function damageCalc(a, d, mk, o) {
     notes.add(aab === 'contrary' ? `出招前特攻 −1（${abilZh(aab)}）` : '出招前特攻 +1');
   }
   const dst = di === 2 ? d.st.def : d.st.spd;
-  let atk = statOf((foul ? D : A).bs[ai], asp, ai, anat);
+  // raw＝被力量平分、防守平分換掉的能力值（對戰模擬給，{ 能力索引: 值 }；Showdown storedStats），沒有照種族值、點數、性格算
+  let atk = (foul ? d.raw : a.raw)?.[ai] ?? statOf((foul ? D : A).bs[ai], asp, ai, anat);
   if (ast && !(r.crit && ast < 0) && !(dab === 'unaware' && use(dab))) atk = stageStat(atk, ast);
   if (aab === 'hustle' && cat === 'physical' && use(aab)) atk = pokeRound(atk * 3 / 2);
   const atMods = [];
@@ -322,7 +329,7 @@ function damageCalc(a, d, mk, o) {
   if (a.stakeout && aab === 'stakeout') atMods.push(use(aab) && 8192);
   if (ait.atk && family(A) === ait.mon) atMods.push(ait.atk);
   atk = Math.max(1, pokeRound(atk * chainMods(atMods, 410, 131072) / 4096));
-  let def = statOf(D.bs[di], dsp, di, dnat);
+  let def = d.raw?.[di] ?? statOf(D.bs[di], dsp, di, dnat);
   if (dst && IGNORE_DEF.has(mk)) notes.add('無視對手的能力變化');
   else if (dst && !(r.crit && dst > 0) && !(aab === 'unaware' && use(aab))) def = stageStat(def, dst);
   if (aab !== 'mega-sol' && ((wthr === 'sand' && di === 4 && dTy.includes('rock')) || (wthr === 'snow' && di === 2 && dTy.includes('ice')))) def = pokeRound(def * 3 / 2);
