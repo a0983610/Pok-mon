@@ -1,14 +1,18 @@
-// 一步一步和模擬 AI 對打（單打 3 對 3）：第 0 方＝玩家（人或 subagent 下指令），第 1 方＝AI（預設 tree:400＝模擬分頁「標準」）。
+// 一步一步和模擬 AI 對打（單打，各 6 隻選 3 隻）：第 0 方＝玩家（人或 subagent 下指令），第 1 方＝AI（預設 tree:400＝模擬分頁「標準」）。
 // 用途：讓「不是模擬引擎」的玩家打一場，看 AI 的選擇哪裡怪、玩家的選擇和 AI 建議哪裡不同，再用 mc 從那個局面實打驗證誰對。
-// 雙方都看得到對方的完整配置（同 tools/sim_ai.js 預設：AI 看得到對手的招式道具特性）。不需要 Showdown。
+// 選角時看得到對手的 6 隻、看不到對手帶誰；帶出場後雙方看得到對方帶的 3 隻的完整配置（同 tools/sim_ai.js 預設：AI 看得到對手的招式道具特性）。不需要 Showdown。
 // 用法（在 repo 根目錄；檔案＝這一局的紀錄 JSON，建議放 AgentData\temp\sim_play\）：
-//   node tools/sim_play.js new 檔案 [種子 20261118] [AI tree:400] [排名前幾名 60]
-//     隨機兩隊（同 sim_ai.js：單打前幾名、各 3 隻、同家族不重複、超級進化最多 1 隻、配招 OP.GG 預設、先發第一隻），印出第一個要選的局面
-//   node tools/sim_play.js show 檔案                 印出目前要選的局面（打完了就印結果）
+//   node tools/sim_play.js new 檔案 [種子 20261118] [AI tree:400] [排名前幾名 60] [隊伍 6]
+//     隨機兩隊（同 sim_ai.js：單打前幾名、同家族不重複、超級進化最多 1 隻、配招 OP.GG 預設、道具同一隊不重複）。
+//     隊伍 6（預設）＝各 6 隻：AI 照出戰選角（bringPlan 第 1 名的帶法與先發）帶 3 隻，印出雙方 6 隻給玩家選（見 bring）；
+//     隊伍 3＝直接各 3 隻、先發第一隻（2026-11-19 以前的做法），印出第一個要選的局面
+//   node tools/sim_play.js bring 檔案 先發編號 編號 編號 [理由…]   隊伍 6 的局：第 0 方帶哪 3 隻（[0]～[5]，第一個先發）
+//   node tools/sim_play.js show 檔案                 印出目前要選的局面（還沒選角就印雙方 6 隻；打完了就印結果）
 //   node tools/sim_play.js go 檔案 選項編號 [p隊伍編號] [理由…]
 //     第 0 方選「可選」裡的第幾個；用急速折返類（或被吼走）要換上誰可加 p0／p1／p2（隊伍編號，沒給照簡單規則 simGreedyPick）；
 //     理由會記進檔案（賽後 review 看）。AI 這一步早就在同一個局面選好了（雙方同時出），不會看你的選擇
-//   node tools/sim_play.js review 檔案              賽後：逐筆列第 0 方的選擇、理由，和 AI（同一次樹搜尋）建議第 0 方的出法比例、各選項評分、快速（ply1）的建議
+//   node tools/sim_play.js review 檔案              賽後：選角（第 0 方帶的和出戰選角會建議它帶的），再逐筆列第 0 方的選擇、理由，
+//     和 AI（同一次樹搜尋）建議第 0 方的出法比例、各選項評分、快速（ply1）的建議
 //   node tools/sim_play.js mc 檔案 選擇編號 [每格場數 60] [執行緒 4]
 //     從第幾個選擇（review 的 #）的局面，雙方選項的每種組合各實打 n 場：這一步照組合出，之後雙方都用快速（ply1）照亂數打完；
 //     各格共用同一組亂數（成對比較）。印第 0 方得分率（贏 1、平手 0.5）矩陣，再列雙方各選項對「對手照 AI 這次算的出法比例」
@@ -24,13 +28,19 @@ const FILES = ['base-stats.js', 'mons-data.js', 'js/engine/core.js', 'js/engine/
 const NAMES = ['MONS', 'MON', 'MOVES', 'TYPES', 'IDX', 'ITEMS', 'ABILS', 'FIELD_ZH', 'HITS', 'SIM_SUP', 'SIM_STATUS_ZH', 'SIM_HAZ_ZH', 'SIM_MAX_TURN', 'abilZh',
   'simMon', 'simItems', 'simStart', 'simTurn', 'simReplace', 'simPhase', 'simPhaseOpts', 'simDecide', 'simSearch', 'simGreedyPick', 'simRng', 'simHash', 'simKey',
   'simBaseKey', 'simCtx', 'simClone', 'simHit', 'simExp', 'simAcc', 'simSwitch', 'simSpeed', 'simFaster', 'simTypes', 'simWx', 'simTer', 'simWinner', 'simDraw',
-  'simPri', 'FLAG', 'SIM_SEC', 'SIM_RECOIL', 'SIM_DRAIN', 'SIM_STANCE'];
+  'simPri', 'FLAG', 'SIM_SEC', 'SIM_RECOIL', 'SIM_DRAIN', 'SIM_STANCE', 'bringPlan'];
+// 出戰選角（bringPlan）要用的 traitScan 在網頁的 js/ui/team.js（整個檔一載入就會碰畫面元素）：只取 THREAT_N 和 NO_WEATHER～traitScan 那一段（同 tools/sim_ai.js）
+function traitSrc(txt) {
+  const a = txt.indexOf('const NO_WEATHER'), b = txt.indexOf('\nconst warnShort'), t = txt.match(/^const THREAT_N = .*$/m);
+  if (a < 0 || b < a || !t) throw new Error('js/ui/team.js 找不到 traitScan 那一段（THREAT_N、NO_WEATHER～warnShort 之前），出戰選角用不了');
+  return t[0] + '\n' + txt.slice(a, b);
+}
 let E0;
 function engine() {
   if (E0) return E0;
   const g = { console };
   vm.createContext(g);
-  vm.runInContext(FILES.map(f => fs.readFileSync(path.join(R, f), 'utf8')).join('\n;\n')
+  vm.runInContext([...FILES.map(f => fs.readFileSync(path.join(R, f), 'utf8')), traitSrc(fs.readFileSync(path.join(R, 'js/ui/team.js'), 'utf8'))].join('\n;\n')
     + `\n;globalThis.E = { ${NAMES.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ')} };`, g);
   return E0 = g.E;
 }
@@ -38,15 +48,28 @@ const load = f => JSON.parse(fs.readFileSync(f, 'utf8'));
 const save = (f, G) => fs.writeFileSync(f, JSON.stringify(G, null, 1));
 
 // ---------- 組隊（同 tools/sim_ai.js 的 teams，一組） ----------
-function team2(seed, top) {
+function team2(seed, top, size) {
   const E = engine(), rnd = E.simRng(seed), pickOf = xs => xs[Math.floor(rnd() * xs.length)];
   const pool = E.MONS.filter(m => m.rank.s > 0 && m.rank.s <= top).map(m => m.key), fam = k => E.MON[k].base || k;
   const one = () => {
     const T = [];
-    while (T.length < 3) { const k = pickOf(pool); if (!T.some(x => fam(x) === fam(k)) && !(E.MON[k].base && T.some(x => E.MON[x].base))) T.push(k); }
+    while (T.length < size) { const k = pickOf(pool); if (!T.some(x => fam(x) === fam(k)) && !(E.MON[k].base && T.some(x => E.MON[x].base))) T.push(k); }
     return T;
   };
   return [one(), one()];
+}
+// 出戰選角（bringPlan）第 1 名的帶法：keys（6 隻）對上對手 opp（6 隻；看不到對手帶誰，雙方配招都照 OP.GG 常見）帶哪幾隻
+// （隊伍索引，先發排第一；同 simMyPlan）。隊伍裡超級進化最多 1 隻，不會遇到「只能進化一隻」
+function bringIdx(E, keys, opp) {
+  const plan = E.bringPlan(keys.map(k => ({ defs: E.MON[k].types, key: k })), opp.map(k => E.MON[k]), 's'), lead = plan.pick.js[0];
+  return [lead, ...plan.combos[0].idx.filter(j => j !== lead)];
+}
+// 雙方帶出場的 { keys 寶可夢 key（先發排第一）, items 道具 }：隊伍 6 的局照 G.pick（G.six 的索引），道具照 6 隻分配（同一隊不重複）再取帶的；
+// 隊伍 3 的局是 G.T，道具照 3 隻分配
+function lineup(E, G) {
+  if (!G.six) return G.T.map(keys => ({ keys, items: E.simItems(keys, 's') }));
+  if (!G.pick[0]) throw new Error('還沒選角：先用 bring 選第 0 方帶哪 3 隻');
+  return G.six.map((six, s) => { const items = E.simItems(six, 's'); return { keys: G.pick[s].map(j => six[j]), items: G.pick[s].map(j => items[j]) }; });
 }
 
 // ---------- AI 在一個局面的選擇 ----------
@@ -77,7 +100,7 @@ function decideAI(E, st, phase, G, di) {
 // stopAt＝停在第幾個局面（mc、audit 用，不管選了沒、含 auto）；回傳停下來的局面，或打完的 { over }。dirty＝這次有新算 AI 的選擇（要存檔）
 function replay(G, stopAt = Infinity) {
   const E = engine(), ctx = E.simCtx('s'), rnd = E.simRng(G.seed);
-  const st = E.simStart(G.T.map((keys, s) => { const items = E.simItems(keys, 's'); return { mons: keys.map((k, j) => E.simMon(k, undefined, items[j], s, 's')) }; }), true);
+  const st = E.simStart(lineup(E, G).map((x, s) => ({ mons: x.keys.map((k, j) => E.simMon(k, undefined, x.items[j], s, 's')) })), true);
   let di = 0, pin = null, logAt = 0, dirty = false;
   const pick = (c, s, hit) => s === 0 && pin != null && c.sd[0].mons[pin]?.hp > 0 && c.sd[0].act !== pin ? pin : E.simGreedyPick(ctx, c, s, hit);
   for (;;) {
@@ -163,15 +186,16 @@ function entryHurt(E, st, s, i) {
   return Math.max(0, h0 - Math.max(0, M.hp));
 }
 const descOf = (tab, k) => String(tab?.[k]?.[1] || '').replace(/\s+/g, '');
-function monBlock(E, ctx, st, s, i) {
-  const M = st.sd[s].mons[i], act = st.sd[s].act === i;
+// pre＝選角時的預覽（沒有誰在場上，不標場上／後排）
+function monBlock(E, ctx, st, s, i, pre = false) {
+  const M = st.sd[s].mons[i], act = !pre && st.sd[s].act === i;
   if (M.hp <= 0) return [`  [${i}] ${nameOf(E, M)}：倒下`];
   const boost = Object.entries(M.st).filter(([, v]) => v).map(([k, v]) => `${STAT_ZH[k] || k}${v > 0 ? '+' : ''}${v}`).join(' ');
   // 睡眠：每次輪到出招減 1（早起減 2），減完還大於 0 才繼續睡（同 simMove）
   const stt = M.status ? (E.SIM_STATUS_ZH[M.status] || M.status) + (M.status === 'slp' ? `（第 ${M.b.ab === 'early-bird' ? Math.ceil(M.slp / 2) : M.slp} 次輪到出招時醒來並行動）` : M.status === 'tox' ? `（計數 ${M.tox}，每回合扣的越來越多）`
     : M.status === 'frz' ? `（計數 ${M.frz}：每次輪到出招減 1，減到 0 一定融化，沒到 0 時每次 1/4 機率融化）` : '') : '';
   const bs = E.MON[M.fk || M.key]?.bs || E.MON[M.key].bs, mega = !!E.MON[M.key].base;
-  const L = [`  [${i}] ${act ? '★場上' : '後排'} ${nameOf(E, M)}（${E.simTypes(M).map(t => tz(E, t)).join('／')}）HP ${Math.max(0, M.hp)}/${M.max}（${pct(M.hp, M.max)}%）`
+  const L = [`  [${i}] ${pre ? '' : act ? '★場上 ' : '後排 '}${nameOf(E, M)}（${E.simTypes(M).map(t => tz(E, t)).join('／')}）HP ${Math.max(0, M.hp)}/${M.max}（${pct(M.hp, M.max)}%）`
     + (stt ? `｜${stt}` : '') + (boost ? `｜能力 ${boost}` : '') + `｜道具 ${M.item ? E.ITEMS?.[M.item]?.[0] || M.item : mega ? '超級石（已超級進化）' : '無'}｜特性 ${E.abilZh(M.b.ab) || M.b.ab}`
     + `｜速度 ${E.simSpeed(ctx, st, M)}｜種族值 ${bs.join('/')}`];
   L.push(`      特性：${descOf(E.ABILS, M.b.ab) || '（沒有說明）'}${M.item && descOf(E.ITEMS, M.item) ? `｜道具：${descOf(E.ITEMS, M.item)}` : ''}`);
@@ -190,7 +214,7 @@ function monBlock(E, ctx, st, s, i) {
     const desc = String(mv[4] || '').replace(/\s+/g, '').slice(0, 70), eff = effText(E, k);
     if (E.SIM_SUP[k]) { L.push(`${head}：${desc}`); continue; }
     L.push(`${head}：` + foes.map(([D, j]) => {
-      const fs = stanceForms(E, D), name = `[${j}]${nameOf(E, D)}${st.sd[1 - s].act === j ? '(場上)' : ''}`;
+      const fs = stanceForms(E, D), name = `[${j}]${nameOf(E, D)}${!pre && st.sd[1 - s].act === j ? '(場上)' : ''}`;
       return fs ? `${name} 盾牌形態 ${dmgText(E, ctx, st, atk, fs[0], k)}／刀劍形態 ${dmgText(E, ctx, st, atk, fs[1], k)}` : `${name} ${dmgText(E, ctx, st, atk, D, k)}`;
     }).join('｜'));
     L.push(`        說明：${desc}${eff ? `｜附加：${eff}` : ''}`);
@@ -252,8 +276,23 @@ function show(r, G) {
   out.push('（選擇編號是整局的局面編號；只有 AI 要選的局面（例如 AI 補位）不會給你看，所以編號會跳）');
   return out.join('\n');
 }
-// 走到下一個要選的局面並印出；有新算的 AI 選擇就存檔
+// 選角：雙方 6 隻（第 0 方的角度），每隻的配置、招式對對方每一隻的傷害（同局面的格式）。
+// 雙方 6 隻排成一個局面來算：simStart 開局時第一隻發動的出場效果（開天氣場地、變身、種子等）都不要，換回剛做好的寶可夢、清掉天氣場地
+function preview(G, file) {
+  const E = engine(), ctx = E.simCtx('s'), mons = G.six.map((six, s) => { const items = E.simItems(six, 's'); return six.map((k, j) => E.simMon(k, undefined, items[j], s, 's')); });
+  const st = E.simStart(mons.map(ms => ({ mons: ms })), false, []);
+  st.sd.forEach((x, s) => { x.mons = mons[s]; });
+  st.wx = st.ter = null;
+  const out = ['===== 選角：雙方各 6 隻，選 3 隻帶出場（第一隻先發） =====',
+    '（看得到對手的 6 隻、看不到對手帶哪 3 隻；AI 照出戰選角的建議帶，也看不到你帶誰。帶出場後雙方都看得到對方帶的 3 隻）',
+    '（傷害：同對戰中的格式，都是滿 HP、沒有能力變化、沒有天氣場地；出場特性（威嚇、開天氣場地等）沒算）'];
+  ['我方（你）', '對手（AI）'].forEach((who, s) => { out.push(`【${who}】`); st.sd[s].mons.forEach((_, i) => out.push(...monBlock(E, ctx, st, s, i, true))); });
+  out.push(`下指令：node tools/sim_play.js bring ${file} 先發編號 編號 編號 理由（我方方括號裡的 [0]～[5]）`);
+  return out.join('\n');
+}
+// 走到下一個要選的局面並印出（還沒選角就印選角）；有新算的 AI 選擇就存檔
 function advance(file, G) {
+  if (G.six && !G.pick[0]) { console.log(preview(G, file)); return; }
   const r = replay(G);
   if (r.over && !G.w) { G.w = r.E.simWinner(r.st); r.dirty = true; }
   if (r.dirty) save(file, G);
@@ -262,8 +301,14 @@ function advance(file, G) {
 
 // ---------- review：逐筆列第 0 方的選擇和 AI 的建議 ----------
 function review(G) {
-  const E = engine();
-  console.log(`AI＝${G.ai}；隊伍 我方 ${G.T[0].map(k => E.MON[k].zh).join('、')} vs AI ${G.T[1].map(k => E.MON[k].zh).join('、')}；結果 ${G.w === 0 ? '我方贏' : G.w === 1 ? 'AI 贏' : G.w == null ? '還沒打完' : '平手'}`);
+  const E = engine(), L = lineup(E, G), zh = keys => keys.map(k => E.MON[k].zh).join('、');
+  console.log(`AI＝${G.ai}；隊伍 我方 ${zh(L[0].keys)} vs AI ${zh(L[1].keys)}（先發排第一）；結果 ${G.w === 0 ? '我方贏' : G.w === 1 ? 'AI 贏' : G.w == null ? '還沒打完' : '平手'}`);
+  if (G.six) {
+    const sug = bringIdx(E, G.six[0], G.six[1]).map(j => G.six[0][j]);
+    console.log(`選角：雙方 6 隻 我方 ${zh(G.six[0])}｜AI ${zh(G.six[1])}`);
+    console.log(`  你帶 ${zh(L[0].keys)}；出戰選角會建議你帶 ${zh(sug)}${sug.join() === L[0].keys.join() ? '（一樣）' : '　★不同'}`);
+    if (G.bwhy) console.log(`  理由：${G.bwhy}`);
+  }
   // 標籤要局面才知道換成誰：重播一次，每個局面記下選項名稱
   const names = [];
   for (let i = 0; i < G.d.length; i++) {
@@ -403,12 +448,26 @@ async function audit(G, n, nw, sides) {
 
 async function main() {
   const [mode, file, ...a] = process.argv.slice(2);
-  if (!file) throw new Error('用法見 tools/sim_play.js 開頭：new／show／go／review／mc／audit');
+  if (!file) throw new Error('用法見 tools/sim_play.js 開頭：new／bring／show／go／review／mc／audit');
   if (mode === 'new') {
-    const seed = +(a[0] || 20261118), ai = a[1] || 'tree:400', top = +(a[2] || 60);
+    const seed = +(a[0] || 20261118), ai = a[1] || 'tree:400', top = +(a[2] || 60), size = +(a[3] || 6);
     if (!/^(ply1|tree:\d+)$/.test(ai)) throw new Error(`AI 寫 ply1 或 tree:次數（例如 tree:400），收到「${ai}」`);
+    if (![3, 6].includes(size)) throw new Error(`隊伍寫 6（各 6 隻選 3 隻）或 3（直接 3 對 3），收到「${a[3]}」`);
     fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
-    const G = { seed, ai, top, T: team2(seed, top), d: [] };
+    const T = team2(seed, top, size);
+    // 隊伍 6：six＝雙方 6 隻，pick＝雙方帶的（six 的索引，先發排第一；AI 的現在就照出戰選角選好，第 0 方的等 bring）
+    const G = size === 6 ? { seed, ai, top, six: T, pick: [null, bringIdx(engine(), T[1], T[0])], d: [] } : { seed, ai, top, T, d: [] };
+    save(file, G);
+    advance(file, G);
+  } else if (mode === 'bring') {
+    const G = load(file);
+    if (!G.six) throw new Error('這局是直接 3 對 3（new 的隊伍 3），沒有選角');
+    if (G.pick[0]) throw new Error('這局已經選過角了');
+    const js = a.slice(0, 3).map(Number);
+    if (js.length < 3 || js.some(j => !Number.isInteger(j) || !G.six[0][j]) || new Set(js).size < 3)
+      throw new Error(`要寫 3 個不同的隊伍編號（我方方括號裡的 [0]～[${G.six[0].length - 1}]，第一個先發），收到「${a.slice(0, 3).join(' ')}」`);
+    G.pick[0] = js;
+    if (a.length > 3) G.bwhy = a.slice(3).join(' ');
     save(file, G);
     advance(file, G);
   } else if (mode === 'show') advance(file, load(file));
@@ -435,5 +494,5 @@ async function main() {
     const G = load(file), n = +(a[0] || 60), nw = Math.max(1, Math.min(+(a[1] || 4), os.cpus().length - 1)), sides = a[2] === 'all' ? [1, 0] : [1];
     if (!n || a[2] && !['ai', 'all'].includes(a[2])) throw new Error('用法：node tools/sim_play.js audit 檔案 [每個選項場數 60] [執行緒 4] [ai／all]');
     await audit(G, n, nw, sides);
-  } else throw new Error('用法見 tools/sim_play.js 開頭：new／show／go／review／mc／audit');
+  } else throw new Error('用法見 tools/sim_play.js 開頭：new／bring／show／go／review／mc／audit');
 }
