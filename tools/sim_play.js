@@ -203,16 +203,20 @@ function selfText(E, A, D, k, dealt) {
   return xs.length ? `，${xs.join('，')}` : '';
 }
 // 換下場就清掉的狀態（M.v）：看得懂的寫中文，程式內部的記錄不列；沒列在這裡的照欄位名稱列
-const V_HIDE = new Set(['mt', 'got', 'up', 'metro', 'fc', 'mim', 'asw', 'aswUsed', 'protUsed', 'stall', 'fickle', 'pt', 'types', 'encK', 'fling', 'b0']);
+// hurt／down／elec 是「這回合」的記號（惡意追擊、洩憤、輸電，存回合數）、aria 出招完就清，回合之間看沒有意義
+const V_HIDE = new Set(['mt', 'got', 'up', 'down', 'hurt', 'elec', 'aria', 'metro', 'fc', 'mim', 'asw', 'aswUsed', 'protUsed', 'stall', 'fickle', 'pt', 'types', 'encK', 'fling', 'b0']);
+const STAT_IDX_ZH = ['HP', '攻擊', '防禦', '特攻', '特防', '速度'];
 const V_ZH = { db: '同命中（下次出招前被打倒，打倒牠的也會倒下）', taunt: '被挑釁', seed: '被寄生種子', curse: '被詛咒', yawn: '打哈欠（回合結束睡著）', focus: '集氣', charge: '充電', trap: '不能換人',
   prot: '守住中', endure: '挺住', conf: '混亂', flinch: '畏縮', octo: '被蛸固纏住', shackle: '被縫影縫住', hblock: '回復封鎖', tchop: '不能用聲音招式',
   smack: '被擊落（在地面）', mrise: '電磁飄浮', mini: '變小', attract: '著迷', salt: '鹽醃', syrup: '糖漿炸彈', impr: '封印', gastro: '特性失效',
   add: '加上了屬性', spe: '速度互換過', roost: '羽棲（這回合失去飛行）', glaive: '巨劍突擊後（受到傷害 ×2）', ff: '引火發動', unb: '輕裝發動',
-  hangry: '飽了又餓（空腹）', cud: '反芻', beak: '加熱鳥嘴', fallen: '大將' };
+  hangry: '飽了又餓（空腹）', cud: '反芻', beak: '加熱鳥嘴', fallen: '大將', ingrain: '扎根（每回合結束回 1/16、不能換人）', torment: '被無理取鬧（不能連續用同一招）' };
 function volText(E, M) {
   return Object.entries(M.v).filter(([k, x]) => x && !V_HIDE.has(k)).map(([k, x]) =>
     k === 'sub' ? `替身（剩 ${pct(x, M.max)}%）` : k === 'stock' ? `蓄力 ${x} 次` : k === 'dis' ? `${E.MOVES[x.k]?.[0] || x.k}被定身` : k === 'enc' ? `被再來一次（只能用${E.MOVES[M.v.encK]?.[0] || ''}）`
-      : k === 'rage' ? `逆鱗類鎖住${E.MOVES[x.k]?.[0] || ''}` : k === 'bind' ? '被綁住' : k === 'taunt' && typeof x === 'number' ? `被挑釁（剩 ${x} 回合）` : V_ZH[k] || k);
+      : k === 'rage' ? `逆鱗類鎖住${E.MOVES[x.k]?.[0] || ''}` : k === 'bind' ? '被綁住' : k === 'taunt' && typeof x === 'number' ? `被挑釁（剩 ${x} 回合）`
+      // 滅亡之歌：每回合結束減 1，減到 0 倒下（simEnd）；力量／防守平分：換掉的能力值（v.raw，鍵是 HP～速度的索引）
+      : k === 'perish' ? `滅亡之歌（再 ${x} 個回合結束時倒下）` : k === 'raw' ? `能力值被平分過（${Object.entries(x).map(([n, v]) => `${STAT_IDX_ZH[n] || n} ${v}`).join('、')}）` : V_ZH[k] || k);
 }
 // 招式的附加效果（SIM_SEC：機率＋異常／畏縮／混亂／能力變化）、反作用力與吸血的比例
 function effText(E, k) {
@@ -228,13 +232,14 @@ function effText(E, k) {
 // 特性戰鬥切換（堅盾劍怪）：出招時變刀劍形態、王者盾牌變盾牌形態（同 simStance）；回傳 [盾牌形態, 刀劍形態] 的複本，不是就 null
 const stanceForms = (E, M) => M.b.ab === 'stance-change' && !M.tf && Object.values(E.SIM_STANCE).includes(M.key)
   ? [{ ...M, fk: E.SIM_STANCE.shield }, { ...M, fk: E.SIM_STANCE.blade }] : null;
-// 第 s 方隊伍第 i 隻換上場會吃多少（隱形岩、撒菱…）：在複本上換一次看 HP 少多少
-function entryHurt(E, st, s, i) {
+// 第 s 方隊伍第 i 隻換上場會吃多少（隱形岩、撒菱…）：在複本上換一次看 HP 少多少；回傳 { c 換完的局面複本, M 複本裡的那隻, h 吃了多少 }
+function entryClone(E, st, s, i) {
   const c = E.simClone(st), M = c.sd[s].mons[i], h0 = M.hp;
   c.log = null;
   E.simSwitch(c, s, i, null);
-  return Math.max(0, h0 - Math.max(0, M.hp));
+  return { c, M, h: Math.max(0, h0 - Math.max(0, M.hp)) };
 }
+const entryHurt = (E, st, s, i) => entryClone(E, st, s, i).h;
 const descOf = (tab, k) => String(tab?.[k]?.[1] || '').replace(/\s+/g, '');
 // 資料沒有說明（或沒有中文名）的特性（冠軍版的超級進化）：[中文名（資料有就空字串）, 模擬怎麼算]，照 js/engine/sim.js、damage.js 的處理寫
 const ABIL_NOTE = {
@@ -253,6 +258,10 @@ const ABIL_NOTE = {
   'eelevate': ['', '（模擬沒有處理這個特性）'],
 };
 const abName = (E, k) => E.abilZh(k) || ABIL_NOTE[k]?.[0] || k;
+// 資料有說明、但漏寫模擬有算的效果（接在說明後面）
+const ABIL_ADD = { 'thermal-exchange': '也不會陷入灼傷（資料的說明沒寫，模擬有算：鬼火等一定失敗）' };
+// 滿 HP 才發動的（氣勢披帶、結實）：不滿 HP 時標出來
+const fullOnly = M => M.hp < M.max ? '（不是滿 HP，現在不會發動）' : '';
 // pre＝選角時的預覽（沒有誰在場上，不標場上／後排）
 function monBlock(E, ctx, st, s, i, pre = false) {
   const M = st.sd[s].mons[i], act = !pre && st.sd[s].act === i;
@@ -263,15 +272,23 @@ function monBlock(E, ctx, st, s, i, pre = false) {
     : M.status === 'frz' ? `（計數 ${M.frz}：每次輪到出招減 1，減到 0 一定融化，沒到 0 時每次 1/4 機率融化）` : '') : '';
   const bs = E.MON[M.fk || M.key]?.bs || E.MON[M.key].bs, mega = !!E.MON[M.key].base;
   const L = [`  [${i}] ${pre ? '' : act ? '★場上 ' : '後排 '}${nameOf(E, M)}（${E.simTypes(M).map(t => tz(E, t)).join('／')}）HP ${Math.max(0, M.hp)}/${M.max}（${pct(M.hp, M.max)}%）`
-    + (stt ? `｜${stt}` : '') + (boost ? `｜能力 ${boost}` : '') + `｜道具 ${M.item ? E.ITEMS?.[M.item]?.[0] || M.item : mega ? '超級石（已超級進化）' : '無'}｜特性 ${abName(E, M.b.ab)}`
-    + `｜速度 ${E.simSpeed(ctx, st, M)}｜種族值 ${bs.join('/')}`];
-  L.push(`      特性：${descOf(E.ABILS, M.b.ab) || ABIL_NOTE[M.b.ab]?.[1] || '（沒有說明）'}${M.item && descOf(E.ITEMS, M.item) ? `｜道具：${descOf(E.ITEMS, M.item)}` : ''}`);
+    + (stt ? `｜${stt}` : '') + (boost ? `｜能力 ${boost}` : '') + `｜道具 ${M.item ? E.ITEMS?.[M.item]?.[0] || M.item : mega ? '超級石（已超級進化）' : '無'}${M.item === 'focus-sash' ? fullOnly(M) : ''}`
+    + `｜特性 ${abName(E, M.b.ab)}${M.b.ab === 'sturdy' ? fullOnly(M) : ''}｜速度 ${E.simSpeed(ctx, st, M)}｜種族值 ${bs.join('/')}`];
+  L.push(`      特性：${descOf(E.ABILS, M.b.ab) || ABIL_NOTE[M.b.ab]?.[1] || '（沒有說明）'}${ABIL_ADD[M.b.ab] || ''}${M.item && descOf(E.ITEMS, M.item) ? `｜道具：${descOf(E.ITEMS, M.item)}` : ''}`);
   const extra = [M.lock && `講究鎖住${E.MOVES[M.lock]?.[0]}`, M.chg && `蓄力中${E.MOVES[M.chg]?.[0]}`, M.rech && '下回合要休息', act && M.last && `上一招${E.simMoveZh(M.last)}`,
     ...(act ? volText(E, M) : [])].filter(Boolean);
   if (extra.length) L.push(`      狀態：${extra.join('、')}`);
   const foes = st.sd[1 - s].mons.map((D, j) => [D, j]).filter(([D]) => D.hp > 0);
   // 戰鬥切換：自己出攻擊招時照刀劍形態算；對手是戰鬥切換的，盾牌、刀劍兩種形態都列（牠先出招就變刀劍形態挨打）
   const myForms = stanceForms(E, M), atk = myForms ? myForms[1] : M;
+  // 對手後排換上來會先吃場地傷害（隱形岩、撒菱…）的：在換完的局面複本上再算一次（HP 變少、氣勢披帶／結實／多重鱗片可能失效、威嚇等出場效果也算進去）
+  const after = new Map();
+  if (!pre) foes.forEach(([, j]) => {
+    if (st.sd[1 - s].act === j) return;
+    const x = entryClone(E, st, 1 - s, j), A = x.c.sd[s].mons[i];
+    if (x.h) after.set(j, { ...x, A: stanceForms(E, A)?.[1] || A });
+  });
+  const vs = (st0, A, D, k) => { const fs = stanceForms(E, D); return fs ? `盾牌形態 ${dmgText(E, ctx, st0, A, fs[0], k)}／刀劍形態 ${dmgText(E, ctx, st0, A, fs[1], k)}` : dmgText(E, ctx, st0, A, D, k); };
   if (myForms) L.push('      （戰鬥切換：出攻擊招時變刀劍形態，下面自己的傷害照刀劍形態算；用王者盾牌變回盾牌形態）');
   for (const k of M.moves) {
     const mv = E.MOVES[k], acc = mv[6] ?? 100, pri = E.simPri(st, M, k), pri0 = E.simPri(st, { ...M, b: { ...M.b, ab: '' } }, k);
@@ -283,8 +300,11 @@ function monBlock(E, ctx, st, s, i, pre = false) {
     const desc = String(mv[4] || '').replace(/\s+/g, '').slice(0, 70), eff = effText(E, k);
     if (E.SIM_SUP[k]) { L.push(`${head}：${desc}`); continue; }
     L.push(`${head}：` + foes.map(([D, j]) => {
-      const fs = stanceForms(E, D), name = `[${j}]${nameOf(E, D)}${!pre && st.sd[1 - s].act === j ? '(場上)' : ''}`;
-      return fs ? `${name} 盾牌形態 ${dmgText(E, ctx, st, atk, fs[0], k)}／刀劍形態 ${dmgText(E, ctx, st, atk, fs[1], k)}` : `${name} ${dmgText(E, ctx, st, atk, D, k)}`;
+      // 換上來之後的結果和現在一樣（打倒機率等都沒變）就不重複列
+      const name = `[${j}]${nameOf(E, D)}${!pre && st.sd[1 - s].act === j ? '(場上)' : ''}`, x = after.get(j), now = vs(st, atk, D, k);
+      const later = x && x.M.hp > 0 ? vs(x.c, x.A, x.M, k) : now;
+      const aft = !x ? '' : x.M.hp <= 0 ? '；換上來就被場地傷害打倒' : later !== now ? `；換上來先吃場地 ${pct(x.h, D.max)}% 後 ${later}` : '';
+      return `${name} ${now}${aft}`;
     }).join('｜'));
     L.push(`        說明：${desc}${eff ? `｜附加：${eff}` : ''}`);
   }
