@@ -18,8 +18,13 @@ function renderDexList() {
       + `<span class="meta">${m.rank[team.fmt] ? `#${m.rank[team.fmt]}` : '無排名'}</span></button>`).join('')}</div>`
       : '<p class="muted small">名單裡沒有這種屬性組合的寶可夢。</p>');
 }
+// 有效種族值：合計扣掉攻擊、特攻較低的那項（通常只用其中一種攻擊；2026-11-19 使用者要的）
+const dexEffText = m => {
+  const [a, c] = [m.bs[1], m.bs[3]], tot = m.bs.reduce((s, v) => s + v, 0);
+  return `有效 ${tot - Math.min(a, c)}，扣掉${a === c ? `攻擊特攻同為 ${a}` : a < c ? `較低的攻擊 ${a}` : `較低的特攻 ${c}`}`;
+};
 // 種族值長條（200 以上畫滿）：HP／攻擊／防禦、特攻／特防、速度三種顏色
-const dexStatsHTML = m => `<div class="dx-sub">種族值（合計 ${m.bs.reduce((s, v) => s + v, 0)}）</div><div class="dx-st">`
+const dexStatsHTML = m => `<div class="dx-sub">種族值（合計 ${m.bs.reduce((s, v) => s + v, 0)}・${dexEffText(m)}）</div><div class="dx-st">`
   + m.bs.map((v, k) => `<span>${STAT_ZH[k]}</span><b>${v}</b><span class="dx-bar${k === 5 ? ' spe' : k >= 3 ? ' sp' : ''}"><i style="width:${Math.min(100, v / 2)}%"></i></span>`).join('') + '</div>';
 // 特性：超級進化是固定的特性；其他列可能的特性（LEARN，超級進化沿用原型的）。都附效果說明
 function dexAbilsHTML(m) {
