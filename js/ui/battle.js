@@ -5,7 +5,7 @@
 // st：場上位置的能力變化 [攻擊, 防禦, 特攻, 特防, 速度]（換下場就清掉，同遊戲）；hp：我方各格剩下的 HP（null＝全滿）；ohp：對手各格剩下的 HP %；
 // item：對手各格標的道具（空＝用預設 btOppItems、'-'＝沒有道具）；ab：對手各格選的特性（空＝用 defAbOf 的預設）；
 // form：各格選的型態（空＝隊伍分析／出戰選角裡的那個，用來切換超級進化前後）；weather、terrain、tr 戲法空間、tw 有順風的一方（'me'／'opp'）；
-// bring：我方這場帶的隊伍格子（null＝照出戰選角第 1 名組合，見 btBrought）；seen：對手各格出場過沒（放上場就標）；
+// bring：我方這場帶的隊伍格子（null＝照出戰選角的建議帶法，見 btBrought）；seen：對手各格出場過沒（放上場就標）；
 // used：對手各格用過的招式 key（見 btOppSet）；osp：對手各格改過的能力點數／性格 { sp?, nat? }（沒改的那項照 Showdown 最常見，null＝都沒改）；
 // keys：記錄時各格的寶可夢 key（隊伍或對手換了寶可夢，那格的紀錄就清掉）；
 // status：雙方各格的異常狀態（BT_STATUS，換下場不會好）；walls：雙方的牆（BT_WALLS）；haz：雙方場地上的撒菱類（BT_HAZ 各幾層）；
@@ -54,14 +54,16 @@ function syncBattle() {
     battle[side].forEach((j, p) => { if (j === i) { battle[side][p] = -1; battle.st[side][p] = [0, 0, 0, 0, 0]; } });
   }));
 }
-// 我方這場帶的隊伍格子（只算挑了寶可夢的）：自己改過就照改的，不然照出戰選角第 1 名組合（bringPlan；還沒填對手就是全部）。
-// 隊伍、配招、對手、單打／雙打沒變就不重算
+// 我方這場帶的隊伍格子（只算挑了寶可夢的）：自己改過就照改的，不然照出戰選角的建議帶法（單打「用模擬比較帶法」算好的 bSimBest），
+// 還沒算好或雙打照第 1 名組合（bringPlan；還沒填對手就是全部）。第 1 名組合在隊伍、配招、對手、單打／雙打沒變時不重算
 const btPlan = { k: null, v: [] };
 function btBrought() {
   const named = team.mons.map((k, i) => k ? i : -1).filter(i => i >= 0);
   if (battle.bring) return battle.bring.filter(i => team.mons[i]);
   const members = team.slots.map((s, i) => [s, i]).filter(([s]) => s.length), opps = bring.opp.filter(k => MON[k]).map(k => MON[k]);
   if (!opps.length) return named;
+  const b = bSimBest();
+  if (b) return b.slots.filter(i => team.mons[i]).sort((x, y) => x - y);
   const k = JSON.stringify([team.slots, team.mons, team.sets, bring.opp, team.fmt]);
   if (btPlan.k !== k) {
     const plan = bringPlan(members.map(([s, i]) => ({ defs: s, key: team.mons[i], set: team.sets[i] })), opps, team.fmt);
@@ -249,7 +251,7 @@ function btPickHTML(side) {
   const me = side === 'me', list = btList(side), fold = 'pick.' + side;
   const has = me ? (b => i => b.includes(i))(btBrought()) : i => battle.seen[i];
   const names = list.map((k, i) => k && has(i) ? MON[btKey(side, i)].zh : '').filter(Boolean);
-  const head = me ? `這場帶的（${battle.bring ? '自己選的' : bring.opp.some(Boolean) ? '照出戰選角第 1 名' : '還沒填對手，全部列出'}）`
+  const head = me ? `這場帶的（${battle.bring ? '自己選的' : bring.opp.some(Boolean) ? (bSimBest() ? '照出戰選角的模擬比較' : '照出戰選角第 1 名') : '還沒填對手，全部列出'}）`
     : `對手出場過的（${names.length}／${BRING_N[team.fmt]}，放上場就會標）`;
   const guess = me ? '' : btGuessText();
   return `<details class="bt-pick" data-fold="${fold}"${btFold[fold] ? ' open' : ''}><summary>${head}：${names.join('、') || '（還沒有）'}${guess ? `・${guess}` : ''}</summary><div class="bt-bench">`
@@ -575,7 +577,7 @@ function btResultHTML() {
     + '換上來的照變成那隻對手算（連牠目前的能力變化）。'
     + '上方場上對位的「⚠ 先動就打得倒」只要有機率一擊就警告（後面寫機率），換人的 ⚠ 和幾下打倒照出戰選角取機率一半以上的，所以亂數一擊不到一半時只有上方會警告。'
     + '對手按「打中」「實際」的招式會標成用過，也可以在上方「用過的招式」自己點；標滿 4 招就只算這 4 招，沒滿的用使用率高的補滿 4 招。'
-    + '下方只列這場會出場的：我方列「這場帶的」（預設照出戰選角第 1 名組合，可以點開改），對手出場過的到了帶出場的隻數（單打 3、雙打 4）就不列其他的。'
+    + '下方只列這場會出場的：我方列「這場帶的」（預設照出戰選角的建議帶法：單打用「用模擬比較帶法」算好的，還沒算好或雙打照第 1 名組合；可以點開改），對手出場過的到了帶出場的隻數（單打 3、雙打 4）就不列其他的。'
     + '「對手出場過的」後面的「猜」照「出戰選角」的「對手可能帶的」：還沒有出場的猜帶法和先發，有出場的就從包含出場過的帶法裡挑第一種，只是參考。</p>';
 }
 // ----- 推薦出招：照目前場上狀況跑對戰模擬的樹搜尋（同「模擬對戰」的推演，只做單打） -----
@@ -716,6 +718,7 @@ function renderBattle() {
   $('#btResult').innerHTML = btResultHTML();
   btRecUpdate();
   pBgFlush();
+  bSimAuto();
   saveState();
 }
 // 放上場：放進選中的位置（原本在別的位置就移過來），那個位置的能力變化清掉，再跳到下一個空位置；已在場上就只選中牠的位置。對手放上場就標出場過。

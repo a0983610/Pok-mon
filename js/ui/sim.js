@@ -1,5 +1,6 @@
 // ---------- 對戰模擬 ----------
-// 我方帶出場：sel 點選的隊伍格子（點的順序）、lead 先發的格子、evo 超級進化的格子；沒點過（sel 是 null）用出戰選角的建議（simMyPlan）。
+// 我方帶出場：sel 點選的隊伍格子（點的順序）、lead 先發的格子、evo 超級進化的格子；沒點過（sel 是 null）用出戰選角的建議
+// （「用模擬比較帶法」算好的 bSimBest，還沒算好照第 1 名 simMyPlan）。
 // k 對手每種帶法打幾場、algo 決策方式（這兩個是收合的「賽前：對手每一種帶法的勝率」用）；run 模擬中（{ stop }）、res 上一次的結果、
 // tree 一步一步推演（點對手先發開始，或賽前結果的「看怎麼打」；這三個不存網址）
 const SIM_KS = [10, 30, 100];
@@ -37,7 +38,7 @@ function simMyPick() {
     const sel = sim.sel.filter(i => team.mons[i]), lead = sel.includes(sim.lead) ? sim.lead : sel[0];
     return { slots: lead == null ? [] : [lead, ...sel.filter(i => i !== lead)], evo: sim.evo, custom: true };
   }
-  const mine = simMine(), p = simMyPlan(mine, bring.opp, 's');
+  const mine = simMine(), p = bSimBest() || simMyPlan(mine, bring.opp, 's');
   return { ...(p || { slots: mine.slice(0, simNeedN()).map(x => x.slot), evo: -1 }), custom: false };
 }
 // 開始自己點：從目前的帶法（建議的）接著改
@@ -87,6 +88,7 @@ function renderSim() {
   // 正在填「改成實戰的結果」時不重畫推演（賽前整批跑完會呼叫這裡，填到一半的會被洗掉；推演的內容和這裡無關）
   if (!sim.tree?.edit) renderSimTree();
   pBgFlush();
+  bSimAuto();
   saveState();
 }
 // 背景計算（js/engine/sim-worker.js）開幾個：電腦的執行緒數減 1（留一個給畫面），最多 SIM_WK_MAX；
