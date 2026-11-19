@@ -2,8 +2,9 @@
 // 用途：讓「不是模擬引擎」的玩家打一場，看 AI 的選擇哪裡怪、玩家的選擇和 AI 建議哪裡不同，再用 mc 從那個局面實打驗證誰對。
 // 選角時看得到對手的 6 隻、看不到對手帶誰；帶出場後雙方看得到對方帶的 3 隻的完整配置（同 tools/sim_ai.js 預設：AI 看得到對手的招式道具特性）。不需要 Showdown。
 // 用法（在 repo 根目錄；檔案＝這一局的紀錄 JSON，建議放 AgentData\temp\sim_play\）：
-//   node tools/sim_play.js new 檔案 [種子 20261118] [AI tree:400] [排名前幾名 60] [隊伍 6]
+//   node tools/sim_play.js new 檔案 [種子 20261118] [AI tree:400] [排名前幾名 60] [隊伍 6] [swap]
 //     隨機兩隊（同 sim_ai.js：單打前幾名、同家族不重複、超級進化最多 1 隻、配招 Showdown 預設、道具同一隊不重複）。
+//     swap＝同種子的兩隊交換（玩家拿原本 AI 那隊），同一組隊伍打兩局、交換再打一局，看強弱不受隊伍好壞影響。
 //     隊伍 6（預設）＝各 6 隻：AI 用模擬選帶法（bringSim，單執行緒約 1～3 分鐘）帶 3 隻，印出雙方 6 隻給玩家選（見 bring）；
 //     隊伍 3＝直接各 3 隻、先發第一隻（2026-11-19 以前的做法），印出第一個要選的局面
 //   node tools/sim_play.js bring 檔案 先發編號 編號 編號 [理由…]   隊伍 6 的局：第 0 方帶哪 3 隻（[0]～[5]，第一個先發）
@@ -526,11 +527,13 @@ async function main() {
   const [mode, file, ...a] = process.argv.slice(2);
   if (!file) throw new Error('用法見 tools/sim_play.js 開頭：new／bring／show／go／review／mc／audit');
   if (mode === 'new') {
-    const seed = +(a[0] || 20261118), ai = a[1] || 'tree:400', top = +(a[2] || 60), size = +(a[3] || 6);
+    const seed = +(a[0] || 20261118), ai = a[1] || 'tree:400', top = +(a[2] || 60), size = +(a[3] || 6), swap = a[4] === 'swap';
     if (!/^(ply1|tree:\d+)$/.test(ai)) throw new Error(`AI 寫 ply1 或 tree:次數（例如 tree:400），收到「${ai}」`);
     if (![3, 6].includes(size)) throw new Error(`隊伍寫 6（各 6 隻選 3 隻）或 3（直接 3 對 3），收到「${a[3]}」`);
+    if (a[4] && !swap) throw new Error(`第 5 個參數只能寫 swap（兩隊交換），收到「${a[4]}」`);
     fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
     const T = team2(seed, top, size);
+    if (swap) T.reverse();
     // 隊伍 6：six＝雙方 6 隻，pick＝雙方帶的（six 的索引，先發排第一；AI 的現在就用模擬選好（bsim 記選了第幾個候補與各候補得分率），第 0 方的等 bring）
     let G;
     if (size === 6) {
@@ -538,6 +541,7 @@ async function main() {
       const b = bringSim(engine(), T, 1, seed);
       G = { seed, ai, top, six: T, pick: [null, b.js], bsim: { at: b.at, sc: b.sc }, d: [] };
     } else G = { seed, ai, top, T, d: [] };
+    if (swap) G.swap = true;
     save(file, G);
     advance(file, G);
   } else if (mode === 'bring') {
