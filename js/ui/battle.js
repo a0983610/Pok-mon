@@ -56,7 +56,7 @@ function syncBattle() {
 }
 // 我方這場帶的隊伍格子（只算挑了寶可夢的）：自己改過就照改的，不然照出戰選角的建議帶法（單打「用模擬比較帶法」算好的 bSimBest），
 // 還沒算好或雙打照第 1 名組合（bringPlan；還沒填對手就是全部）。第 1 名組合在隊伍、配招、對手、單打／雙打沒變時不重算
-const btPlan = { k: null, v: [] };
+const btPlan = { k: null, v: [], lead: [] };
 function btBrought() {
   const named = team.mons.map((k, i) => k ? i : -1).filter(i => i >= 0);
   if (battle.bring) return battle.bring.filter(i => team.mons[i]);
@@ -67,7 +67,7 @@ function btBrought() {
   const k = JSON.stringify([team.slots, team.mons, team.sets, bring.opp, team.fmt]);
   if (btPlan.k !== k) {
     const plan = bringPlan(members.map(([s, i]) => ({ defs: s, key: team.mons[i], set: team.sets[i] })), opps, team.fmt);
-    Object.assign(btPlan, { k, v: plan.combos[0].idx.map(j => members[j][1]) });
+    Object.assign(btPlan, { k, v: plan.combos[0].idx.map(j => members[j][1]), lead: plan.pick.js.map(j => members[j][1]) });
   }
   return btPlan.v.filter(i => team.mons[i]);
 }
@@ -183,15 +183,20 @@ function btPosHTML(side, p) {
   const hp = `aria-label="剩下的 HP${me ? '' : ' %'}" min="0" max="${max}" step="1" value="${v}" data-bhp="${side}" data-i="${i}"`;
   // 我方帶的道具（登錄的或預設；切回原型的超級進化沒有）：用掉了、被拍落就點「道具沒了」，之後照沒道具算（拍落不加成）
   const it0 = me && b.key === team.mons[i] ? battler(b.key, team.fmt, team.sets[i]).item : '';
+  const fold = `${side}.${p}`, itemZh = m.base ? '超級石' : b.item ? `${ITEMS[b.item][0]}${battle.item[i] ? '' : '（預設）'}` : '沒有道具';
+  // 對手的特性、道具、能力點數、性格平常不用改：收成一行摘要，點開才改（2026-11-19 使用者選「對手配置收成一行」；預設收起，開合記在 btFold）
+  const top = me ? null : topSpread(b.key, team.fmt), o = battle.osp[i] || {}, cfg = 'cfg.' + fold;
+  const cfgSum = [abilZh(b.ab), itemZh, top && spText(o.sp || top.sp), top && natText(o.nat || top.nat)].filter(Boolean).join('・');
   const info = me ? `<div class="meta bt-info">${team.sets[i] ? '照登錄的配招' : '沒登錄配招，照預設'}・${abilZh(b.ab) || '沒有特性統計'}`
       + `${it0 ? `・${ITEMS[it0][0]}${battle.noItem[i] ? '（沒了）' : ''}<button class="mini" data-bnoitem="${i}" aria-pressed="${battle.noItem[i]}">道具沒了</button>` : ''}</div>`
-    : `<div class="c-f"><span class="c-l">特性</span><select class="sel" data-bab="${i}" aria-label="特性">${abilOptions(BT_REL, b.key, b.ab)}</select></div>`
+    : `<details class="bt-cfg" data-fold="${cfg}"${btFold[cfg] ? ' open' : ''}><summary>配置：${cfgSum}（點開改）</summary>`
+      + `<div class="c-f"><span class="c-l">特性</span><select class="sel" data-bab="${i}" aria-label="特性">${abilOptions(BT_REL, b.key, b.ab)}</select></div>`
       + `<div class="c-f"><span class="c-l">道具</span><select class="sel" data-bitem="${i}" aria-label="道具"${m.base ? ' disabled' : ''}>${btItemOptions(i, b.key)}</select></div>`
-      + btSpreadHTML(i, b.key) + btUsedHTML(i, b.key);
+      + btSpreadHTML(i, b.key) + '</details>' + btUsedHTML(i, b.key);
   // 收起時的摘要：異常狀態、不是 0 的能力變化、特性、道具（對手另外標改過的點數、用過幾招）
-  const s = battle.st[side][p], fold = `${side}.${p}`, sta = battle.status[side][i];
+  const s = battle.st[side][p], sta = battle.status[side][i];
   const sum = [sta && BT_STATUS.find(([k]) => k === sta)[1], BT_STATS.map(([, zh], n) => s[n] ? `${zh} ${stgText(s[n])}` : '').filter(Boolean).join('・') || '能力變化都是 0', abilZh(b.ab),
-    me ? b.item ? ITEMS[b.item][0] : it0 && '道具沒了' : m.base ? '超級石' : b.item ? `${ITEMS[b.item][0]}${battle.item[i] ? '' : '（預設）'}` : '沒有道具',
+    me ? b.item ? ITEMS[b.item][0] : it0 && '道具沒了' : itemZh,
     !me && battle.osp[i] && '點數／性格改過', !me && battle.used[i].length && `用過 ${battle.used[i].length} 招`].filter(Boolean).join('・');
   const status = `<div class="c-f"><span class="c-l">異常狀態</span><div class="seg">${BT_STATUS.map(([k, zh]) =>
     `<button data-bstat="${side}.${i}" data-v="${k}" aria-pressed="${sta === k}">${zh}</button>`).join('')}</div></div>`;
@@ -440,7 +445,7 @@ function btSwapHTML(opps, f) {
   const bench = btBench(), alive = opps.filter(O => O.cur);
   if (!bench.length || !alive.length) return '';
   const n = x => x < 9 ? `${x} 下` : '四下打不倒', fmt = team.fmt;
-  return `<div class="res-head">換人<span class="muted small">（後排換上來對上場上的對手）</span></div>`
+  return `<div class="res-head" id="btSwap">換人<span class="muted small">（後排換上來對上場上的對手）</span></div>`
     + alive.map(O => {
       const om = btTfName(O);
       const rows = bench.map(i => {
@@ -539,7 +544,7 @@ function btResultHTML() {
     ...battle.tw.map(s => s === 'me' ? '我方順風' : '對手順風')].filter(Boolean).join('・')}）</span></div>`
     + btFocusHTML(mine, opps, f) + btComboHTML(mine, opps, f)
     + mine.map(M => opps.map(O => btPairHTML(M, O, f)).join('')).join('') + swap
-    + '<p class="note">※ 我方照「隊伍分析」登錄的招式、特性、道具、能力點數與性格算，沒登錄的欄位和對手都照「傷害計算」的預設：'
+    + noteHTML('btResult', '我方照「隊伍分析」登錄的招式、特性、道具、能力點數與性格算，沒登錄的欄位和對手都照「傷害計算」的預設：'
     + '能力點數與性格用 Showdown 最常見的組合（沒有統計的攻擊／特攻 32＋性格、速度 32＋性格、HP／防禦／特防 0）、'
     + '特性用 Showdown 最常見的（對手的特性可在上方改；超級進化用固定特性）。對手某種超級進化佔過半的預設是超級進化型態（同「對手可能帶的」），可在「型態」切回。'
     + '對手的道具預設 Showdown 最常帶的，看到實際道具就在選單改（用掉或被拍落選「沒有道具」）。同一隊不能帶重複的道具：'
@@ -578,7 +583,7 @@ function btResultHTML() {
     + '上方場上對位的「⚠ 先動就打得倒」只要有機率一擊就警告（後面寫機率），換人的 ⚠ 和幾下打倒照出戰選角取機率一半以上的，所以亂數一擊不到一半時只有上方會警告。'
     + '對手按「打中」「實際」的招式會標成用過，也可以在上方「用過的招式」自己點；標滿 4 招就只算這 4 招，沒滿的用使用率高的補滿 4 招。'
     + '下方只列這場會出場的：我方列「這場帶的」（預設照出戰選角的建議帶法：單打用「用模擬比較帶法」算好的，還沒算好或雙打照第 1 名組合；可以點開改），對手出場過的到了帶出場的隻數（單打 3、雙打 4）就不列其他的。'
-    + '「對手出場過的」後面的「猜」照「出戰選角」的「對手可能帶的」：還沒有出場的猜帶法和先發，有出場的就從包含出場過的帶法裡挑第一種，只是參考。</p>';
+    + '「對手出場過的」後面的「猜」照「出戰選角」的「對手可能帶的」：還沒有出場的猜帶法和先發，有出場的就從包含出場過的帶法裡挑第一種，只是參考。');
 }
 // ----- 推薦出招：照目前場上狀況跑對戰模擬的樹搜尋（同「模擬對戰」的推演，只做單打） -----
 // 局面：我方＝這場帶的（btBrought，場上那隻排第一）照登錄的配招、剩下的 HP、異常狀態、道具沒了、畫皮破了；
@@ -661,11 +666,11 @@ function btRecRender() {
     + `<label class="small"><input type="checkbox" data-bhid${r.hid ? ' checked' : ''}> 看不到對手招式</label></div>`;
   const hidNote = r.hid ? '勾了「看不到對手招式」：對手每隻「用過的招式」以外的招照 Showdown 使用率猜 4 組、每組各打 1/4 次合起來，表格列出猜過的招，'
     + '「有這招」是 4 組裡有幾成猜牠帶；★ 是 4 組平均勝率最高的選擇（不給混合比例）。' : '';
-  const note = '<p class="note">※ 用「模擬對戰」的樹搜尋（往下打約 3000 次）：我方照「隊伍分析」登錄的配招；對手照 Showdown 常見的配招、上方標的特性道具與用過的招式，'
+  const note = noteHTML('btRec', '用「模擬對戰」的樹搜尋（往下打約 3000 次）：我方照「隊伍分析」登錄的配招；對手照 Showdown 常見的配招、上方標的特性道具與用過的招式，'
     + '還沒出場的照「猜」。勝率是對手照牠最穩的出法時我方的平均勝率（模擬次數有限，差 2～3% 內算差不多）；建議出的照比例排在前面，'
     + '同時出招，★ 以外比例也高的可以混著出，免得被猜中。'
     + `天氣、場地、牆、戲法空間當成剛開（5 回合），順風當成剛開（4 回合）；撒菱類照上方標的；睡眠當還要睡 2 次、冰凍最多 3 次、劇毒當剛中；`
-    + `對手的 PP 用量不算${r.notes.length ? `；${r.notes.join('、')}模擬不算` : ''}。${hidNote}只是參考。</p>`;
+    + `對手的 PP 用量不算${r.notes.length ? `；${r.notes.join('、')}模擬不算` : ''}。${hidNote}只是參考。`);
   if (!v) {
     box.innerHTML = head + (btRecBg() ? '<p class="muted small">計算中…（約 2～5 秒）</p>'
       : '<div class="c-f"><button class="btn" data-brec>算推薦</button><span class="muted small">算的時候畫面會停幾秒</span></div>') + note;
@@ -701,9 +706,49 @@ $('#btRec').addEventListener('change', e => {
   btRec.hid = b.checked;
   btRecUpdate();
 });
+// 出戰選角建議的先發（隊伍格子；雙打 2 隻）：單打用「用模擬比較帶法」算好的（bSimBest，先發排第一），雙打或沒有背景計算時照第 1 名組合的先發（bringPlan 的 pick）。
+// 單打還在等模擬比較（有背景計算、這組隊伍與對手還沒有結果）時回傳空的：先照第 1 名放上場的話，算好後建議換了會被 bSimKeep 固定成舊的帶法
+function btLeads() {
+  const b = bSimBest();
+  if (b) return b.slots.slice(0, 1).filter(i => team.mons[i]);
+  if (team.fmt === 's' && bSimReady() && simWkN() && bSim.res?.sig !== bSimSig()) return [];
+  btBrought();
+  return btPlan.lead.filter(i => team.mons[i]);
+}
+// 我方先發自動上場（2026-11-19 使用者選）：這場還沒開始（場上空著、沒自己選帶誰、我方 HP 都沒改、對手都還沒出場）時，把建議的先發放上場；
+// 同一組隊伍、配招、對手、單打／雙打只自動放一次（按「下場」拿掉後不再放回；按「清除」重來）。不存網址：重新整理後場上照網址
+let btAutoKey = '';
+function btAutoLead() {
+  const n = btN(), k = JSON.stringify([team.mons, team.sets, bring.opp, team.fmt]);
+  if (btAutoKey === k || !bring.opp.some(x => MON[x]) || battle.bring || battle.me.slice(0, n).some(i => i >= 0)
+    || battle.hp.some(v => v != null) || battle.seen.some(Boolean)) return;
+  const lead = btLeads().slice(0, n);
+  if (!lead.length) return;
+  btAutoKey = k;
+  lead.forEach((i, p) => { battle.me[p] = i; battle.st.me[p] = [0, 0, 0, 0, 0]; });
+  battle.sel.me = Math.max(0, battle.me.slice(0, n).indexOf(-1));
+}
+// 場地區收起時的摘要（2026-11-19 使用者選「場地區收成一行」）：單打／雙打＋有開的天氣、場地、戲法空間、順風、牆、撒菱類
+function btFieldSum() {
+  const who = s => s === 'me' ? '我方' : '對手';
+  const xs = [FIELD_ZH[battle.weather], FIELD_ZH[battle.terrain], battle.tr && '戲法空間', ...battle.tw.map(s => who(s) + '順風'),
+    ...BT_SIDES.flatMap(s => battle.walls[s].map(w => who(s) + (MOVES[w]?.[0] || w))),
+    ...BT_SIDES.flatMap(s => BT_HAZ.filter(([k]) => battle.haz[s][k]).map(([k, max]) => who(s) + SIM_HAZ_ZH[k] + (max > 1 ? ` ${battle.haz[s][k]}` : '')))].filter(Boolean);
+  return `場地：${FMT_ZH[team.fmt]}・${xs.join('・') || '無'}（點開改天氣、場地、順風、牆、撒菱）`;
+}
+// 跳轉列（窄螢幕才顯示）：捲到那一區；場地區順便打開；沒有那一區（例如還沒有換人可列）的按鈕藏起來
+const btJumpSync = () => document.querySelectorAll('#btJump [data-jump]').forEach(b => { b.hidden = !$('#' + b.dataset.jump); });
+$('#btJump').addEventListener('click', e => {
+  const b = e.target.closest('[data-jump]'), el = b && $('#' + b.dataset.jump);
+  if (!el) return;
+  if (el.tagName === 'DETAILS') el.open = true;
+  el.scrollIntoView({ block: 'start' });
+});
 function renderBattle() {
   syncBattle();
+  btAutoLead();
   BT_SIDES.forEach(side => { $('#bt-' + side).innerHTML = btSideHTML(side); });
+  $('#btFieldSum').textContent = btFieldSum();
   document.querySelectorAll('#p-battle [data-bab]').forEach(s => { s.disabled = s.options.length < 2; });
   $('#btW').innerHTML = [['', '無天氣'], ...WEATHERS.map(w => [w, FIELD_ZH[w]])].map(([w, zh]) => `<button data-bw="${w}" aria-pressed="${battle.weather === w}">${zh}</button>`).join('');
   $('#btT').innerHTML = [['', '無場地'], ...TERRAINS.map(t => [t, FIELD_ZH[t]])].map(([t, zh]) => `<button data-bf="${t}" aria-pressed="${battle.terrain === t}">${zh}</button>`).join('');
@@ -716,6 +761,7 @@ function renderBattle() {
   document.querySelectorAll('[data-btw]').forEach(c => { c.checked = battle.tw.includes(c.dataset.btw); });
   document.querySelectorAll('#btFmt button').forEach(b => b.setAttribute('aria-pressed', b.dataset.fmt === team.fmt));
   $('#btResult').innerHTML = btResultHTML();
+  btJumpSync();
   btRecUpdate();
   pBgFlush();
   bSimAuto();
@@ -851,6 +897,7 @@ $('#p-battle').addEventListener('input', e => {
   btHpRow(t, v, false);
   $('#btBench-' + side).innerHTML = btBenchHTML(side);
   $('#btResult').innerHTML = btResultHTML();
+  btJumpSync();
   btRecUpdate();
   saveState();
 });
@@ -872,4 +919,4 @@ $('#p-battle').addEventListener('change', e => {
   renderBattle();
 });
 $('#btFmt').addEventListener('click', setFmt);
-$('#btClear').addEventListener('click', () => { Object.assign(battle, battle0()); btObs = null; btEdit = null; renderBattle(); });
+$('#btClear').addEventListener('click', () => { Object.assign(battle, battle0()); btObs = null; btEdit = null; btAutoKey = ''; renderBattle(); });

@@ -62,7 +62,7 @@ function summaryHTML(members) {
     [warn.length && `要注意 ${warn.map(r => T[r.atk].zh).join('、')}`, gaps.length && `缺口 ${gaps.map(id => T[id].zh).join('、')}`].filter(Boolean).join('；')));
   return `<div class="res-head">隊伍總評<span class="muted small">（${fz}；${members.length} 隻，其中 ${named.length} 隻挑了寶可夢）</span></div>`
     + (out.length ? out.join('') : '<p class="b-sum">✔ 目前沒有明顯問題。</p>')
-    + '<p class="note">※ 問題整理自下面各卡片（隊伍特性與場地招式、弱點總表、聯防搭檔、熱門威脅檢查）；要補誰、換誰看最上面的「推薦」。</p>';
+    + noteHTML('sum', '問題整理自下面各卡片（隊伍特性與場地招式、弱點總表、聯防搭檔、熱門威脅檢查）；要補誰、換誰看最上面的「推薦」。');
 }
 // 隊伍角色：挑了寶可夢的隊員依常用招式判斷角色、列出常用招式與效果，並對照 NEEDS 標出隊伍還缺什麼
 const MAIN_ZH = { phys: '物攻', spec: '特攻', sup: '輔助' };
@@ -239,11 +239,11 @@ function traitHTML(members) {
     cover: () => `${label([w.h])[0]}是強化手，隊上沒有隊友帶擊掌奇襲或引誘（跟我來、憤怒粉）掩護，強化那回合容易被集火`,
   })[w.kind]();
 
+  // 只列隊上有的分類，沒有的併成一行「沒有：…」（2026-11-19 使用者選「特性與場地只列有的」）
+  const cats = TRAIT_CATS.map(c => ({ c, l: label(has(c.abils, c.moves)) })), none = cats.filter(x => !x.l.length).map(x => x.c.zh);
   return head
-    + TRAIT_CATS.map(c => {
-      const l = label(has(c.abils, c.moves));
-      return `<div class="x-line"><span class="x-msg">${c.zh}：</span>${l.length ? l.map(s => `<span class="rtag">${s}</span>`).join('') : '<span class="none">（無）</span>'}</div>`;
-    }).join('')
+    + cats.filter(x => x.l.length).map(({ c, l }) => `<div class="x-line"><span class="x-msg">${c.zh}：</span>${l.map(s => `<span class="rtag">${s}</span>`).join('')}</div>`).join('')
+    + (none.length ? `<div class="x-line"><span class="x-msg">沒有：</span><span class="none">${none.join('、')}</span></div>` : '')
     // 攻擊搭配：提供的一方（例如擊掌奇襲）→ 受惠的隊員（例如強化手）
     + `<div class="x-line"><span class="x-msg">攻擊搭配：</span>${syn.length ? '' : '<span class="none">（沒有）</span>'}</div>`
     + syn.map(([zh, by, js]) => `<div class="x-line"><span class="rtag">✔ ${zh}</span><span>${label(by).join('、')} → ${js.map(who).join('、')}</span></div>`).join('')
@@ -353,7 +353,7 @@ function coreHTML(members) {
     + rows.join('')
     + (open.size ? [...open].map(([ty, who]) => `<div class="issue"><span class="need no">✘ 沒人扛</span><span>${chip(ty)}（${who.map(name).join('、')}怕）</span></div>`).join('')
       : '<p class="b-sum">✔ 每個弱點都有隊友抵抗或免疫。</p>')
-    + '<p class="note">※ 怕＝受到 ×2 以上，扛＝×½ 以下（含免疫）；只算屬性，不含特性（如飄浮、引火）與道具。</p>';
+    + noteHTML('core', '怕＝受到 ×2 以上，扛＝×½ 以下（含免疫）；只算屬性，不含特性（如飄浮、引火）與道具。');
 }
 // 可收合的區塊（熱門威脅的有解、速度線的排行、隊伍角色每隻的常用招式、兩張卡片的說明）：預設收起，點過就照點的（不存網址；重畫時保持）
 const tFold = {};
@@ -372,20 +372,26 @@ function threatHTML(members) {
   // 換上能扛的、只有正面打得贏的（換上能扛的一定也打得贏，不重複列）、會被牠先手一擊的；
   // 單打名字後面寫勝率（teamVs 的 p：換上能扛寫換上來那場、正面打得贏寫正面對打的；還在背景算的不寫）
   const whoP = (t, idx, k) => idx.length ? idx.map(j => `${members[j][1] + 1} ${slotName(members[j][1])}${t.p[j]?.[k] != null ? ` ${Math.round(t.p[j][k] * 100)}%` : ''}`).join('、') : '（無）';
+  // 一隻一行（2026-11-19 使用者選「熱門威脅精簡」）：摘要只列結論（換上能扛／正面打得贏／會被先手一擊，沒有的不寫）；
+  // 可能超級進化、牠的攻擊、實戰點開看（開合記在 tFold，重畫時保持）
   const row = t => {
-    const mg = megaInfo(t.mon, team.fmt).filter(x => x.counted);
-    return `<div class="threat lv${t.level}"><span class="lv">${LV[t.level]}</span><span class="meta">#${t.mon.rank[team.fmt]}</span>`
-      + `<b>${t.mon.zh}</b>${chips(t.mon.types)}${mg.length ? `<span class="who">可能超級進化：${megaText(mg)}</span>` : ''}`
+    const mg = megaInfo(t.mon, team.fmt).filter(x => x.counted), hit = t.hit.filter(j => !t.safe.includes(j)), fold = 'thr.' + t.mon.key;
+    const sum = `<span class="lv">${LV[t.level]}</span><span class="meta">#${t.mon.rank[team.fmt]}</span><b>${t.mon.zh}</b>${chips(t.mon.types)}`
+      + (t.safe.length ? `<span class="thr-k">換上能扛：${whoP(t, t.safe, 'sw')}</span>` : '')
+      + (hit.length ? `<span class="thr-k">正面打得贏：${whoP(t, hit, 'head')}</span>` : '')
+      + (t.ohko.length ? `<span class="thr-k x-msg">⚠ 會被牠先手一擊：${who(t.ohko)}</span>` : '');
+    return `<details class="threat lv${t.level}" data-tfold="${fold}"${tFold[fold] ? ' open' : ''}><summary>${sum}</summary>`
+      + (mg.length ? `<span class="who">可能超級進化：${megaText(mg)}</span>` : '')
       + (top4Text(t.mon.key) ? `<span class="who">牠前 4 招的攻擊：${top4Text(t.mon.key)}</span>` : `<span class="who">牠的攻擊：${oppAtkText(monUnit(t.mon, team.fmt))}</span>`)
-      + `<span class="who">換上能扛：${whoP(t, t.safe, 'sw')}・正面打得贏：${whoP(t, t.hit.filter(j => !t.safe.includes(j)), 'head')}</span>`
-      + (t.ohko.length ? `<span class="who x-msg">⚠ 會被牠先手一擊：${who(t.ohko)}</span>` : '') + `${realHTML(t.mon, named)}</div>`;
+      + `${realHTML(t.mon, named)}</details>`;
   };
   const ok = list.filter(t => t.level === 2);
   return `<div class="res-head">熱門威脅檢查<span class="muted small">（${FMT_ZH[team.fmt]}排名前 ${THREAT_N}）</span></div>`
     + `<p class="b-sum">沒解 <b>${cnt[0]}</b> 隻、半解 <b>${cnt[1]}</b> 隻、有解 <b>${cnt[2]}</b> 隻。</p>`
     + pBgNote('熱門威脅') + list.filter(t => t.level < 2).map(row).join('')
     + (ok.length ? tFoldHTML('threat', `有解的 ${ok.length} 隻（點開看）`, ok.map(row).join('')) : '')
-    + '<p class="note">※ 算法同「出戰選角」的對位表：「換上能扛」＝換上來先吃牠最痛的一招（取最高傷害），剩下的 HP 對打還打得贏；'
+    + noteHTML('threat', '每隻點一下看可能超級進化、牠的攻擊招式與實戰；摘要只列有的（都打不贏的不寫）。'
+    + '算法同「出戰選角」的對位表：「換上能扛」＝換上來先吃牠最痛的一招（取最高傷害），剩下的 HP 對打還打得贏；'
     + `「正面打得贏」＝雙方 HP 全滿正面對打先打倒牠：單打用「模擬對戰」的引擎 1 對 1 帶亂數打 ${SIM_DUEL_N} 場、勝率過半才算（變化招式、強化、反作用力、道具回復、換招補刀都算；`
     + '換上能扛也是從吃過一下剩下的 HP 再打一樣多場；名字後面的 % 是勝率，算法與誤差見「出戰選角」對位表下方的說明），雙打照速度和連用同一招幾下打倒（取打倒機率一半以上的次數）；'
     + '「會被牠先手一擊」＝打不贏，而且牠一下就打得倒這隻、又比這隻先出手（速度較快、同速或先制招式）。擊掌奇襲、迎頭一擊只有上場第一回合能用，只算一下打倒的。'
@@ -395,7 +401,7 @@ function threatHTML(members) {
     + `「可能超級進化」＝Showdown 統計佔全家族 ${ROLE_PCT}% 以上的超級進化型態（沒有統計的每種都算），要對進化前後每種型態都成立才算（⚠ 任一種成立就標）。`
     + `排名與常用招式為 Showdown 統計（${USAGE_SRC.month}）。`
     + '「實戰」＝Showdown 這隻的剋星（遇到時常被打倒或逼換下的，「牠常敗給」）、或牠常打倒或逼換下的（「牠常打倒」）前 10 名裡有我方隊員'
-    + '（原型看家族裡最常見的型態）；兩份名單都有的不列，只供參考，不影響有解／沒解。</p>';
+    + '（原型看家族裡最常見的型態）；兩份名單都有的不列，只供參考，不影響有解／沒解。');
 }
 // 速度線：我方（挑了寶可夢的才有速度）和熱門寶可夢依實際速度由快到慢排，同速時我方排前面；算法同熱門威脅檢查（battler＋speedOf）：
 // 我方照登錄的配招，熱門寶可夢照 Showdown 最常見的能力點數＋性格、最常帶的道具。
@@ -426,11 +432,11 @@ function speedHTML(members) {
       rows.map(x => `<div class="spd${x.i != null ? ' me' : ''}"><b class="v">${x.v}</b><b>${x.mon.zh}</b>${chips(x.mon.types)}`
       + `<span class="meta">${x.i != null ? `我方第 ${x.i + 1} 隻` : `#${x.mon.rank[fmt]}`}・種族 ${x.mon.spe}`
       + `${x.mega ? `・超級進化${x.p != null ? `（佔 ${x.p}%）` : ''}` : ''}${scarfText(x)}</span></div>`).join(''))
-    + '<p class="note">※ 實際速度（Lv50），算法同熱門威脅檢查：我方照登錄的配招（能力點數、性格、道具、特性），'
+    + noteHTML('speed', '實際速度（Lv50），算法同熱門威脅檢查：我方照登錄的配招（能力點數、性格、道具、特性），'
     + `熱門寶可夢照 Showdown ${FMT_ZH[fmt]}最常見的能力點數＋性格、最常帶的道具；不含能力變化、順風、戲法空間、天氣與場地加速特性。`
     + '速度相同時實際誰先動各 50%，算同速。我方超級進化看超級進化後的速度；'
     + `熱門寶可夢 Showdown 統計有 ${ROLE_PCT}% 以上是超級進化的，超級進化型態另列一行（標「超級進化」，% 是佔全家族的比例），上方「比幾隻快／慢」取進化前後較快的那個。`
-    + `「講究圍巾 N%」＝Showdown 統計有 N% 的人帶講究圍巾（速度 ×1.5），帶的話實際會更快（照最常帶的道具已經是講究圍巾的標「已算」）；超級進化要帶超級石，不標。</p>`;
+    + `「講究圍巾 N%」＝Showdown 統計有 N% 的人帶講究圍巾（速度 ×1.5），帶的話實際會更快（照最常帶的道具已經是講究圍巾的標「已算」）；超級進化要帶超級石，不標。`);
 }
 // 不在隊伍分析分頁時只記下要重畫（切過來時 showTab 再畫；開網頁、在別的分頁切單打／雙打或載入隊伍時不白算），網址照樣存
 let teamDirty = false;
@@ -463,13 +469,15 @@ function renderTeam() {
     $('#tCore').innerHTML = coreHTML(members);
     const rows = teamProfile(members.map(([s]) => s)), warn = rows.filter(r => r.warn), gaps = teamGaps(rows);
     const sym = { 4: '4', 2: '2', 1: '', 0.5: '½', 0.25: '¼', 0: '0' };
+    // 防守角度上色（2026-11-19 使用者選）：怕（×2、×4）紅、抗（×½、×¼）綠，和對戰中表格「綠＝對我方好」一致；克制表照舊用 MCLS 的攻擊方配色
+    const DCLS = { 4: 'mq', 2: 'mh', 1: 'm1', 0.5: 'm2', 0.25: 'm4', 0: 'm0' };
     let h = '<thead><tr><th class="corner">攻擊 ↓<br>隊員 →</th>'
       + members.map(([s, i]) => `<th><span class="tcol"><span class="slot-n">${i + 1}</span><span class="duo">`
         + `${s.map(id => `<span class="vchip" style="${style(id)}">${T[id].zh}</span>`).join('')}</span></span></th>`).join('')
       + '<th class="cnt">怕</th><th class="cnt">抗</th></tr></thead><tbody>';
     rows.forEach(r => {
       h += `<tr><th><span class="chip rchip" style="${style(r.atk)}">${T[r.atk].zh}</span></th>`
-        + r.ms.map(m => `<td class="${MCLS[m]}" title="${fmt(m)} ${MSG(m)}">${sym[m]}</td>`).join('')
+        + r.ms.map(m => `<td class="${DCLS[m]}" title="${fmt(m)} ${MSG(m)}">${sym[m]}</td>`).join('')
         + `<td class="cnt${r.warn ? ' warn' : ''}">${r.warn ? '⚠' : ''}${r.weak}</td><td class="cnt">${r.resist}</td></tr>`;
     });
     $('#tResult').innerHTML = `<div class="res-head">隊伍弱點總表<span class="muted small">（${members.length} 隻）</span></div>`
@@ -480,8 +488,9 @@ function renderTeam() {
       + `<div class="x-line"><span class="x-msg">本系打不出效果絕佳：</span>${sg.length ? sg.map(id => chip(id)).join('') : '<span class="none">（無）</span>'}</div>`
       + teamRecHTML(gaps, warn.length)
       + `<div class="mwrap cover" style="margin-top:10px"><table class="matrix team">${h}</tbody></table></div>`
-      + '<p class="note">※ 怕＝受到 ×2 以上；抗＝×½ 以下（含沒有效果）。⚠ 標示 3 隻以上都怕，或 2 隻以上怕又沒人抗的屬性。本系＝隊員自己的屬性。'
-      + '弱點總表只算屬性，不含特性；推薦的雙屬性組合不一定有對應寶可夢。</p>';
+      + '<p class="muted small">紅＝怕（×2、×4 深紅）、綠＝抗（×½、×¼ 深綠）、0＝沒有效果</p>'
+      + noteHTML('weak', '怕＝受到 ×2 以上；抗＝×½ 以下（含沒有效果）。⚠ 標示 3 隻以上都怕，或 2 隻以上怕又沒人抗的屬性。本系＝隊員自己的屬性。'
+      + '弱點總表只算屬性，不含特性；推薦的雙屬性組合不一定有對應寶可夢。');
   }
   $('#tSpeed').innerHTML = speedHTML(members);
   $('#tSim').innerHTML = tSimHTML();

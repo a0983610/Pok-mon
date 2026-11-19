@@ -170,6 +170,8 @@ table.matrix { border-collapse: separate; border-spacing: 0; margin: 0 auto; }
 
 /* ---------- 配招分析 ---------- */
 .b-intro { margin: 0; }
+.look-top > .intro-fold { flex: 1 1 320px; }
+.intro-fold[open] > summary { margin-bottom: 4px; }
 .b-label { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; font-weight: 700; margin: 14px 0 8px; }
 .pick.sm { grid-template-columns: repeat(auto-fill, minmax(60px, 1fr)); gap: 6px; }
 .pick.sm .tbtn { padding: 6px 2px; }
@@ -194,6 +196,13 @@ table.matrix { border-collapse: separate; border-spacing: 0; margin: 0 auto; }
 .t-jump .mini { white-space: nowrap; }
 #p-team > .card { scroll-margin-top: 52px; }
 @media (max-width: 640px) { .t-jump { flex-wrap: wrap; } #p-team > .card { scroll-margin-top: 84px; } }
+/* 對戰中的跳轉列：只在結果排到下方（窄螢幕）時顯示 */
+.bt-jump { display: none; }
+@media (max-width: 900px) { .bt-jump { display: flex; flex-wrap: wrap; } #bt-me, #bt-opp, #btFieldBox, #btRec, #btResult, #btSwap { scroll-margin-top: 52px; } }
+.bt-field { margin-top: 14px; }
+.bt-field > .c-field { margin-top: 0; }
+.bt-cfg { margin-top: 8px; }
+.bt-cfg > summary { cursor: pointer; font-size: 13px; color: var(--muted); }
 .t-fold { margin-top: 10px; }
 .t-fold > summary { cursor: pointer; font-size: 14px; color: var(--muted); }
 .top-actions { display: flex; gap: 4px; }
@@ -237,9 +246,15 @@ table.matrix { border-collapse: separate; border-spacing: 0; margin: 0 auto; }
 .slot-name { font-size: 13px; font-weight: 700; line-height: 1.2; text-align: center; }
 .t-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; }
 .meta { color: var(--muted); font-size: 13px; }
-.threat { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; padding: 8px 0; border-top: 1px solid var(--border); font-size: 14px; }
+.threat { padding: 8px 0; border-top: 1px solid var(--border); font-size: 14px; }
+.threat > summary { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; cursor: pointer; list-style: none; }
+.threat > summary::-webkit-details-marker { display: none; }
+.threat > summary::after { content: '▸'; color: var(--muted); margin-left: auto; }
+.threat[open] > summary::after { content: '▾'; }
 .threat .lv { font-weight: 800; min-width: 3.2em; }
-.threat .who { flex-basis: 100%; color: var(--muted); font-size: 13px; }
+.threat .thr-k { font-size: 13px; }
+.threat .who { display: block; margin-top: 4px; color: var(--muted); font-size: 13px; }
+.note-fold { margin-top: 10px; }
 .lv0 .lv { color: var(--nve); }
 .lv1 .lv { color: var(--muted); }
 .lv2 .lv { color: var(--se); }
@@ -493,7 +508,7 @@ footer a { color: inherit; }
   <section id="p-team" role="tabpanel" hidden>
     <div class="card" id="tTop">
       <div class="look-top">
-        <p class="muted small b-intro">建議先挑 2 隻左右的核心，再照下方「推薦」（聯防挑候選、模擬決定補誰）一格一格補到 6 隻。先點隊伍格子，再選屬性（1～2 個），從下方列出的寶可夢挑一隻；挑好會留在這格、下方接著顯示配招，下一隻再點下一個格子；格子右上角的 × 只清那一格。只選屬性不挑寶可夢也能看屬性分析，但看不到角色、常用招式與特性。挑好寶可夢時配招會先填好 Showdown 使用率前 4 招、最常用的特性與道具、最常見的能力點數與性格，可以在下方改成自己的配招（招式、特性、道具、能力點數、性格）。</p>
+        <details class="b-more intro-fold"><summary>怎麼用（點開看）</summary><p class="muted small b-intro">建議先挑 2 隻左右的核心，再照下方「推薦」（聯防挑候選、模擬決定補誰）一格一格補到 6 隻。先點隊伍格子，再選屬性（1～2 個），從下方列出的寶可夢挑一隻；挑好會留在這格、下方接著顯示配招，下一隻再點下一個格子；格子右上角的 × 只清那一格。只選屬性不挑寶可夢也能看屬性分析，但看不到角色、常用招式與特性。挑好寶可夢時配招會先填好 Showdown 使用率前 4 招、最常用的特性與道具、最常見的能力點數與性格，可以在下方改成自己的配招（招式、特性、道具、能力點數、性格）。</p></details>
         <div class="top-actions"><button class="btn ghost" data-copy>複製連結</button><button class="btn ghost" id="tClear">清除整隊</button></div>
       </div>
       <div class="c-f t-save"><span class="c-l">記憶的隊伍</span><input type="text" class="sel" id="tSaveName" maxlength="30" placeholder="隊伍名稱（沒填用隊員名）" aria-label="隊伍名稱"><button class="mini" id="tSave">記住這隊</button><span class="muted small" id="tSaveMsg" role="status"></span></div>
@@ -543,14 +558,16 @@ footer a { color: inherit; }
 
   <!-- 對戰中 -->
   <section id="p-battle" role="tabpanel" hidden>
+    <nav class="t-jump bt-jump" id="btJump" aria-label="跳到對戰中的各區"><button class="mini" data-jump="bt-me">我方</button><button class="mini" data-jump="bt-opp">對手</button><button class="mini" data-jump="btFieldBox">場地</button><button class="mini" data-jump="btRec">推薦</button><button class="mini" data-jump="btResult">對位</button><button class="mini" data-jump="btSwap">換人</button></nav>
     <div class="bt-wrap">
       <div class="card">
         <div class="look-top">
-          <p class="muted small b-intro">對戰時把雙方場上的寶可夢點上來，調剩下的 HP、能力變化與場地，旁邊（窄螢幕在下方）即時列出每一招的傷害、能不能打倒、誰先動。我方沿用「隊伍分析」（含登錄的配招），對手沿用「出戰選角」的 6 隻。</p>
+          <details class="b-more intro-fold"><summary>怎麼用（點開看）</summary><p class="muted small b-intro">對戰時把雙方場上的寶可夢點上來，調剩下的 HP、能力變化與場地，旁邊（窄螢幕在下方）即時列出每一招的傷害、能不能打倒、誰先動。我方沿用「隊伍分析」（含登錄的配招），對手沿用「出戰選角」的 6 隻。</p></details>
           <div class="top-actions"><button class="btn ghost" data-copy>複製連結</button><button class="btn ghost" id="btClear">清除</button></div>
         </div>
         <div class="bt-side" id="bt-me"></div>
         <div class="bt-side" id="bt-opp"></div>
+        <details class="b-more bt-field" id="btFieldBox"><summary id="btFieldSum">場地</summary>
         <div class="t-row c-field">
           <div class="seg" id="btW" aria-label="天氣"></div>
           <div class="seg" id="btT" aria-label="場地"></div>
@@ -566,6 +583,7 @@ footer a { color: inherit; }
             <button data-fmt="d" aria-pressed="false">雙打</button>
           </div>
         </div>
+        </details>
       </div>
       <div class="card bt-res"><div id="btRec"></div><div id="btResult"></div></div>
     </div>
@@ -632,7 +650,7 @@ footer a { color: inherit; }
   <section id="p-sim" role="tabpanel" hidden>
     <div class="card">
       <div class="look-top">
-        <p class="muted small b-intro">選好我方這場帶的 3 隻與先發，看到對手派出的先發就點牠：電腦把雙方這一回合的各種出招組合都往下打到分出勝負（單打），列出每一格我方的勝率；點雙方實際出的那一格往下一步（傷害照平均算，可以改成實戰的結果），再算下一回合。對手照「出戰選角」的 6 隻、後排先猜最可能的 2 隻；我方沿用「隊伍分析」（含登錄的配招）。</p>
+        <details class="b-more intro-fold"><summary>怎麼用（點開看）</summary><p class="muted small b-intro">選好我方這場帶的 3 隻與先發，看到對手派出的先發就點牠：電腦把雙方這一回合的各種出招組合都往下打到分出勝負（單打），列出每一格我方的勝率；點雙方實際出的那一格往下一步（傷害照平均算，可以改成實戰的結果），再算下一回合。對手照「出戰選角」的 6 隻、後排先猜最可能的 2 隻；我方沿用「隊伍分析」（含登錄的配招）。</p></details>
         <div class="top-actions"><button class="btn ghost" data-copy>複製連結</button></div>
       </div>
       <div class="b-label">我方帶出場<span class="muted small">點 3 隻（點第 4 隻會換掉最早點的，先發不換），預設是「出戰選角」用模擬比較出來的建議帶法（還沒算好時照第 1 名）</span><button class="mini" id="sReset">恢復建議</button></div>

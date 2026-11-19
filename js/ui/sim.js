@@ -177,8 +177,8 @@ function simResultHTML(res) {
     + '（對手用同一套方法看我方 6 隻選的，先發也照它的挑法）。點「看怎麼打」看這種帶法開局雙方各種出招的勝率。</p>' + rows
     + `<h3>我方每隻</h3>${myRows}<h3>對手每隻</h3>${oppRows}`
     + `<h3>逐回合紀錄</h3>${logBox('win', '贏') + logBox('lose', '輸') || '<p class="muted small">這次沒有分出勝負的場次。</p>'}`
-    + '<p class="note">※ 怎麼模擬：我方照上面點選的 3 隻與先發（一場只能超級進化一隻）；對手照「出戰選角」的 6 隻，6 選 3 的每一種帶法都打，'
-    + '先發照對手用「出戰選角」的方法對這種帶法的挑法（對手看不到我方的配招；選一般型態、但某種超級進化佔過半的當成超級進化）。' + simRulesText() + '</p>';
+    + noteHTML('simBatch', '怎麼模擬：我方照上面點選的 3 隻與先發（一場只能超級進化一隻）；對手照「出戰選角」的 6 隻，6 選 3 的每一種帶法都打，'
+    + '先發照對手用「出戰選角」的方法對這種帶法的挑法（對手看不到我方的配招；選一般型態、但某種超級進化佔過半的當成超級進化）。' + simRulesText());
 }
 // 模擬的規則（賽前結果的說明與推演的「規則細節」共用）
 function simRulesText() {
@@ -367,16 +367,24 @@ function simApplyEdit(t) {
   t.edit = false;
   simCalcTree();
 }
-// 算目前這一步每一格的勝率（先畫「計算中」，讓畫面更新後再算）
+// 算目前這一步每一格的勝率（先畫「計算中」）：有背景計算（Worker）時交給它算，算的時候畫面照常能捲、能點
+// （2026-11-19 使用者選「推演改背景算」：在畫面這邊算每一步卡 3～4 秒；同對戰中推薦出招的做法：上一個還在算就停掉重開，結果用 id 對，舊的不收）；
+// file://、沒有 Worker 或背景計算出錯時照舊在畫面這邊算
+const simTreeWk = { wk: null, id: 0, busy: false, fail: false };
 function simCalcTree() {
-  const t = sim.tree;
+  const t = sim.tree, cur = t.path[t.path.length - 1];
   renderSimTree();
-  setTimeout(() => {
-    const cur = t.path[t.path.length - 1];
-    if (sim.tree !== t || cur.view) return;
-    cur.view = (sim.hid ? simViewHid : simView)(t.ctx, cur.st, SIM_TREE_ITERS);
-    renderSimTree();
-  });
+  if (cur.view) return;
+  const done = view => { if (sim.tree !== t || cur.view) return; cur.view = view; renderSimTree(); };
+  const local = () => setTimeout(() => { if (sim.tree === t && !cur.view) done((sim.hid ? simViewHid : simView)(t.ctx, cur.st, SIM_TREE_ITERS)); });
+  if (simTreeWk.fail || location.protocol === 'file:' || typeof Worker === 'undefined') { local(); return; }
+  const w = simTreeWk, id = ++w.id;
+  if (w.busy && w.wk) { w.wk.terminate(); w.wk = null; }
+  try { w.wk ||= new Worker('js/engine/sim-worker.js'); } catch { w.fail = true; local(); return; }
+  w.wk.onmessage = e => { if (e.data.id !== w.id) return; w.busy = false; done(e.data.view); };
+  w.wk.onerror = () => { Object.assign(w, { busy: false, fail: true, wk: null }); local(); };
+  w.busy = true;
+  w.wk.postMessage({ view: { id, st: cur.st, iters: SIM_TREE_ITERS, hid: sim.hid } });
 }
 // 看不到對手招式時點到對手猜的招式 k：對手場上那隻實際出了這招，把它換進牠的招式（換掉還沒看到、這隻使用率最低的；不到 4 招就加上），
 // 回傳改好的局面複本（往下一步時 simMoveIn 會把它記成看到的）
@@ -493,9 +501,9 @@ function renderSimTree() {
     + simSideHTML(st.sd[0], 0) + simSideHTML(st.sd[1], 1, t.live)
     + (t.edit ? simEditHTML(st) : v ? '<div class="c-f"><button class="mini" data-edit>改成實戰的結果</button><span class="muted small">傷害、急所、異常狀態有沒有中跟上面不一樣，或看到對手的型態、道具、招式和猜的不一樣時</span></div>' : '')
     + body
-    + '<p class="note">※ 每一層總共往下打約 3000 次、平均分給每一格（格子上停著看次數），樹搜尋與規則見最下面的「規則細節」。'
+    + noteHTML('simTree', '每一層總共往下打約 3000 次、平均分給每一格（格子上停著看次數），樹搜尋與規則見最下面的「規則細節」。'
     + '往下一步是照期望值打（傷害取平均、不會急所、麻痺不會不能動、同速我方先、打完換人照簡單規則挑），實戰會有運氣差，可以改成實戰的結果再往下算。'
-    + (t.live ? '對手還沒上場的後排是猜的（「出戰選角」的「對手可能帶的」帶法裡會派這隻先發、排名最高的那種；沒有一種會派牠先發就取有帶牠的），對手每一隻的配招、道具照 Showdown 常見（上過場的看到不一樣，在「改成實戰的結果」改型態、道具、招式）。' : '') + '</p>'
+    + (t.live ? '對手還沒上場的後排是猜的（「出戰選角」的「對手可能帶的」帶法裡會派這隻先發、排名最高的那種；沒有一種會派牠先發就取有帶牠的），對手每一隻的配招、道具照 Showdown 常見（上過場的看到不一樣，在「改成實戰的結果」改型態、道具、招式）。' : ''))
     + `<details class="b-more note"><summary>規則細節</summary>${simRulesText()}</details>`;
 }
 $('#sMine').addEventListener('click', e => {

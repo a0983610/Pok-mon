@@ -20,6 +20,11 @@ const chip = (id, sub = '') => `<span class="chip" style="${style(id)}">${T[id].
 const chips = ids => `<span class="duo">${ids.map(id => chip(id)).join('')}</span>`;
 const MCLS = { 4: 'm4', 2: 'm2', 1: 'm1', 0.5: 'mh', 0.25: 'mq', 0.125: 'mq', 0: 'm0' };
 const mtag = m => `<span class="mtag ${MCLS[m]}">${fmt(m)}</span>`;
+// 長說明收合：卡片的「※」說明改成點開看（2026-11-19 使用者：「減少操作動作 更方便看各種資訊」）；
+// 開合記在 noteFold（鍵＝k，重畫時保持；不存網址）
+const noteFold = {};
+const noteHTML = (k, body, summary = '說明（點開看）') => `<details class="b-more note-fold" data-nfold="${k}"${noteFold[k] ? ' open' : ''}><summary>${summary}</summary><p class="note">${body}</p></details>`;
+document.addEventListener('toggle', e => { const k = e.target.dataset?.nfold; if (k) noteFold[k] = e.target.open; }, true);
 
 // ---------- 分頁 ----------
 const TABS = ['table', 'build', 'team', 'bring', 'battle', 'calc', 'sim', 'dex'];
