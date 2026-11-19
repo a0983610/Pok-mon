@@ -28,7 +28,7 @@ const FILES = ['base-stats.js', 'mons-data.js', 'js/engine/core.js', 'js/engine/
 const NAMES = ['MONS', 'MON', 'MOVES', 'TYPES', 'IDX', 'ITEMS', 'ABILS', 'FIELD_ZH', 'HITS', 'SIM_SUP', 'SIM_STATUS_ZH', 'SIM_HAZ_ZH', 'SIM_MAX_TURN', 'abilZh',
   'simMon', 'simItems', 'simStart', 'simTurn', 'simReplace', 'simPhase', 'simPhaseOpts', 'simDecide', 'simSearch', 'simGreedyPick', 'simRng', 'simHash', 'simKey',
   'simBaseKey', 'simCtx', 'simClone', 'simHit', 'simExp', 'simAcc', 'simSwitch', 'simSpeed', 'simFaster', 'simTypes', 'simWx', 'simTer', 'simWinner', 'simDraw',
-  'simPri', 'FLAG', 'SIM_SEC', 'SIM_RECOIL', 'SIM_DRAIN', 'SIM_STANCE', 'bringPlan'];
+  'simPri', 'FLAG', 'SIM_SEC', 'SIM_RECOIL', 'SIM_DRAIN', 'SIM_STANCE', 'bringPlan', 'SIM_OHKO', 'simMoveZh', 'simMoveType', 'WX_AB', 'TER_AB'];
 // 出戰選角（bringPlan）要用的 traitScan 在網頁的 js/ui/team.js（整個檔一載入就會碰畫面元素）：只取 THREAT_N 和 NO_WEATHER～traitScan 那一段（同 tools/sim_ai.js）
 function traitSrc(txt) {
   const a = txt.indexOf('const NO_WEATHER'), b = txt.indexOf('\nconst warnShort'), t = txt.match(/^const THREAT_N = .*$/m);
@@ -131,7 +131,7 @@ const CAT_ZH = { physical: '物理', special: '特殊', status: '變化' };
 const tz = (E, t) => E.TYPES[E.IDX[t]]?.zh || t;
 const nameOf = (E, M) => E.MON[E.simBaseKey(M)].zh;
 const pct = (v, max) => Math.round(Math.max(0, v) / max * 100);
-const optLabel = (E, st, s, o) => o.t === 'mv' ? (E.MOVES[o.k]?.[0] || o.k) : o.t === 'sw' ? `換成 [${o.i}] ${nameOf(E, st.sd[s].mons[o.i])}`
+const optLabel = (E, st, s, o) => o.t === 'mv' ? E.simMoveZh(o.k) : o.t === 'sw' ? `換成 [${o.i}] ${nameOf(E, st.sd[s].mons[o.i])}`
   : o.t === 'rech' ? '休息（這回合不能動）' : o.t === 'pass' ? '不用換' : o.t === 'none' ? '什麼都不能做' : o.t;
 // 打倒機率：各下 16 個亂數（不算急所）加總 ≥ hp 的比例；3 下以內全部列舉，更多下回傳 null（只標「可能打倒」）
 function koP(rows, hp) {
@@ -141,20 +141,33 @@ function koP(rows, hp) {
   go(0, 0);
   return n / all;
 }
-// A 用招式 k 打 D：傷害範圍（16 個亂數的最低～最高，連續攻擊各下加總；不含命中率）、期望（含命中率）、打倒機率（看 D 現在的 HP、不算急所，命中率另外標）
+// A 用招式 k 打 D：傷害範圍（16 個亂數的最低～最高，連續攻擊各下加總；不含命中率）、期望（含命中率）、打倒機率（看 D 現在的 HP、不算急所，命中率另外標），
+// 再加上自己會吃的（selfText）。一擊必殺只寫命中率（期望值模式的傷害是「剩下的 HP × 命中率」，寫成範圍會誤導）
 function dmgText(E, ctx, st, A, D, k) {
   const r = E.simHit(ctx, st, A, D, k, false, true);
   if (!r.eff) return '無效' + (r.fail ? `（${r.fail}）` : '');
+  if (E.SIM_OHKO.has(k)) return `一擊必殺：命中 ${r.acc}%，打中就倒下${E.simHit(ctx, st, A, D, k, false, false).endured ? '（現在滿 HP 帶氣勢披帶，會撐住剩 1）' : ''}`;
   const lo = r.rolls.reduce((t, x) => t + x[0], 0), hi = r.rolls.reduce((t, x) => t + x[15], 0), ex = E.simExp(ctx, st, A, D, k);
   const acc = Math.min(100, Math.round(E.simAcc(st, A, D, k, false))), cond = acc < 100 ? `（要命中，命中率 ${acc}%）` : '';
   let ko = '';
   if (r.endured && D.hp >= D.max && hi >= D.hp) ko = '，會被氣勢披帶／結實撐住';
   else if (hi >= D.hp) { const p = koP(r.rolls, D.hp); ko = (p == null ? '，可能打倒' : p >= 1 ? '，確定打倒' : `，打倒機率 ${Math.round(p * 100)}%`) + cond; }
-  return `${pct(lo, D.max)}～${pct(hi, D.max)}%（期望 ${pct(ex, D.max)}%${ko}）`;
+  return `${pct(lo, D.max)}～${pct(hi, D.max)}%（期望 ${pct(ex, D.max)}%${ko}）${selfText(E, A, D, k, Math.min(ex, D.hp))}`;
+}
+// A 用 k 打 D 自己會吃的：反作用力（打出傷害 × 比例，dealt＝期望打出的傷害）、接觸懲罰（凸凸頭盔每打中一下 1/6、粗糙皮膚 1/8，同 simContactHurt；
+// 接觸同 simMove：特性遠隔不算）
+function selfText(E, A, D, k, dealt) {
+  const xs = [], rc = E.SIM_RECOIL[k];
+  if (rc) xs.push(`反作用力約自己 ${pct(dealt * rc[0] / rc[1], A.max)}%`);
+  if (E.FLAG.contact.has(k) && A.b.ab !== 'long-reach') {
+    const f = (D.item === 'rocky-helmet' ? 1 / 6 : 0) + (D.b.ab === 'rough-skin' ? 1 / 8 : 0);
+    if (f) xs.push(`每打中一下自己扣 ${pct(A.max * f, A.max)}%（${[D.item === 'rocky-helmet' && '凸凸頭盔', D.b.ab === 'rough-skin' && '粗糙皮膚'].filter(Boolean).join('、')}）`);
+  }
+  return xs.length ? `，${xs.join('，')}` : '';
 }
 // 換下場就清掉的狀態（M.v）：看得懂的寫中文，程式內部的記錄不列；沒列在這裡的照欄位名稱列
-const V_HIDE = new Set(['mt', 'got', 'up', 'metro', 'fc', 'mim', 'db', 'asw', 'aswUsed', 'protUsed', 'stall', 'fickle', 'pt', 'types', 'encK', 'fling', 'b0']);
-const V_ZH = { taunt: '被挑釁', seed: '被寄生種子', curse: '被詛咒', yawn: '打哈欠（回合結束睡著）', focus: '集氣', charge: '充電', trap: '不能換人',
+const V_HIDE = new Set(['mt', 'got', 'up', 'metro', 'fc', 'mim', 'asw', 'aswUsed', 'protUsed', 'stall', 'fickle', 'pt', 'types', 'encK', 'fling', 'b0']);
+const V_ZH = { db: '同命中（下次出招前被打倒，打倒牠的也會倒下）', taunt: '被挑釁', seed: '被寄生種子', curse: '被詛咒', yawn: '打哈欠（回合結束睡著）', focus: '集氣', charge: '充電', trap: '不能換人',
   prot: '守住中', endure: '挺住', conf: '混亂', flinch: '畏縮', octo: '被蛸固纏住', shackle: '被縫影縫住', hblock: '回復封鎖', tchop: '不能用聲音招式',
   smack: '被擊落（在地面）', mrise: '電磁飄浮', mini: '變小', attract: '著迷', salt: '鹽醃', syrup: '糖漿炸彈', impr: '封印', gastro: '特性失效',
   add: '加上了屬性', spe: '速度互換過', roost: '羽棲（這回合失去飛行）', glaive: '巨劍突擊後（受到傷害 ×2）', ff: '引火發動', unb: '輕裝發動',
@@ -186,6 +199,23 @@ function entryHurt(E, st, s, i) {
   return Math.max(0, h0 - Math.max(0, M.hp));
 }
 const descOf = (tab, k) => String(tab?.[k]?.[1] || '').replace(/\s+/g, '');
+// 資料沒有說明（或沒有中文名）的特性（冠軍版的超級進化）：[中文名（資料有就空字串）, 模擬怎麼算]，照 js/engine/sim.js、damage.js 的處理寫
+const ABIL_NOTE = {
+  'mega-sol': ['', '自己出招時一律當成晴天：火屬性 ×1.5、水屬性 ×0.5（下雨也一樣）、日光束不用蓄力、氣象球變火屬性；場上實際的天氣不變'],
+  'spicy-spray': ['', '被攻擊招式打中時，讓攻擊方灼傷（火屬性等本來不會灼傷的不受）'],
+  'aerilate': ['', '一般屬性招式變成飛行屬性，威力 ×1.2'],
+  'dragonize': ['', '一般屬性招式變成龍屬性，威力 ×1.2'],
+  'fire-mane': ['', '火屬性招式的攻擊 ×1.5'],
+  'fairy-aura': ['', '雙方的妖精屬性招式威力 ×1.33（自己或對手有這個特性都算）'],
+  'parental-bond': ['', '只打一下的單體攻擊招式改成打兩下，第 2 下傷害 ¼'],
+  'aura-guard': ['', '受到接觸招式的傷害減半；特性互換、遊魂、木乃伊、胃液對它沒用'],
+  'innards-out': ['', '被攻擊招式打倒時，打倒牠的寶可夢受到和那一招打掉的 HP 一樣多的傷害'],
+  'shadow-tag': ['踩影', '對手不能換人（幽靈屬性、同樣是踩影的不受影響；急速折返類、被吹走照樣換）'],
+  'unseen-fist': ['無形拳', '接觸招式穿透守住類（含廣域／快速防守），穿透時傷害 ¼'],
+  'piercing-drill': ['', '接觸招式穿透守住類（含廣域／快速防守），穿透時傷害 ¼'],
+  'eelevate': ['', '（模擬沒有處理這個特性）'],
+};
+const abName = (E, k) => E.abilZh(k) || ABIL_NOTE[k]?.[0] || k;
 // pre＝選角時的預覽（沒有誰在場上，不標場上／後排）
 function monBlock(E, ctx, st, s, i, pre = false) {
   const M = st.sd[s].mons[i], act = !pre && st.sd[s].act === i;
@@ -196,10 +226,10 @@ function monBlock(E, ctx, st, s, i, pre = false) {
     : M.status === 'frz' ? `（計數 ${M.frz}：每次輪到出招減 1，減到 0 一定融化，沒到 0 時每次 1/4 機率融化）` : '') : '';
   const bs = E.MON[M.fk || M.key]?.bs || E.MON[M.key].bs, mega = !!E.MON[M.key].base;
   const L = [`  [${i}] ${pre ? '' : act ? '★場上 ' : '後排 '}${nameOf(E, M)}（${E.simTypes(M).map(t => tz(E, t)).join('／')}）HP ${Math.max(0, M.hp)}/${M.max}（${pct(M.hp, M.max)}%）`
-    + (stt ? `｜${stt}` : '') + (boost ? `｜能力 ${boost}` : '') + `｜道具 ${M.item ? E.ITEMS?.[M.item]?.[0] || M.item : mega ? '超級石（已超級進化）' : '無'}｜特性 ${E.abilZh(M.b.ab) || M.b.ab}`
+    + (stt ? `｜${stt}` : '') + (boost ? `｜能力 ${boost}` : '') + `｜道具 ${M.item ? E.ITEMS?.[M.item]?.[0] || M.item : mega ? '超級石（已超級進化）' : '無'}｜特性 ${abName(E, M.b.ab)}`
     + `｜速度 ${E.simSpeed(ctx, st, M)}｜種族值 ${bs.join('/')}`];
-  L.push(`      特性：${descOf(E.ABILS, M.b.ab) || '（沒有說明）'}${M.item && descOf(E.ITEMS, M.item) ? `｜道具：${descOf(E.ITEMS, M.item)}` : ''}`);
-  const extra = [M.lock && `講究鎖住${E.MOVES[M.lock]?.[0]}`, M.chg && `蓄力中${E.MOVES[M.chg]?.[0]}`, M.rech && '下回合要休息', act && M.last && `上一招${E.MOVES[M.last]?.[0] || M.last}`,
+  L.push(`      特性：${descOf(E.ABILS, M.b.ab) || ABIL_NOTE[M.b.ab]?.[1] || '（沒有說明）'}${M.item && descOf(E.ITEMS, M.item) ? `｜道具：${descOf(E.ITEMS, M.item)}` : ''}`);
+  const extra = [M.lock && `講究鎖住${E.MOVES[M.lock]?.[0]}`, M.chg && `蓄力中${E.MOVES[M.chg]?.[0]}`, M.rech && '下回合要休息', act && M.last && `上一招${E.simMoveZh(M.last)}`,
     ...(act ? volText(E, M) : [])].filter(Boolean);
   if (extra.length) L.push(`      狀態：${extra.join('、')}`);
   const foes = st.sd[1 - s].mons.map((D, j) => [D, j]).filter(([D]) => D.hp > 0);
@@ -208,8 +238,10 @@ function monBlock(E, ctx, st, s, i, pre = false) {
   if (myForms) L.push('      （戰鬥切換：出攻擊招時變刀劍形態，下面自己的傷害照刀劍形態算；用王者盾牌變回盾牌形態）');
   for (const k of M.moves) {
     const mv = E.MOVES[k], acc = mv[6] ?? 100, pri = E.simPri(st, M, k), pri0 = E.simPri(st, { ...M, b: { ...M.b, ab: '' } }, k);
-    const head = `      ${mv[0]}（${tz(E, mv[1])}／${CAT_ZH[mv[2]] || mv[2]}${mv[3] ? '／威力 ' + mv[3] : ''}${acc < 100 ? '／命中 ' + acc : ''}`
-      + `${pri ? '／先制 ' + (pri > 0 ? '+' : '') + pri + (pri !== pri0 ? `（${E.abilZh(M.b.ab) || M.b.ab}）` : '') : ''}${E.FLAG.contact.has(k) ? '／接觸' : ''}`
+    // 實際的屬性（氣象球照天氣、皮膚類特性等，simMoveType），和資料上的不同時註明
+    const ty = E.simMoveType(st, atk, k) || mv[1];
+    const head = `      ${mv[0]}（${tz(E, ty)}${ty !== mv[1] ? `（原本${tz(E, mv[1])}）` : ''}／${CAT_ZH[mv[2]] || mv[2]}${mv[3] ? '／威力 ' + mv[3] : ''}${acc < 100 ? '／命中 ' + acc : ''}`
+      + `${pri ? '／先制 ' + (pri > 0 ? '+' : '') + pri + (pri !== pri0 ? `（${abName(E, M.b.ab)}）` : '') : ''}${E.FLAG.contact.has(k) ? '／接觸' : ''}`
       + `${E.HITS[k] ? '／' + (E.HITS[k][1] || E.HITS[k][0] + ' 下') : ''}）PP ${M.pp[k]}/${mv[5]}`;
     const desc = String(mv[4] || '').replace(/\s+/g, '').slice(0, 70), eff = effText(E, k);
     if (E.SIM_SUP[k]) { L.push(`${head}：${desc}`); continue; }
@@ -226,7 +258,7 @@ function cantText(E, st, O) {
   const M = st.sd[0].mons[st.sd[0].act];
   if (!O.every(o => o.t === 'mv' || o.t === 'sw')) return '';
   const can = new Set(O.filter(o => o.t === 'mv').map(o => o.k));
-  const why = k => M.pp[k] <= 0 ? 'PP 用完' : M.v.taunt && E.SIM_SUP[k] ? '被挑釁' : M.v.dis?.k === k ? '被定身' : M.lock && M.lock !== k ? '講究鎖住別的招'
+  const why = k => M.pp[k] <= 0 ? 'PP 用完' : k === 'destiny-bond' && M.v.db ? '同命連續使用會失敗' : M.v.taunt && E.SIM_SUP[k] ? '被挑釁' : M.v.dis?.k === k ? '被定身' : M.lock && M.lock !== k ? '講究鎖住別的招'
     : M.v.enc ? '被再來一次' : '一定會失敗或條件不符（例如滿血不能回復、上場第一回合限定、對手已有異常）';
   const no = M.moves.filter(k => !can.has(k));
   return no.length ? '【這回合不能選】' + no.map(k => `${E.MOVES[k]?.[0] || k}（${why(k)}）`).join('、') : '';
@@ -244,6 +276,8 @@ function fieldText(E, st) {
   });
   return f.join('；') || '無';
 }
+const DMG_NOTE = '（傷害：範圍＝16 個亂數最低～最高、不含命中率與急所；期望＝含命中率的平均（所以可能比最低還低）；打倒機率看目前 HP、不算急所，命中率不到 100 另外標；'
+  + '後面列自己會吃的反作用力、凸凸頭盔等）';
 function show(r, G) {
   const { E, ctx, st } = r, out = [];
   out.push(`===== ${r.over ? '對戰結束' : `選擇 #${r.di}：第 ${st.turn + 1} 回合${r.phase === 'replace' ? '（補位：選誰上場）' : ''}`} =====`);
@@ -255,7 +289,7 @@ function show(r, G) {
     return out.join('\n');
   }
   out.push(`【場地】${fieldText(E, st)}`);
-  out.push('（傷害：範圍＝16 個亂數最低～最高、不含命中率與急所；期望＝含命中率的平均；打倒機率看目前 HP、不算急所，命中率不到 100 另外標）');
+  out.push(DMG_NOTE);
   ['我方（你）', '對手（AI）'].forEach((who, s) => { out.push(`【${who}】`); st.sd[s].mons.forEach((_, i) => out.push(...monBlock(E, ctx, st, s, i))); });
   // 補位時場上有倒下的，速度比較沒有意義，不列
   if (r.phase === 'turn') {
@@ -285,7 +319,11 @@ function preview(G, file) {
   st.wx = st.ter = null;
   const out = ['===== 選角：雙方各 6 隻，選 3 隻帶出場（第一隻先發） =====',
     '（看得到對手的 6 隻、看不到對手帶哪 3 隻；AI 照出戰選角的建議帶，也看不到你帶誰。帶出場後雙方都看得到對方帶的 3 隻）',
-    '（傷害：同對戰中的格式，都是滿 HP、沒有能力變化、沒有天氣場地；出場特性（威嚇、開天氣場地等）沒算）'];
+    DMG_NOTE, '（選角的傷害都是滿 HP、沒有能力變化、沒有天氣場地；出場特性（威嚇、開天氣場地等）沒算）'];
+  // 出場會開天氣／場地的（simEntryField 的 WX_AB、TER_AB）：上面的傷害沒算，另外列
+  const field = mons.flatMap((ms, s) => ms.map(M => [s, M, E.WX_AB[M.b.ab] || E.TER_AB[M.b.ab]]).filter(x => x[2]))
+    .map(([s, M, f]) => `${s ? '對手' : '我方'}${nameOf(E, M)}出場開${E.FIELD_ZH[f] || f}`);
+  if (field.length) out.push(`【出場會開天氣／場地（上面的傷害沒算）】${field.join('、')}`);
   ['我方（你）', '對手（AI）'].forEach((who, s) => { out.push(`【${who}】`); st.sd[s].mons.forEach((_, i) => out.push(...monBlock(E, ctx, st, s, i, true))); });
   out.push(`下指令：node tools/sim_play.js bring ${file} 先發編號 編號 編號 理由（我方方括號裡的 [0]～[5]）`);
   return out.join('\n');

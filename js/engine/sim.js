@@ -2456,14 +2456,14 @@ function simGreedyAct(ctx, st, s, pre) {
   // 雙方每招打中時的期望傷害與命中率（simGreedyPre；simExp＝兩者相乘 ÷ 100），dt、dm 與下面逐招共用
   const P = pre || simGreedyPre(ctx, st), mH = P[s], exp = ([h, a]) => h * a / 100;
   const tExp = T.moves.map(k => exp(P[1 - s].get(k))), dt = Math.max(0, ...tExp), dm = Math.max(0, ...M.moves.map(k => exp(mH.get(k))));
-  // 對手打我最痛那一招的分類（牆類看這個）
-  const dtCat = dt > 0 ? simCat(T.moves[tExp.indexOf(dt)]) : '';
+  // 對手打我最痛那一招（牆類看分類、同命看先制）
+  const dtK = dt > 0 ? T.moves[tExp.indexOf(dt)] : '';
   let best = mv[0], bv = -Infinity;
   mv.forEach(o => {
     const k = o.k, hk = mH.get(k);
     let v;
     const p = (hk ? hk[1] : simAcc(st, M, T, k, false)) / 100;
-    if (SIM_SUP[k]) v = p * simGreedySup(st, s, M, T, k, dt, dm, dtCat);
+    if (SIM_SUP[k]) v = p * simGreedySup(st, s, M, T, k, dt, dm, dtK);
     else {
       const e = k === 'upper-hand' ? 0 : hk ? hk[0] : simExpHit(ctx, st, M, T, k), sub = T.v.sub > 0 && !FLAG.sound.has(k) && M.b.ab !== 'infiltrator', ko = !sub && e >= T.hp;
       v = p * (sub ? Math.min(e, T.v.sub) / T.max / 2 : Math.min(e, T.hp) / T.max + (ko ? 1 + (simPri(st, M, k) > 0 ? 0.5 : 0) : 0));
@@ -2477,10 +2477,10 @@ function simGreedyAct(ctx, st, s, pre) {
 // 簡單規則的輔助招（一定失敗的已經不在選項裡）：打得倒對手就不用；dt＝對手對我最痛一招的期望傷害、dm＝我對對手最痛一招的期望傷害。
 // 強化攻擊／特攻／速度：對手打我不到剩下 HP 的 35%、自己還沒強化超過 +3 時 0.6（只強化防禦的 0.3）；回復：HP 一半以下、對手一下打不掉一半時 0.7；
 // 祈願：HP 六成以下 0.4；異常、哈欠、寄生種子：我兩下打不倒對手時 0.5（睡眠類 0.65、寄生 0.4）；撒菱類：對手還有後排、我不怕被打時 0.45；
-// 牆：對手打得痛（兩成以上）、反射壁／光牆對得上那一招的物理／特殊（dtCat）時 0.4；吼叫、黑霧：對手強化合計 +2 以上時 0.8；蓄力同強化防禦；生命水滴同回復但 0.4；自我暗示、速度互換見下面；
+// 牆：對手打得痛（兩成以上）、反射壁／光牆對得上那一招（dtK）的物理／特殊時 0.4；吼叫、黑霧：對手強化合計 +2 以上時 0.8；蓄力同強化防禦；生命水滴同回復但 0.4；自我暗示、速度互換見下面；
 // 守住類只在特性加速時用（見下）；其他 0（只有往前算一回合時才會選）
-function simGreedySup(st, s, M, T, k, dt, dm, dtCat) {
-  const x = SIM_SUP[k], safe = dt < M.hp * 0.35;
+function simGreedySup(st, s, M, T, k, dt, dm, dtK) {
+  const x = SIM_SUP[k], safe = dt < M.hp * 0.35, dtCat = dtK ? simCat(dtK) : '';
   // 守住類（不含挺住）：特性加速、這回合會被比我快的對手打倒、+1 後就比對手快 → 守住拿加速（上一回合剛守住過的不算）。
   // 對手先動就打倒我，我打得倒牠也沒用，所以放在「打得倒就不用輔助招」前面。2026-11-18 tools/sim_play.js：推演裡超級火焰雞不會守住，
   // 換上來的超級烈咬陸鯊被推演成三回合掃光（實打 AI 勝率 20%）
@@ -2509,11 +2509,16 @@ function simGreedySup(st, s, M, T, k, dt, dm, dtCat) {
     case 'screen': return dt > M.max * 0.2 && (k === 'aurora-veil' || (k === 'reflect') === (dtCat === 'physical')) ? 0.4 : 0;
     case 'phaze': case 'haze': return T.st.atk + T.st.spa + T.st.spe >= 2 ? 0.8 : 0;
     case 'transform': return 0.9;
-    // 戲法空間：自己比對手慢（還沒開）或比對手快（對手開了）時；順風：比對手慢、×2 就追得上；同命：這回合會被打倒；
+    // 戲法空間：自己比對手慢（還沒開）或比對手快（對手開了）時；順風：比對手慢、×2 就追得上；
+    // 同命：這回合會被打倒、而且同命比對手最痛那一招先出（先制比較高，或一樣高時比較快；比較慢的還沒出招就倒下，同命來不及用。
+    // 2026-11-19 tools/sim_play.js g17#6 把鋁鋼橋龍改成滿血：比較慢的耿鬼（23%）打不倒對手時，推演裡原本會用同命）；
     // 接棒：強化合計 +2 以上；斷尾、復生祈禱、回收利用、顛倒（對手強化 +2 以上）、定身法（對手上一招是牠最痛的）
     case 'troom': { const a = simSpe(st, M), b = simSpe(st, T); return (st.troom ? a > b : a < b) ? 0.6 : 0; }
     case 'tailwind': { const a = simSpe(st, M), b = simSpe(st, T); return a < b && a * 2 > b ? 0.55 : 0; }
-    case 'dbond': return dt >= M.hp ? 0.75 : 0;
+    case 'dbond': {
+      const a = simPri(st, M, k), b = dtK ? simPri(st, T, dtK) : 0;
+      return dt >= M.hp && (a > b || a === b && simFaster(st, simSpe(st, M), simSpe(st, T))) ? 0.75 : 0;
+    }
     case 'baton': return Object.values(M.st).reduce((t, v) => t + Math.max(0, v), 0) >= 2 ? 0.5 : 0;
     case 'shedtail': return safe ? 0.4 : 0;
     case 'revive': return 0.8;
