@@ -6,7 +6,7 @@
 // item：對手各格標的道具（空＝用預設 btOppItems、'-'＝沒有道具）；ab：對手各格選的特性（空＝用 defAbOf 的預設）；
 // form：各格選的型態（空＝隊伍分析／出戰選角裡的那個，用來切換超級進化前後）；weather、terrain、tr 戲法空間、tw 有順風的一方（'me'／'opp'）；
 // bring：我方這場帶的隊伍格子（null＝照出戰選角第 1 名組合，見 btBrought）；seen：對手各格出場過沒（放上場就標）；
-// used：對手各格用過的招式 key（見 btOppSet）；osp：對手各格改過的能力點數／性格 { sp?, nat? }（沒改的那項照 OP.GG 最常見，null＝都沒改）；
+// used：對手各格用過的招式 key（見 btOppSet）；osp：對手各格改過的能力點數／性格 { sp?, nat? }（沒改的那項照 Showdown 最常見，null＝都沒改）；
 // keys：記錄時各格的寶可夢 key（隊伍或對手換了寶可夢，那格的紀錄就清掉）；
 // status：雙方各格的異常狀態（BT_STATUS，換下場不會好）；walls：雙方的牆（BT_WALLS）；haz：雙方場地上的撒菱類（BT_HAZ 各幾層）；
 // noItem：我方各格的道具用掉了、被拍落（對手看 item 的 '-'）；
@@ -31,7 +31,7 @@ const BT_REL = new Set([...ATK_REL, ...DEF_REL, ...LIVE_ABILS]);
 // 場上幾隻：單打 1、雙打 2（同先發的數量）
 const btN = () => LEAD_N[team.fmt];
 const btList = side => side === 'me' ? team.mons : bring.opp;
-// 格子 i 沒切換型態時的預設型態：我方照隊伍；對手照猜帶法的當法（likelyForm：某顆超級石使用率過半的當成超級進化）
+// 格子 i 沒切換型態時的預設型態：我方照隊伍；對手照猜帶法的當法（likelyForm：某種超級進化佔過半的當成超級進化）
 const btKey0 = (side, i) => side === 'opp' && MON[bring.opp[i]] ? likelyForm(MON[bring.opp[i]], team.fmt).key : btList(side)[i];
 const btKey = (side, i) => battle.form[side][i] || btKey0(side, i);
 // 格子 i 可以切換的型態（原型＋超級進化）；我方只有隊伍裡選了超級進化型態的能切回原型（一般型態登錄不了超級石）；不能切換回傳 []
@@ -69,7 +69,7 @@ function btBrought() {
   }
   return btPlan.v.filter(i => team.mons[i]);
 }
-// 對手各格實際算的道具：標了的照標的（'-'＝沒有道具），沒標的預設牠 OP.GG 最常帶的。同一隊不能帶重複的道具：
+// 對手各格實際算的道具：標了的照標的（'-'＝沒有道具），沒標的預設牠 Showdown 最常帶的。同一隊不能帶重複的道具：
 // 標了的先佔，其餘依使用率由高到低分配（同一顆給使用率高的那隻，另一隻改拿牠下一個常帶的）；超級進化帶自己的超級石（回傳 ''，不影響計算）。
 // unset＝把這一格當成沒標（選單上顯示「預設是什麼」用）
 function btOppItems(unset = -1) {
@@ -81,8 +81,8 @@ function btOppItems(unset = -1) {
     .forEach(({ i, it }) => { if (!done.has(i) && !taken.has(it)) { out[i] = it; taken.add(it); done.add(i); } });
   return out;
 }
-// 對手格子 i（寶可夢 key）當成配招算的：招式＝用過的，沒滿 4 招的用 OP.GG 使用率高的補滿 4 招（沒標過＝使用率前 4 招，同對位 duel 的預設）；
-// 能力點數、性格＝改過的（osp），沒改的照 OP.GG 最常見（topSpread）。都沒有回傳 undefined（照 battler 的預設）
+// 對手格子 i（寶可夢 key）當成配招算的：招式＝用過的，沒滿 4 招的用 Showdown 使用率高的補滿 4 招（沒標過＝使用率前 4 招，同對位 duel 的預設）；
+// 能力點數、性格＝改過的（osp），沒改的照 Showdown 最常見（topSpread）。都沒有回傳 undefined（照 battler 的預設）
 function btOppSet(i, key) {
   const used = battle.used[i], o = battle.osp[i], fmt = team.fmt;
   if (!used.length && !o) return undefined;
@@ -129,16 +129,16 @@ function btStHTML(side, p) {
     + `<button class="mini" data-bst="${side}.${p}.${n}" data-d="1" aria-label="${zh} +1">＋</button></span>`).join('')
     + (s.some(Boolean) ? `<button class="mini" data-bst0="${side}.${p}">全部歸 0</button>` : '') + '</div>';
 }
-// 型態切換；對手的超級進化標 OP.GG 帶這顆超級石的比例（預設型態見 btKey0：過半的預設超級進化）
+// 型態切換；對手的超級進化標 Showdown 統計佔全家族的比例（預設型態見 btKey0：過半的預設超級進化）
 function btFormHTML(side, i) {
   const forms = btForms(side, i), cur = btKey(side, i);
   if (!forms.length) return '';
   const p = side === 'opp' ? Object.fromEntries(megaInfo(forms[0], team.fmt).map(x => [x.mon.key, x.p])) : {};
   return `<div class="c-f"><span class="c-l">型態</span><div class="seg">${forms.map(m => `<button data-bform="${side}.${i}" data-k="${m.key}" aria-pressed="${m.key === cur}">`
-    + `${m.base ? (forms.length > 2 ? m.zh : '超級進化') : '沒進化'}${p[m.key] != null ? `<span class="meta">${p[m.key]}% 帶石</span>` : ''}</button>`).join('')}</div></div>`;
+    + `${m.base ? (forms.length > 2 ? m.zh : '超級進化') : '沒進化'}${p[m.key] != null ? `<span class="meta">佔 ${p[m.key]}%</span>` : ''}</button>`).join('')}</div></div>`;
 }
 // 對手道具選單：第一項是預設（btOppItems 分配到的），再來是「沒有道具」；其他對手標了的道具不列（同一隊不能帶重複的道具），
-// 超級石不列（超級進化在「型態」切換）；這隻 OP.GG 常帶的排前面，影響傷害或速度的附效果說明，其他的排後面
+// 超級石不列（超級進化在「型態」切換）；這隻 Showdown 常帶的排前面，影響傷害或速度的附效果說明，其他的排後面
 function btItemOptions(i, key) {
   if (MON[key].base) { const st = stoneOf(MON[key]); return `<option value="">${st ? ITEMS[st][0] : '專屬的超級石'}（超級進化固定）</option>`; }
   const taken = new Set(battle.item.filter((k, j) => k && k !== '-' && j !== i)), use = Object.fromEntries(useOf(key, team.fmt)?.items || []);
@@ -161,14 +161,14 @@ function btUsedHTML(i, key) {
     + (full ? '' : `<select class="sel" data-bused-add="${i}" aria-label="其他招式"><option value="">其他招式…</option>${rest.map(k => `<option value="${k}">${MOVES[k][0]}</option>`).join('')}</select>`)
     + `</div><span class="meta">${used.length}／4${full ? '：只算這 4 招' : used.length ? '：沒標的用使用率高的補滿 4 招' : '：照使用率前 4 招算；牠用了哪招就點，「打中」「實際」也會自動標'}</span></div>`;
 }
-// 對手的能力點數、性格：預設照 OP.GG 最常見（topSpread），可以改成 OP.GG 其他常見的（或從誰先動、實際傷害反推後套用）
+// 對手的能力點數、性格：預設照 Showdown 最常見的組合（topSpread），可以改成 Showdown 其他常見的（或從誰先動、實際傷害反推後套用）
 function btSpreadHTML(i, key) {
   const use = useOf(key, team.fmt), top = topSpread(key, team.fmt), o = battle.osp[i] || {};
   if (!top) return '';
   const opt = (v, zh, cur) => `<option value="${v}"${v === cur ? ' selected' : ''}>${zh}</option>`, nats = use.natures.map(([n]) => n.join('+'));
-  return `<div class="c-f"><span class="c-l">能力點數</span><select class="sel" data-bosp="${i}" aria-label="能力點數"><option value="">OP.GG 最常見：${spText(top.sp)}</option>`
+  return `<div class="c-f"><span class="c-l">能力點數</span><select class="sel" data-bosp="${i}" aria-label="能力點數"><option value="">Showdown 最常見：${spText(top.sp)}</option>`
     + use.spreads.map(([sp, p]) => opt(sp.join('+'), `${spText(sp)}（${p}%）`, o.sp?.join('+'))).join('') + '</select></div>'
-    + `<div class="c-f"><span class="c-l">性格</span><select class="sel" data-bonat="${i}" aria-label="性格"><option value="">OP.GG 最常見：${natText(top.nat)}</option>`
+    + `<div class="c-f"><span class="c-l">性格</span><select class="sel" data-bonat="${i}" aria-label="性格"><option value="">Showdown 最常見：${natText(top.nat)}</option>`
     + use.natures.map(([n, p]) => opt(n.join('+'), `${natText(n)}（${p}%）`, o.nat?.join('+'))).join('')
     + [[0, 0], ...NATURES].filter(n => !nats.includes(n.join('+'))).map(n => opt(n.join('+'), natText(n), o.nat?.join('+'))).join('') + '</select></div>';
 }
@@ -288,8 +288,8 @@ function btVariant(O, c) {
   v.H = hpOf(v); v.cur = Math.ceil(v.H * battle.ohp[O.i] / 100);
   return v;
 }
-// 對手 O 可能的其他配置裡，對得上觀察的（ok(對手配置) 為真）：先試只改一項（道具 items、或 OP.GG 常見的點數＋性格，
-// 性格不降有投點數的那項），都對不上才試道具和點數性格一起改。依 OP.GG 使用率由高到低取前 3 個，每個 { item?, sp?, nat?, w, label }
+// 對手 O 可能的其他配置裡，對得上觀察的（ok(對手配置) 為真）：先試只改一項（道具 items、或 Showdown 常見的點數＋性格，
+// 性格不降有投點數的那項），都對不上才試道具和點數性格一起改。依 Showdown 使用率由高到低取前 3 個，每個 { item?, sp?, nat?, w, label }
 // 變身中的對手（百變怪）：道具照百變怪自己的使用率，能力點數性格是抄來的、不試
 function btFix(O, items, ok) {
   const k0 = O.tfFrom || O.key, use = useOf(k0, team.fmt), top = O.tfFrom ? null : topSpread(O.key, team.fmt), itemUse = Object.fromEntries(use?.items || []);
@@ -298,7 +298,7 @@ function btFix(O, items, ok) {
     .map(k => ({ item: k, w: itemUse[k] || 0.5, label: k === '-' ? '沒有道具' : `${ITEMS[k][0]}${itemUse[k] ? `（這隻 ${itemUse[k]}% 帶）` : ''}` }));
   const sps = top ? use.spreads.flatMap(([sp, p]) => [...use.natures, [[0, 0], 0]].filter(([n]) => !n[1] || !sp[n[1]])
     .filter(([n]) => sp.join() !== (O.sp || []).join() || n.join() !== (O.nat || []).join())
-    .map(([n, q]) => ({ sp, nat: n, w: p * Math.max(q, 0.5), label: `點數 ${spText(sp)}・${natText(n)}（OP.GG ${p}%${q ? `／${q}%` : ''}）` }))) : [];
+    .map(([n, q]) => ({ sp, nat: n, w: p * Math.max(q, 0.5), label: `點數 ${spText(sp)}・${natText(n)}（Showdown ${p}%${q ? `／${q}%` : ''}）` }))) : [];
   const pick = list => list.filter(c => ok(btVariant(O, c))).sort((x, y) => y.w - x.w).filter((c, n, a) => a.findIndex(d => d.label === c.label) === n).slice(0, 3);
   const one = pick([...its, ...sps]);
   return one.length ? one : pick(its.flatMap(a => sps.map(b => ({ ...a, ...b, w: a.w * b.w, label: `${a.label}＋${b.label}` }))));
@@ -307,7 +307,7 @@ function btFix(O, items, ok) {
 const btFixHTML = (i, fixes, why) => fixes.length
   ? '可能是：' + fixes.map(c => `<button class="mini" data-bfix="${i}"${c.item != null ? ` data-item="${c.item}"` : ''}`
     + `${c.sp ? ` data-sp="${c.sp.join('+')}" data-nat="${c.nat.join('+')}"` : ''}>套用 ${c.label}</button>`).join('')
-  : `OP.GG 常見的道具、點數、性格都對不上（可能是${why}沒標）。`;
+  : `Showdown 常見的道具、點數、性格都對不上（可能是${why}沒標）。`;
 // 實際誰先動（oppFirst＝牠先動）：和預測對不上時，試對手帶／不帶講究圍巾、其他常見的點數性格。
 // 戲法空間時慢的先動：牠先動＝牠比預測慢（試不帶講究圍巾），我先動＝牠比預測快（試講究圍巾）
 function btSpeedObs(M, O, f, oppFirst) {
@@ -538,13 +538,13 @@ function btResultHTML() {
     + btFocusHTML(mine, opps, f) + btComboHTML(mine, opps, f)
     + mine.map(M => opps.map(O => btPairHTML(M, O, f)).join('')).join('') + swap
     + '<p class="note">※ 我方照「隊伍分析」登錄的招式、特性、道具、能力點數與性格算，沒登錄的欄位和對手都照「傷害計算」的預設：'
-    + '能力點數與性格用 OP.GG 最常見的（沒有統計的攻擊／特攻 32＋性格、速度 32＋性格、HP／防禦／特防 0）、'
-    + '特性用 OP.GG 最常見的（對手的特性可在上方改；超級進化用固定特性）。對手某顆超級石使用率過半的預設是超級進化型態（同「對手可能帶的」），可在「型態」切回。'
-    + '對手的道具預設 OP.GG 最常帶的，看到實際道具就在選單改（用掉或被拍落選「沒有道具」）。同一隊不能帶重複的道具：'
+    + '能力點數與性格用 Showdown 最常見的組合（沒有統計的攻擊／特攻 32＋性格、速度 32＋性格、HP／防禦／特防 0）、'
+    + '特性用 Showdown 最常見的（對手的特性可在上方改；超級進化用固定特性）。對手某種超級進化佔過半的預設是超級進化型態（同「對手可能帶的」），可在「型態」切回。'
+    + '對手的道具預設 Showdown 最常帶的，看到實際道具就在選單改（用掉或被拍落選「沒有道具」）。同一隊不能帶重複的道具：'
     + '標了的先算，沒標的依使用率由高到低分配，同一顆給使用率高的那隻、另一隻改拿牠下一個常帶的；其他對手標了的道具選單也不列。'
     + '按「打中」「實際」時，抗性樹果減半了、氣球被打中、氣勢披帶撐住了、被拍落，挨打那一方就自動標成沒有道具（我方是位置卡的「道具沒了」，也可以自己點）。'
     + '% 是佔對方最大 HP 的比例；「一擊」「二擊」是連用同一招打掉對方剩下的 HP（對手剩下的 % 換算成 HP 時無條件進位），'
-    + '不是全滿時氣勢披帶、結實、多重鱗片沒有作用。招式看登錄的，沒登錄的（含對手）看 OP.GG 使用率前 4 招（對手用過的先算，再照使用率補滿 4 招）裡的攻擊招式，依傷害由高到低排。'
+    + '不是全滿時氣勢披帶、結實、多重鱗片沒有作用。招式看登錄的，沒登錄的（含對手）看 Showdown 使用率前 4 招（對手用過的先算，再照使用率補滿 4 招）裡的攻擊招式，依傷害由高到低排。'
     + '先動看實際速度（能力變化、順風 ×2、戲法空間、講究圍巾、天氣／場地加速特性、麻痺 ×½）；同速各 50%，先制招式不看速度。能力變化換下場就清掉，異常狀態不會。'
     + '雙打的範圍招式打到兩隻以上時 ×0.75，對面場上只剩一隻（地震這類連隊友一起打的，隊友也不在）時不減；噴火／噴水以 HP 全滿計。'
     + '異常狀態在位置卡標（麻痺、灼傷影響這裡的傷害與速度；中毒、劇毒、睡眠、冰凍只有上方的「推薦出招」算得到），牆在下方「我方／對手的牆」標，'
@@ -554,7 +554,7 @@ function btResultHTML() {
     + '按「打中」「實際」打到牠也會自動標成破了，之後照一般傷害算）。加速、持久力這類回合中的能力變化請在位置卡自己調。'
     + '「打中」照那一招的平均傷害（最低、最高的平均）扣挨打那一方剩下的 HP（HP 全滿時氣勢披帶、結實撐住剩 1），實際扣多少看遊戲畫面再拉 HP 調整。'
     + '打了才知道：「實際」填遊戲裡打完剩下多少（我方 HP、對手 %），扣血並和預測比對；「實際：我先動／牠先動」和預測的速度比對。'
-    + '對不上時會試對手的其他配置，列出對得上的（依 OP.GG 使用率排，最多 3 個），點「套用」就改成那樣算：'
+    + '對不上時會試對手的其他配置，列出對得上的（依 Showdown 使用率排，最多 3 個），點「套用」就改成那樣算：'
     + '牠打得比預測痛／輕試會讓那招變痛的道具（屬性強化、力量頭帶／博識眼鏡、生命寶珠、達人帶、寶石）或其他常見點數性格，'
     + '牠比預測耐打／不耐打試那招屬性的抗性樹果或其他常見點數性格，牠比預測快／慢試講究圍巾或其他常見點數性格（同一隊不重複的道具照舊）。'
     + '對手的 % 前後各差 1% 內都算對得上；比預測痛時會先看急所（×1.5，不計攻擊方的能力下降、防守方的能力上升）對不對得上，'
@@ -657,9 +657,9 @@ function btRecRender() {
   if (!r.st) { box.innerHTML = r.why ? `<p class="muted small">${r.why}</p>` : ''; return; }
   const head = '<div class="res-head">推薦出招<span class="muted small">（照目前場上狀況往下模擬，對手照最穩的出法）</span>'
     + `<label class="small"><input type="checkbox" data-bhid${r.hid ? ' checked' : ''}> 看不到對手招式</label></div>`;
-  const hidNote = r.hid ? '勾了「看不到對手招式」：對手每隻「用過的招式」以外的招照 OP.GG 使用率猜 4 組、每組各打 1/4 次合起來，表格列出猜過的招，'
+  const hidNote = r.hid ? '勾了「看不到對手招式」：對手每隻「用過的招式」以外的招照 Showdown 使用率猜 4 組、每組各打 1/4 次合起來，表格列出猜過的招，'
     + '「有這招」是 4 組裡有幾成猜牠帶；★ 是 4 組平均勝率最高的選擇（不給混合比例）。' : '';
-  const note = '<p class="note">※ 用「模擬對戰」的樹搜尋（往下打約 3000 次）：我方照「隊伍分析」登錄的配招；對手照 OP.GG 常見的配招、上方標的特性道具與用過的招式，'
+  const note = '<p class="note">※ 用「模擬對戰」的樹搜尋（往下打約 3000 次）：我方照「隊伍分析」登錄的配招；對手照 Showdown 常見的配招、上方標的特性道具與用過的招式，'
     + '還沒出場的照「猜」。勝率是對手照牠最穩的出法時我方的平均勝率（模擬次數有限，差 2～3% 內算差不多）；建議出的照比例排在前面，'
     + '同時出招，★ 以外比例也高的可以混著出，免得被猜中。'
     + `天氣、場地、牆、戲法空間當成剛開（5 回合），順風當成剛開（4 回合）；撒菱類照上方標的；睡眠當還要睡 2 次、冰凍最多 3 次、劇毒當剛中；`
@@ -857,7 +857,7 @@ $('#p-battle').addEventListener('change', e => {
   if (d.bhp) { btHpRow(t, d.bhp === 'me' ? battle.hp[+d.i] ?? +t.max : battle.ohp[+d.i], true); return; }
   if (d.bab != null) battle.ab[+d.bab] = t.value;
   else if (d.bitem != null) battle.item[+d.bitem] = t.value;
-  // 對手用過的招式（從「其他招式」加）、改能力點數／性格（選回第一項＝照 OP.GG 最常見）
+  // 對手用過的招式（從「其他招式」加）、改能力點數／性格（選回第一項＝照 Showdown 最常見）
   else if (d.busedAdd != null) { const u = battle.used[+d.busedAdd]; if (t.value && u.length < 4 && !u.includes(t.value)) battle.used[+d.busedAdd] = [...u, t.value]; }
   else if (d.bosp != null || d.bonat != null) {
     const i = +(d.bosp ?? d.bonat), o = { ...battle.osp[i], [d.bosp != null ? 'sp' : 'nat']: t.value ? t.value.split('+').map(Number) : undefined };

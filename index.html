@@ -466,7 +466,7 @@ footer a { color: inherit; }
   <section id="p-team" role="tabpanel" hidden>
     <div class="card" id="tTop">
       <div class="look-top">
-        <p class="muted small b-intro">建議先挑 2 隻左右的核心，再照下方「推薦」（聯防挑候選、模擬決定補誰）一格一格補到 6 隻。先點隊伍格子，再選屬性（1～2 個），從下方列出的寶可夢挑一隻；挑好會留在這格、下方接著顯示配招，下一隻再點下一個格子；格子右上角的 × 只清那一格。只選屬性不挑寶可夢也能看屬性分析，但看不到角色、常用招式與特性。挑好寶可夢時配招會先填好 OP.GG 使用率前 4 招、最常用的特性與道具、最常見的能力點數與性格，可以在下方改成自己的配招（招式、特性、道具、能力點數、性格）。</p>
+        <p class="muted small b-intro">建議先挑 2 隻左右的核心，再照下方「推薦」（聯防挑候選、模擬決定補誰）一格一格補到 6 隻。先點隊伍格子，再選屬性（1～2 個），從下方列出的寶可夢挑一隻；挑好會留在這格、下方接著顯示配招，下一隻再點下一個格子；格子右上角的 × 只清那一格。只選屬性不挑寶可夢也能看屬性分析，但看不到角色、常用招式與特性。挑好寶可夢時配招會先填好 Showdown 使用率前 4 招、最常用的特性與道具、最常見的能力點數與性格，可以在下方改成自己的配招（招式、特性、道具、能力點數、性格）。</p>
         <div class="top-actions"><button class="btn ghost" data-copy>複製連結</button><button class="btn ghost" id="tClear">清除整隊</button></div>
       </div>
       <div class="c-f t-save"><span class="c-l">記憶的隊伍</span><input type="text" class="sel" id="tSaveName" maxlength="30" placeholder="隊伍名稱（沒填用隊員名）" aria-label="隊伍名稱"><button class="mini" id="tSave">記住這隊</button><span class="muted small" id="tSaveMsg" role="status"></span></div>
@@ -653,7 +653,8 @@ footer a { color: inherit; }
     已對照 <a href="https://pokesynergy.app/type-chart" target="_blank" rel="noopener">PokeSynergy · Pokémon Champions Type Chart</a>、
     <a href="https://gamewith.jp/pokemon-champions/546446" target="_blank" rel="noopener">GameWith · ポケモンチャンピオンズ タイプ相性表</a>，
     中文屬性名稱依 <a href="https://wiki.52poke.com/zh-hant/%E5%B1%AC%E6%80%A7%E7%9B%B8%E5%89%8B%E8%A1%A8" target="_blank" rel="noopener">神奇寶貝百科 屬性相剋表</a>。<br>
-    隊伍分析的寶可夢名單、種族值、單打／雙打排名，常用招式／特性／道具的使用率與效果說明，以及隊友、勝於、敗於名單擷取自 <a href="https://op.gg/zh-tw/pokemon-champions/pokedex" target="_blank" rel="noopener">OP.GG 寶可夢冠軍圖鑑</a>（<span id="monsDate"></span>）。<br>
+    寶可夢名單、種族值、招式資料，以及招式／特性／道具的中文名與效果說明擷取自 <a href="https://op.gg/zh-tw/pokemon-champions/pokedex" target="_blank" rel="noopener">OP.GG 寶可夢冠軍圖鑑</a>（<span id="monsDate"></span>）；
+    單打／雙打排名，常用招式／特性／道具、能力點數與性格的使用率，以及隊友、勝於、敗於（剋星）名單取自 <a href="https://www.smogon.com/stats/" target="_blank" rel="noopener">Pokémon Showdown 天梯統計</a>（<span id="usageSrc"></span>）。<br>
     傷害計算的能力值公式依 <a href="https://gamewith.jp/pokemon-champions/546449" target="_blank" rel="noopener">GameWith · 対戦の用語一覧</a>，
     傷害公式、取整順序與天氣、道具倍率依 <a href="https://github.com/smogon/damage-calc/blob/master/calc/src/mechanics/champions.ts" target="_blank" rel="noopener">Smogon damage-calc 寶可夢冠軍版</a>，
     急所 ×1.5 依 <a href="https://gamewith.jp/pokemon-champions/560317" target="_blank" rel="noopener">GameWith · 急所の確率と効果</a>。

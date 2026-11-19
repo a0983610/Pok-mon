@@ -1,16 +1,17 @@
-# 從 OP.GG 寶可夢冠軍圖鑑頁擷取寶可夢名單（屬性、單打／雙打排名、超級進化原型），
-# 再逐隻抓有排名的寶可夢詳細頁，取單打／雙打的常用招式、特性、道具使用率，隊友、勝於、敗於名單，能力點數與性格的使用率，
-# 以及招式／特性／道具的中文名與效果（招式另存 PP、命中率、先制、範圍、追加效果、連續攻擊次數、招式標記等），
-# 和每隻可學的招式與可能的特性（LEARN；沒人常用的招式／特性另存 LEARN_MOVES／LEARN_ABILS），
-# 整個檔重寫到 index.html 旁邊的 mons-data.js。超級進化沒有獨立統計，網頁端沿用原型的；
-# 超級進化的特性是固定的，名單頁就有，另外存在名單裡。
+# 寶可夢名單（屬性、種族值、超級進化原型與超級進化後的特性）從 OP.GG 寶可夢冠軍圖鑑頁擷取，再逐隻抓詳細頁，取招式資料
+# （中文名與效果、PP、命中率、先制、範圍、追加效果、連續攻擊次數、招式標記等）和每隻可學的招式與可能的特性（LEARN；沒人常用的招式／特性另存 LEARN_MOVES／LEARN_ABILS）；
+# 道具、特性的中文名與效果從 OP.GG 的道具／特性清單頁擷取（詳細頁只附那一頁用到的）。
+# 單打／雙打的使用率統計（常用招式、特性、道具，能力點數＋性格，隊友、剋星，排名）從 Pokémon Showdown 天梯的每月統計
+# （Smogon stats 的 chaos JSON）擷取：單打用 6 選 3 的 Battle Stadium Singles（gen9championsbss…），雙打用 VGC（gen9championsvgc…，bo3 不算），
+# 分數門檻 SD_CUTOFF，自動取兩種格式都有的最新一個月。Showdown 的超級進化（帶超級石的）有自己的統計，原型只算沒帶超級石的；
+# 另外存每種超級進化佔全家族的比例（猜對手會不會超級進化用）。整個檔重寫到 index.html 旁邊的 mons-data.js。
 # 種族值不太會變，另外寫到 index.html 旁邊的 base-stats.js（不帶日期，資料沒變就不會有 diff）；
 # 體重（打草結、踢倒、重磅衝撞、高溫重壓用）OP.GG 沒有，從 Pokémon Showdown 的寶可夢資料（pokedex.json 的 weightkg）補，也寫在 base-stats.js
 # （Showdown 的冠軍版 mod 沒有自己的 pokedex，沿用主資料的體重）。
 # 寫完後列出這次新出現（舊的 mons-data.js 沒有）、網頁程式（js 資料夾）也還沒提到的招式與特性，提醒特殊效果要另外補程式。
 # 用法：python tools/update_mons.py [--stats] [index.html 路徑，預設為 repo 根目錄的 index.html；只用來決定寫到哪個資料夾，不會改 index.html]
 #   --stats：只重寫 base-stats.js（OP.GG 名單頁的種族值＋Showdown 的體重，幾秒），不抓詳細頁、不動 mons-data.js
-# 有排名的寶可夢約 250 隻要逐頁抓，跑一次約 3～5 分鐘。
+# 詳細頁約 260 頁要逐頁抓，Showdown 雙打統計檔約 18 MB，跑一次約 3～5 分鐘。
 import datetime
 import json
 import os
@@ -19,8 +20,12 @@ import sys
 import time
 import urllib.request
 
-URL = 'https://op.gg/zh-tw/pokemon-champions/pokedex'
+OPGG = 'https://op.gg/zh-tw/pokemon-champions/'
+URL = OPGG + 'pokedex'
 DEX_URL = 'https://play.pokemonshowdown.com/data/pokedex.json'
+SD_URL = 'https://www.smogon.com/stats/'
+SD_CUTOFF = 1500  # Showdown 統計的分數門檻（檔案有 0／1500／1630／1760）
+SD_FMTS = {'single': 'gen9championsbss', 'double': 'gen9championsvgc'}  # 統計檔名的開頭
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36',
     'Accept-Language': 'zh-TW,zh;q=0.9',
@@ -29,10 +34,15 @@ TYPES = ['normal', 'fire', 'water', 'electric', 'grass', 'ice', 'fighting', 'poi
          'flying', 'psychic', 'bug', 'rock', 'ghost', 'dragon', 'dark', 'steel', 'fairy']
 MIN_PCT = 5  # 使用率（四捨五入到整數）低於這個 % 的招式／特性／道具不收
 LIST_N = 10  # 隊友／勝於／敗於名單只收前幾隻
-SP_N = 6  # 能力點數配法只收前幾種（使用率四捨五入到整數，0% 的不收；配法很分散，不設 MIN_PCT 門檻）
+SP_N = 6  # 能力點數配法、點數＋性格組合只收前幾種（使用率四捨五入到整數，0% 的不收；配法很分散，不設 MIN_PCT 門檻）
 FMTS = ('single', 'double')
-# OP.GG 性格的 increased／decreased → 能力索引（1 攻擊、2 防禦、3 特攻、4 特防、5 速度，同網頁的 STAT_ZH）
-NAT_STAT = {'attack': 1, 'defense': 2, 'spAttack': 3, 'spDefense': 4, 'speed': 5}
+# Showdown 的性格英文名 → [↑能力索引, ↓能力索引]（1 攻擊、2 防禦、3 特攻、4 特防、5 速度，同網頁的 STAT_ZH；不加減的是 [0, 0]）；照 Showdown data/natures.ts
+NATURES = {'Hardy': (0, 0), 'Docile': (0, 0), 'Serious': (0, 0), 'Bashful': (0, 0), 'Quirky': (0, 0),
+           'Lonely': (1, 2), 'Brave': (1, 5), 'Adamant': (1, 3), 'Naughty': (1, 4),
+           'Bold': (2, 1), 'Relaxed': (2, 5), 'Impish': (2, 3), 'Lax': (2, 4),
+           'Modest': (3, 1), 'Mild': (3, 2), 'Quiet': (3, 5), 'Rash': (3, 4),
+           'Calm': (4, 1), 'Gentle': (4, 2), 'Sassy': (4, 5), 'Careful': (4, 3),
+           'Timid': (5, 1), 'Hasty': (5, 2), 'Jolly': (5, 3), 'Naive': (5, 4)}
 CAT_ZH = {'physical': '物理', 'special': '特殊', 'status': '變化'}
 
 
@@ -41,7 +51,7 @@ def fetch(url=URL, rsc=False):
     req = urllib.request.Request(url, headers={**HEADERS, **({'RSC': '1'} if rsc else {})})
     for n in range(3):
         try:
-            with urllib.request.urlopen(req, timeout=60) as r:
+            with urllib.request.urlopen(req, timeout=120) as r:
                 return r.read().decode('utf-8')
         except OSError:
             if n == 2:
@@ -86,16 +96,26 @@ def clean(s):
     return re.sub(r'(?<=[^\x00-\x7f])\s+|\s+(?=[^\x00-\x7f])', '', (s or '').strip())
 
 
+alnum = lambda s: re.sub(r'[^a-z0-9]', '', s.lower())
+
+
 def detail(key):
-    # 一隻寶可夢詳細頁：單打／雙打統計（沒有統計時是 null）、這頁用到的特性、道具與性格對照、全部招式的字典，
-    # 以及這隻的資料（pokemon：可學招式 moves、禁用招式 bannedMoves、可能的特性 abilities 等；沒有的話是 {}）
+    # 一隻寶可夢詳細頁：全部招式的字典，以及這隻的資料（pokemon：可學招式 moves、禁用招式 bannedMoves、可能的特性 abilities 等；沒有的話是 {}）
     txt = fetch(URL + '/' + key, rsc=True)
-    det = {f: grab(txt, f + 'Detail', '{') if '"%sDetail":{' % f in txt else None for f in FMTS}
-    lk = grab(txt, 'lookupData', '{') if '"lookupData":{' in txt else {}
     i = txt.index('"moves":[{"id":1,"key":"pound"')
     j = txt.find('"pokemon":{"id":')
     mon = grab(txt[j:], 'pokemon', '{') if j >= 0 else {}
-    return det, lk.get('abilities', []), lk.get('items', []), lk.get('natures', []), grab(txt[i:], 'moves', '['), mon
+    return grab(txt[i:], 'moves', '['), mon
+
+
+def catalog(path, key):
+    # OP.GG 的道具／特性清單頁（完整清單）：頁面裡第一個每筆都有 key、name 的 "<key>":[…] 陣列（其他同名陣列是網站選單）
+    txt = fetch(OPGG + path, rsc=True)
+    for m in re.finditer(r'"%s":\[\{' % key, txt):
+        arr = grab(txt[m.start():], key, '[')
+        if 'key' in arr[0] and 'name' in arr[0]:
+            return arr
+    raise ValueError('%s 頁找不到 %s 清單' % (path, key))
 
 
 # OP.GG 招式的 meta／statChanges／moveTraits → 只留有值的欄位（見 mons-data.js 的 MOVES 說明）
@@ -127,49 +147,6 @@ def move_row(m):
             m.get('pp'), m.get('accuracy'), m.get('priority') or 0, m.get('target'), move_extra(m)]
 
 
-def usage(det, names):
-    # [{id, usagePercent}...] → "key:使用率 key:使用率"（依使用率高到低，低於 MIN_PCT 的不收，對照不到的略過）
-    if not det:
-        return ''
-    return ' '.join('%s:%d' % (names[x['id']], round(x['usagePercent'])) for x in det
-                    if round(x['usagePercent']) >= MIN_PCT and x['id'] in names)
-
-
-def spreads(det):
-    # 能力點數配法 [{spread: "02-20-00-00-00-20"（HP-攻擊-防禦-特攻-特防-速度，16 進位）, usagePercent}...]
-    # → "2.32.0.0.0.32:使用率 ..."（依使用率高到低取前 SP_N 種；每項超過 32 或合計超過 66 的不收）
-    if not det:
-        return ''
-    out = []
-    for x in sorted(det.get('training') or [], key=lambda x: -x['usagePercent']):
-        sp = [int(h, 16) for h in x['spread'].split('-')]
-        if len(sp) == 6 and max(sp) <= 32 and sum(sp) <= 66 and round(x['usagePercent']) >= 1:
-            out.append('%s:%d' % ('.'.join(map(str, sp)), round(x['usagePercent'])))
-    return ' '.join(out[:SP_N])
-
-
-def natures(det, nats):
-    # 性格 [{id, usagePercent}...] → "↑能力索引.↓能力索引:使用率 ..."（不加減的寫 0.0；依使用率高到低，0% 的不收，對照不到的略過）
-    if not det:
-        return ''
-    out = []
-    for x in sorted(det.get('natures') or [], key=lambda x: -x['usagePercent']):
-        n = nats.get(x['id'])
-        if n is None or round(x['usagePercent']) < 1:
-            continue
-        u, d = NAT_STAT.get(n.get('increased')), NAT_STAT.get(n.get('decreased'))
-        out.append('%s:%d' % ('%d.%d' % (u, d) if u and d and u != d else '0.0', round(x['usagePercent'])))
-    return ' '.join(out)
-
-
-def ranked(det, sec, sub, known):
-    # 隊友（team.ttog，網頁上「隊友」顯示的就是這份）／勝於（win.pokemon）／敗於（lose.pokemon）：
-    # 寶可夢 key 以空白分隔，依 OP.GG 的順序取前 LIST_N 隻，名單裡沒有的型態不收
-    if not det:
-        return ''
-    return ' '.join([p['key'] for p in (det.get(sec) or {}).get(sub) or [] if p['key'] in known][:LIST_N])
-
-
 # OP.GG 的寶可夢 key → Showdown 的 id：地區型態的寫法不同（alolan→alola…）、超級進化在後面（mega-charizard-y→charizardmegay）、
 # 母的寫 f（indeedee-female→indeedeef）、公的就是原型、羽色不寫 plumage（squawkabilly-blue-plumage→squawkabillyblue）；寫法對不起來的直接對照（DEX_FIX）
 DEX_REGION = {'alolan': 'alola', 'galarian': 'galar', 'hisuian': 'hisui', 'paldean': 'paldea'}
@@ -178,7 +155,6 @@ DEX_FIX = {'floette-eternal-flower': 'floetteeternal', 'mega-meowstic': 'meowsti
 
 
 def dex_id(key):
-    alnum = lambda s: re.sub(r'[^a-z0-9]', '', s.lower())
     mega = key.startswith('mega-')
     parts = [DEX_REGION.get(p, p) for p in (key[5:] if mega else key).split('-') if p != 'plumage']
     if parts[-1] == 'male':
@@ -190,21 +166,37 @@ def dex_id(key):
     return alnum(''.join(parts))
 
 
+_dex = None
+
+
+def load_dex():
+    # Showdown 的 pokedex.json（只抓一次）
+    global _dex
+    if _dex is None:
+        req = urllib.request.Request(DEX_URL, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=60) as r:
+            _dex = json.loads(r.read().decode('utf-8'))
+    return _dex
+
+
+def base_forme(key, dex):
+    # Showdown 原型的 baseForme 就是 key 這個型態（如 toxtricity-amped＝Toxtricity、gourgeist-average、squawkabilly-green-plumage）時回傳原型 id
+    parts = [p for p in key.split('-') if p != 'plumage']
+    base = alnum(parts[0])
+    return base if len(parts) > 1 and (dex.get(base, {}).get('baseForme') or '').lower() == parts[-1] else None
+
+
 def weights(keys):
     # 寶可夢 key → 體重 kg（Showdown pokedex.json 的 weightkg）。依序試：DEX_FIX、dex_id、
     # Showdown 沒分開的（只差外觀的母的、Showdown 原型的 baseForme 就是這個型態，如 gourgeist-average、toxtricity-amped）用原型的；
     # 都對不上的不收（網頁上看體重的招式就不算），並印出來
     # 同時取性別：母的比例（gender 'N' 無性別記 -1、'M' 只有公 0、'F' 只有母 1，其他看 genderRatio 的 F，沒寫是 0.5；
     # 迷人之軀、鬥爭心用，Showdown 沒指定性別的隊伍照這個比例隨機給）
-    req = urllib.request.Request(DEX_URL, headers=HEADERS)
-    with urllib.request.urlopen(req, timeout=60) as r:
-        dex = json.loads(r.read().decode('utf-8'))
+    dex = load_dex()
     out, fem, miss = {}, {}, []
     for key in keys:
-        parts, sid = [p for p in key.split('-') if p != 'plumage'], dex_id(key)
-        base = re.sub(r'[^a-z0-9]', '', parts[0])
-        cands = [DEX_FIX.get(key), sid, sid[:-1] if parts[-1] == 'female' else None,
-                 base if len(parts) > 1 and (dex.get(base, {}).get('baseForme') or '').lower() == parts[-1] else None]
+        sid = dex_id(key)
+        cands = [DEX_FIX.get(key), sid, sid[:-1] if key.split('-')[-1] == 'female' else None, base_forme(key, dex)]
         s = next((c for c in cands if c and dex.get(c, {}).get('weightkg')), None)
         if s:
             out[key] = dex[s]['weightkg']
@@ -216,6 +208,104 @@ def weights(keys):
     if miss:
         print('這些寶可夢在 Showdown 找不到體重（看體重的招式不算）：%r' % miss)
     return out, fem
+
+
+def sd_keys(rows):
+    # Showdown 統計的寶可夢名（alnum 後＝Showdown id）→ 我們的 key：依序試 DEX_FIX、dex_id、Showdown 原型的 baseForme 就是這個型態
+    dex, out = load_dex(), {}
+    for r in rows:
+        for c in (DEX_FIX.get(r[0]), dex_id(r[0]), base_forme(r[0], dex)):
+            if c:
+                out.setdefault(c, r[0])
+    return out
+
+
+def sd_pick():
+    # Showdown 統計：兩種格式都有 chaos JSON 的最新一個月 → (月份, {single／double: 檔名})。
+    # 同開頭有好幾個（換規則的月份）取檔名排最後的（regmc < regmd、2026 < 2027），bo3 不算
+    months = sorted(set(re.findall(r'href="(\d{4}-\d{2})/"', fetch(SD_URL))), reverse=True)
+    for mo in months[:3]:
+        files = re.findall(r'href="([a-z0-9]+-%d\.json)"' % SD_CUTOFF, fetch(SD_URL + mo + '/chaos/'))
+        pick = {}
+        for f, pre in SD_FMTS.items():
+            c = sorted(x for x in files if x.startswith(pre) and 'bo3' not in x)
+            if c:
+                pick[f] = c[-1]
+        if len(pick) == len(SD_FMTS):
+            return mo, pick
+    raise SystemExit('最近 3 個月的 Showdown 統計找不到 %r 開頭、分數 %d 的檔案' % (list(SD_FMTS.values()), SD_CUTOFF))
+
+
+def sd_stats(data, sid, fam, mv_ids, ab_ids, it_ids, miss):
+    # 一種格式的 chaos JSON（data：Showdown 寶可夢名 → 統計）→ 我們的 key → {usage 使用率（0～1）, moves／abils／items／spreads／natures／sets 字串,
+    # mates／lose／win 家族 key 清單}。招式、特性、道具的使用率＝次數 ÷ 這隻的次數（特性次數加總）；對不上我們 key 的記在 miss
+    out, raw = {}, {}
+    for name, e in data.items():
+        key = sid.get(alnum(name))
+        if not key:
+            miss['mon'][name] = max(miss['mon'].get(name, 0), e['usage'])
+            continue
+        tot = sum(e['Abilities'].values()) or 1
+
+        def pick(d, ids, kind):
+            # {Showdown id: 次數} → "key:使用率 key:使用率"（依使用率高到低，低於 MIN_PCT 的不收；對照不到的記下來）
+            res = []
+            for k, v in sorted(d.items(), key=lambda x: -x[1]):
+                p = round(v / tot * 100)
+                if p < MIN_PCT or not k or k == 'nothing':
+                    continue
+                if k in ids:
+                    res.append('%s:%d' % (ids[k], p))
+                else:
+                    miss[kind].add(k)
+            return ' '.join(res)
+
+        sets, sps, nats = {}, {}, {}
+        for s, v in e['Spreads'].items():
+            nat, _, evs = s.partition(':')
+            sp = tuple(int(x) for x in evs.split('/') if x.isdigit())
+            if nat not in NATURES:
+                miss['nature'].add(nat)
+                continue
+            if len(sp) != 6 or max(sp) > 32 or sum(sp) > 66:
+                continue
+            q, n = v / tot * 100, NATURES[nat]
+            sets[sp + n] = sets.get(sp + n, 0) + q
+            sps[sp] = sps.get(sp, 0) + q
+            nats[n] = nats.get(n, 0) + q
+        top = lambda d, n=None: [(k, round(q)) for k, q in sorted(d.items(), key=lambda x: -x[1]) if round(q) >= 1][:n]
+        out[key] = {
+            'usage': e['usage'],
+            'moves': pick(e['Moves'], mv_ids, 'move'), 'abils': pick(e['Abilities'], ab_ids, 'abil'), 'items': pick(e['Items'], it_ids, 'item'),
+            'spreads': ' '.join('%s:%d' % ('.'.join(map(str, k)), p) for k, p in top(sps, SP_N)),
+            'natures': ' '.join('%d.%d:%d' % (k[0], k[1], p) for k, p in top(nats)),
+            'sets': ' '.join('%s:%d' % ('.'.join(map(str, k)), p) for k, p in top(sets, SP_N)),
+        }
+        raw[key] = e
+    # 隊友：同隊次數，依家族加總；敗於（剋星）＝Checks and Counters：遇到時這隻被打倒或被逼換下的比例 p 減 4 倍標準差 d
+    # （Smogon 排剋星用的分數）大於 0 的，依家族取最高分；勝於＝反過來，這隻出現在誰的剋星裡。都不含自己家族，依次數／分數高到低取前 LIST_N 個家族
+    win = {}
+    for key, e in raw.items():
+        for name, c in e['Checks and Counters'].items():
+            k = sid.get(alnum(name))
+            sc = c['p'] - 4 * c['d']
+            if k and sc > 0:
+                w = win.setdefault(k, {})
+                w[fam[key]] = max(w.get(fam[key], 0), sc)
+    for key, e in raw.items():
+        mates, lose = {}, {}
+        for name, v in e['Teammates'].items():
+            k = sid.get(alnum(name))
+            if k and fam[k] != fam[key]:
+                mates[fam[k]] = mates.get(fam[k], 0) + v
+        for name, c in e['Checks and Counters'].items():
+            k = sid.get(alnum(name))
+            sc = c['p'] - 4 * c['d']
+            if k and sc > 0 and fam[k] != fam[key]:
+                lose[fam[k]] = max(lose.get(fam[k], 0), sc)
+        rank = lambda d: ' '.join(k for k, _ in sorted(d.items(), key=lambda x: -x[1])[:LIST_N])
+        out[key].update(mates=rank(mates), lose=rank(lose), win=rank({k: v for k, v in win.get(key, {}).items() if k != fam[key]}))
+    return out
 
 
 def stats_js(stats, wts, fem):
@@ -298,15 +388,12 @@ def write_stats(out, stats):
 def main(path, only_stats=False):
     txt = payload(fetch())
     mons = grab(txt, 'pokemon', '[')
-    ranks = grab(txt, 'rankings', '{')
     rows, bad, stats = [], [], {}
     for p in mons:
         if not set(p['types']) <= set(TYPES):
             bad.append((p['key'], p['types']))
         base = p.get('base_key') or ''
-        rs = ranks['single'].get(p['key']) or ranks['single'].get(base) or 0
-        rd = ranks['double'].get(p['key']) or ranks['double'].get(base) or 0
-        rows.append([p['key'], p['name'], '.'.join(p['types']), rs, rd, base] + (['.'.join(p.get('abilities') or [])] if base else []))
+        rows.append([p['key'], p['name'], '.'.join(p['types']), 0, 0, base] + (['.'.join(p.get('abilities') or [])] if base else []))
         st = p['stats']
         stats[p['key']] = [st['hp'], st['attack'], st['defense'], st['spAttack'], st['spDefense'], st['speed']]
     if bad:
@@ -327,31 +414,80 @@ def main(path, only_stats=False):
         print(SIM_MATRIX_TIP)
         return
 
-    # 常用招式／特性：只抓有排名的非超級進化寶可夢
-    targets = [r[0] for r in rows if not r[5] and (r[3] or r[4])]
-    use, moves, abils, items, nats, known, learn = {}, {}, {}, {}, {}, {r[0] for r in rows}, {}
+    # 招式字典與可學招式：逐頁抓非超級進化的寶可夢（超級進化沿用原型的可學招式）
+    targets = [r[0] for r in rows if not r[5]]
+    moves, learn, fail = {}, {}, []
     for n, key in enumerate(targets, 1):
-        det, ab, it, nt, mv, mon = detail(key)
+        try:
+            mv, mon = detail(key)
+        except (ValueError, OSError) as e:
+            fail.append((key, str(e)[:60]))
+            continue
         moves = moves or {m['id']: m for m in mv}
         learn[key] = mon
-        abils.update({a['id']: a for a in ab})
-        items.update({x['id']: x for x in it})
-        nats.update({x['id']: x for x in nt})
-        mid, aid, iid = ({i: x['key'] for i, x in d.items()} for d in (moves, abils, items))
-        use[key] = [usage(det[f] and det[f][sec], ids) for sec, ids in (('moves', mid), ('abilities', aid)) for f in FMTS] \
-            + [usage(det[f] and det[f].get('items'), iid) for f in FMTS] \
-            + [ranked(det[f], sec, sub, known) for sec, sub in (('team', 'ttog'), ('win', 'pokemon'), ('lose', 'pokemon')) for f in FMTS] \
-            + [spreads(det[f]) for f in FMTS] + [natures(det[f], nats) for f in FMTS]
         if n % 25 == 0 or n == len(targets):
             print('詳細頁 %d/%d' % (n, len(targets)), flush=True)
         time.sleep(0.3)
-    # 超級進化的特性：中文名與效果只能從各詳細頁帶到的特性對照取（超級進化自己的詳細頁對照是空的），沒帶到的就沒有說明
+    if fail:
+        print('這些詳細頁抓不到（沒有可學招式）：%r' % fail)
+    abils = {a['key']: a for a in catalog('abilities', 'abilities')}
+    items = {x['key']: x for x in catalog('items', 'items')}
+
+    # Showdown 使用率統計
+    month, files = sd_pick()
+    print('Showdown %s：%s' % (month, '、'.join(files[f] for f in FMTS)), flush=True)
+    sid = sd_keys(rows)
+    fam = {r[0]: r[5] or r[0] for r in rows}
+    mv_ids = {alnum(m['key']): m['key'] for m in moves.values()}
+    ab_ids, it_ids = {alnum(k): k for k in abils}, {alnum(k): k for k in items}
+    miss = {'mon': {}, 'move': set(), 'abil': set(), 'item': set(), 'nature': set()}
+    sd, src = {}, {'month': month, 'cutoff': SD_CUTOFF}
+    for f in FMTS:
+        d = json.loads(fetch(SD_URL + month + '/chaos/' + files[f]))
+        sd[f] = sd_stats(d['data'], sid, fam, mv_ids, ab_ids, it_ids, miss)
+        src[f[0]] = [d['info']['metagame'], d['info']['number of battles']]
+    for k, v in miss.items():
+        if v:
+            print('Showdown 統計裡對不上的%s（不收）：%r' % ({'mon': '寶可夢（使用率）', 'move': '招式', 'abil': '特性', 'item': '道具', 'nature': '性格'}[k],
+                                               sorted(v.items(), key=lambda x: -x[1]) if k == 'mon' else sorted(v)))
+    # 排名：家族（原型＋超級進化）使用率加總由高到低，同家族的型態同一個排名；沒有統計的是 0
+    for i, f in enumerate(FMTS):
+        tot = {}
+        for k, x in sd[f].items():
+            tot[fam[k]] = tot.get(fam[k], 0) + x['usage']
+        rk = {k: n for n, k in enumerate(sorted(tot, key=lambda k: -tot[k]), 1)}
+        for r in rows:
+            r[3 + i] = rk.get(fam[r[0]], 0)
+    # 每個 key 一列：招式／道具／點數／性格／組合是這個型態自己的（原型＝沒帶超級石的）；特性：超級進化放原型的常用特性
+    # （出場時還沒超級進化；Showdown 超級進化那筆記的是超級進化後的固定特性，名單已經有）；
+    # 隊友／勝於／敗於：超級進化看自己的，原型看家族裡使用率最高的型態（如噴火龍看超級噴火龍Ｙ）；超級進化比例只有原型有
+    use = {}
+    for r in rows:
+        key, cols = r[0], {}
+        for f in FMTS:
+            forms = {k: x['usage'] for k, x in sd[f].items() if fam[k] == key}
+            own, c = sd[f].get(key), {}
+            if r[5]:
+                if own:
+                    c = {**own, 'abils': (sd[f].get(r[5]) or {}).get('abils', '')}
+            elif forms:
+                tot = sum(forms.values())
+                dom = sd[f][max(forms, key=forms.get)]
+                c = {**(own or {}), 'mates': dom['mates'], 'win': dom['win'], 'lose': dom['lose'],
+                     'megas': ' '.join('%s:%d' % (k, round(u / tot * 100)) for k, u in sorted(forms.items(), key=lambda x: -x[1])
+                                       if k != key and round(u / tot * 100) >= 1)}
+            cols[f] = c
+        row = [cols[f].get(k, '') for k in ('moves', 'abils', 'items', 'mates', 'win', 'lose', 'spreads', 'natures', 'sets', 'megas') for f in FMTS]
+        if any(row):
+            use[key] = row
+    # 超級進化的特性與超級石一定收（超級石：說明寫「超級進化的持有物」的道具，網頁 stoneOf 照說明找每種超級進化帶的那顆）
     mega_a = {r[0]: [a for a in r[6].split('.') if a] for r in rows if r[5]}
-    used_m = {s.split(':')[0] for u in use.values() for s in ' '.join(u[:2]).split()}
-    used_a = {s.split(':')[0] for u in use.values() for s in ' '.join(u[2:4]).split()} | {k for ks in mega_a.values() for k in ks}
-    used_i = {s.split(':')[0] for u in use.values() for s in ' '.join(u[4:6]).split()}
+    pk = lambda cols: {s.split(':')[0] for u in use.values() for c in cols for s in u[c].split()}
+    used_m, used_i = pk((0, 1)), pk((4, 5)) | {k for k, x in items.items() if '超級進化的持有物' in (x.get('effect') or '')}
+    used_a = pk((2, 3)) | {k for ks in mega_a.values() for k in ks}
     mv_out = {m['key']: move_row(m) for m in moves.values() if m['key'] in used_m}
-    ab_out = {a['key']: [a['name'], clean(a['description'])] for a in abils.values() if a['key'] in used_a}
+    ab_out = {k: [a['name'], clean(a['description'])] for k, a in abils.items() if k in used_a}
+    it_out = {k: [x['name'], clean(x.get('effect') or x.get('description'))] for k, x in items.items() if k in used_i}
     # 可學招式（OP.GG 標為不可用、或這隻禁用的不收）與可能的特性；不在 MOVES／ABILS 的另外存 LEARN_MOVES／LEARN_ABILS，
     # 網頁現有功能只看 MOVES／ABILS，不受影響
     avail = {m['key'] for m in moves.values() if m.get('isAvailable', True)}
@@ -365,36 +501,42 @@ def main(path, only_stats=False):
     learn_m = {k for v in learn_out.values() for k in v.split('|')[0].split()} - used_m
     learn_a = {k for v in learn_out.values() for k in v.split('|')[1].split()} - used_a
     lm_out = {m['key']: move_row(m) for m in moves.values() if m['key'] in learn_m}
-    la_out = {a['key']: [a['name'], clean(a['description'])] for a in abils.values() if a['key'] in learn_a}
-    it_out = {x['key']: [x['name'], clean(x.get('effect') or x.get('description'))] for x in items.values() if x['key'] in used_i}
-    miss = sorted({k for ks in mega_a.values() for k in ks} - set(ab_out))
-    if miss:
-        print('找不到這些超級進化特性的說明，網頁上會略過：%r' % miss)
+    la_out = {k: [a['name'], clean(a['description'])] for k, a in abils.items() if k in learn_a}
+    miss_a = sorted({k for ks in mega_a.values() for k in ks} - set(ab_out))
+    if miss_a:
+        print('找不到這些超級進化特性的說明，網頁上會略過：%r' % miss_a)
 
     today = datetime.date.today().isoformat()
     dump = lambda o: json.dumps(o, ensure_ascii=False, separators=(',', ':'))
     body = '\n'.join(dump(r) + ',' for r in rows)
-    mons_js = ('// 寶可夢名單與常用招式：%s 擷取自 OP.GG 寶可夢冠軍圖鑑（含超級進化）；這個檔由 tools/update_mons.py 產生，勿手改\n'
+    mons_js = ('// 寶可夢名單與常用招式：%s 擷取。名單、招式資料、可學招式取自 OP.GG 寶可夢冠軍圖鑑（含超級進化），道具與特性取自 OP.GG 的清單頁；\n'
+               '// 使用率取自 Pokémon Showdown 天梯 %s 的統計（Smogon stats）。這個檔由 tools/update_mons.py 產生，勿手改\n'
                "const MONS_DATE = '%s';\n"
-               '// [key, 中文名, 屬性（. 分隔）, 單打排名, 雙打排名（0＝沒有排名）, 超級進化的原型 key, 超級進化後的特性 key（. 分隔，只有超級進化有）]；\n'
-               '// 種族值在 base-stats.js\n'
+               '// 使用率統計的來源：month 月份、cutoff 分數門檻、s 單打／d 雙打：[Showdown 格式, 場數]\n'
+               'const USAGE_SRC = %s;\n'
+               '// [key, 中文名, 屬性（. 分隔）, 單打排名, 雙打排名（Showdown 家族使用率加總，同家族的型態同一個排名；0＝沒有統計）,\n'
+               '//   超級進化的原型 key, 超級進化後的特性 key（. 分隔，只有超級進化有）]；種族值在 base-stats.js\n'
                'const MONS_RAW = [\n%s\n];\n'
                '// 常用統計：寶可夢 key → [單打招式, 雙打招式, 單打特性, 雙打特性, 單打道具, 雙打道具,\n'
-               '//   單打隊友, 雙打隊友, 單打勝於, 雙打勝於, 單打敗於, 雙打敗於, 單打能力點數, 雙打能力點數, 單打性格, 雙打性格]。\n'
+               '//   單打隊友, 雙打隊友, 單打勝於, 雙打勝於, 單打敗於, 雙打敗於, 單打能力點數, 雙打能力點數, 單打性格, 雙打性格,\n'
+               '//   單打點數＋性格, 雙打點數＋性格, 單打超級進化比例, 雙打超級進化比例]。\n'
+               '//   招式／道具／點數／性格是這個型態自己的（Showdown 的超級進化有自己的統計，原型只算沒帶超級石的）；\n'
+               '//   特性：超級進化放原型的常用特性（出場時還沒超級進化；超級進化後的固定特性在 MONS_RAW）；\n'
                '//   招式／特性／道具每項是「key:使用率%%」以空白分隔、依使用率高到低，低於 %d%% 的不收；\n'
-               '//   隊友／勝於／敗於是寶可夢 key 以空白分隔，依 OP.GG 順序取前 %d 隻；\n'
-               '//   能力點數每項是「HP.攻擊.防禦.特攻.特防.速度:使用率%%」，取前 %d 種；性格每項是「↑能力.↓能力:使用率%%」\n'
-               '//   （1 攻擊、2 防禦、3 特攻、4 特防、5 速度，不加減的寫 0.0）；這兩種依使用率高到低，0%% 的不收。\n'
-               '//   沒有統計的是空字串，超級進化不在這裡（沿用原型）\n'
+               '//   隊友／勝於／敗於是家族（原型）key 以空白分隔，不含自己家族，取前 %d 個：隊友依同隊次數，敗於＝這隻的剋星（Checks and Counters：遇到時這隻被打倒或被逼換下的比例\n'
+               '//   減 4 倍標準差，大於 0 的依分數排），勝於＝反過來這隻是誰的剋星；原型的這三項看家族裡使用率最高的型態；\n'
+               '//   能力點數每項是「HP.攻擊.防禦.特攻.特防.速度:使用率%%」、點數＋性格每項是「HP.攻擊.防禦.特攻.特防.速度.↑能力.↓能力:使用率%%」，各取前 %d 種；\n'
+               '//   性格每項是「↑能力.↓能力:使用率%%」（1 攻擊、2 防禦、3 特攻、4 特防、5 速度，不加減的寫 0.0）；這三種依使用率高到低，0%% 的不收；\n'
+               '//   超級進化比例只有原型有：「超級進化 key:佔全家族使用率%%」，0%% 的不收。沒有統計的是空字串\n'
                'const USAGE_RAW = {\n%s\n};\n'
                '// 招式（任一隻常用的）：key → [中文名, 屬性, 分類（physical 物理／special 特殊／status 變化）, 威力（null＝沒有）, 效果,\n'
                '//   PP, 命中率（null＝必中）, 先制等級, 目標範圍（OP.GG target，如 selected-pokemon 單體、all-opponents 對手全體）, 其他]；\n'
                '//   其他只列有值的：ail 異常／附加狀態（burn、paralysis…）、ailP 機率%%、fl 畏縮機率%%、cr 急所等級、dr 吸血%%（負的是反作用力）、\n'
                '//   hl 回復%%、hits [最少, 最多] 連續攻擊次數、st [[能力, 變化]…] 能力變化、stP 能力變化機率%%（0＝輔助招必定）、tr 招式標記（contact 接觸、sound 聲音…）\n'
                'const MOVES = {\n%s\n};\n'
-               '// 特性：key → [中文名, 效果]\n'
+               '// 特性（任一隻常用的，加上超級進化後的特性）：key → [中文名, 效果]\n'
                'const ABILS = {\n%s\n};\n'
-               '// 道具：key → [中文名, 效果]\n'
+               '// 道具（任一隻常用的，加上全部超級石）：key → [中文名, 效果]\n'
                'const ITEMS = {\n%s\n};\n'
                '// 可學招式與可能的特性（抓了詳細頁的寶可夢；超級進化沿用原型；不可用與禁用的招式不收）：寶可夢 key → "招式 key 空白分隔|特性 key 空白分隔"\n'
                'const LEARN = {\n%s\n};\n'
@@ -402,7 +544,7 @@ def main(path, only_stats=False):
                'const LEARN_MOVES = {\n%s\n};\n'
                '// 可能但不在 ABILS 的特性，格式同 ABILS\n'
                'const LEARN_ABILS = {\n%s\n};\n') % (
-        today, today, body, MIN_PCT, LIST_N, SP_N,
+        today, month, today, dump(src), body, MIN_PCT, LIST_N, SP_N,
         '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in use.items()),
         '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in sorted(mv_out.items())),
         '\n'.join('%s:%s,' % (dump(k), dump(v)) for k, v in sorted(ab_out.items())),
@@ -421,10 +563,10 @@ def main(path, only_stats=False):
     with open(mons_path, 'w', encoding='utf-8', newline='') as f:
         f.write(mons_js)
     write_stats(out, stats)
-    print('寫入 %d 隻（超級進化 %d、單打有排名 %d、雙打有排名 %d）；常用招式 %d 隻、能力點數 %d 隻、性格 %d 隻、招式 %d 種、特性 %d 種、道具 %d 種，%d bytes' % (
+    print('寫入 %d 隻（超級進化 %d、單打有排名 %d、雙打有排名 %d）；有統計 %d 個型態、招式 %d 種、特性 %d 種、道具 %d 種，%d bytes' % (
         len(rows), sum(1 for r in rows if r[5]), sum(1 for r in rows if r[3]), sum(1 for r in rows if r[4]),
-        sum(1 for u in use.values() if u[0] or u[1]), sum(1 for u in use.values() if u[12] or u[13]),
-        sum(1 for u in use.values() if u[14] or u[15]), len(mv_out), len(ab_out), len(it_out), len(mons_js.encode())))
+        len(use), len(mv_out), len(ab_out), len(it_out), len(mons_js.encode())))
+    print('單打 %s %d 場、雙打 %s %d 場（%s，分數 %d 以上）' % (*src['s'], *src['d'], month, SD_CUTOFF))
     print('可學招式表 %d 隻；可學但沒人常用的招式 %d 種、特性 %d 種' % (len(learn_out), len(lm_out), len(la_out)))
     print('前 3 筆：', rows[:3])
     remind(old_txt, os.path.join(out, 'js'), mv_out, ab_out, mega_a)

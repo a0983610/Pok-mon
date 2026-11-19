@@ -75,7 +75,7 @@ const statsHTML = m => `<div class="bst">${m.bs.map((v, k) => `<span${(k === 1 |
   + `${STAT_ZH[k]} <b>${v}</b></span>`).join('')}<span>合計 <b>${m.bs.reduce((s, v) => s + v, 0)}</b></span></div>`;
 // 超級進化型態的道具：固定是自己的超級石（useOf 的 fixedItem；資料裡沒有這顆的寫「專屬的超級石」）
 const megaItemHTML = use => `<span>道具 <b>${use.items[0] ? ITEMS[use.items[0][0]][0] : '專屬的超級石'}</b>（超級進化固定）</span>`;
-// OP.GG 常帶道具（前 3；登錄的不標使用率，超級進化只有固定的超級石）與常見隊友（前 6）；fams 是隊上成員的家族，已在隊上的隊友標 ✔
+// Showdown 常帶道具（前 3；登錄的不標使用率，超級進化只有固定的超級石）與常見隊友（前 6）；fams 是隊上成員的家族，已在隊上的隊友標 ✔
 const kitHTML = (use, fams) => use.items.length || use.mates.length || use.fixedItem ? '<div class="bst">'
   + (use.fixedItem ? megaItemHTML(use)
     : use.items.length ? `<span>道具 ${use.items.slice(0, 3).map(([k, p]) => `<b>${ITEMS[k]?.[0] ?? k}</b>` + (use.reg?.items ? '（登錄）' : ` ${p}%`)).join('・')}</span>` : '')
@@ -115,16 +115,16 @@ function roleHTML(members) {
       const head = `<div class="mrole"><div class="mrole-h"><b>${i + 1} ${MON[key].zh}</b>`;
       if (!r) return `${head}<span class="meta">${fz}沒有統計資料</span></div>${statsHTML(MON[key])}</div>`;
       return `${head}${roleTags(r)}<span class="meta">${r.use.reg?.moves ? '登錄配招' : '平均帶'} 物攻 ${r.phys.toFixed(1)}・特攻 ${r.spec.toFixed(1)}・輔助 ${r.sup.toFixed(1)} 招`
-        + `${MON[key].base ? `・沿用${MON[MON[key].base].zh}的統計` : ''}</span></div>${statsHTML(MON[key])}${kitHTML(r.use, fams)}${useDetailsHTML(r, 'mv.' + i)}</div>`;
+        + `${sharedUse(key, team.fmt) ? `・沿用${MON[MON[key].base].zh}的統計` : ''}</span></div>${statsHTML(MON[key])}${kitHTML(r.use, fams)}${useDetailsHTML(r, 'mv.' + i)}</div>`;
     }).join('')
     + `<details class="b-more" style="margin-top:10px" data-tfold="roleHow"${tFold.roleHow ? ' open' : ''}><summary>角色怎麼判斷</summary><p class="note">`
-    + `依 OP.GG ${fz}統計的常用招式與特性（${MONS_DATE} 擷取，只收使用率 5% 以上）判斷，超級進化沿用原型的統計，再加上超級進化後的固定特性（算 100%，和原型常用特性相同的只算一次）。`
+    + `依 Showdown ${fz}統計的常用招式與特性（${USAGE_SRC.month}，只收使用率 5% 以上）判斷，超級進化用自己的統計（沒有統計的沿用原型的），再加上超級進化後的固定特性（算 100%，和常用特性相同的只算一次）。`
     + `物攻／特攻／輔助＝平均帶幾招該類招式（使用率加總 ÷ 100；輔助類特性如威嚇也算一招），最多的那類就是這隻的角色，輔助同分算輔助。`
-    + '在上方格子登錄了配招的隊員，登錄的招式、特性、道具當成使用率 100%（不標使用率），沒填的欄位照 OP.GG 統計。'
+    + '在上方格子登錄了配招的隊員，登錄的招式、特性、道具當成使用率 100%（不標使用率），沒填的欄位照 Showdown 統計。'
     + `功能標籤要使用率 ${ROLE_PCT}% 以上才標，打 ★ 的算輔助招：<br>`
     + ROLES.map(r => `<b>${r.sup ? '★' : ''}${r.zh}</b>：${names(r.moves, MOVES)}${r.abils && names(r.abils, ABILS) ? '；特性 ' + names(r.abils, ABILS) : ''}`).join('<br>')
     + `<br>「隊伍該有」＝物攻、特攻輸出各一，加上${fz}排名前 30 名裡至少兩成有的功能。`
-    + '<br>道具、常見隊友也是 OP.GG 的統計（道具只收使用率 5% 以上，超級進化型態的道具固定是自己的超級石、不看統計；隊友是 OP.GG「隊友」名單的前幾名，標 ✔ 的已在隊上）。</p></details>';
+    + '<br>道具、常見隊友也是 Showdown 的統計（道具只收使用率 5% 以上，超級進化型態的道具固定是自己的超級石、不看統計；隊友是同隊次數最多的前幾名，標 ✔ 的已在隊上）。</p></details>';
 }
 // 隊伍特性與場地招式：挑了寶可夢的隊員依常用特性、招式（使用率 ROLE_PCT% 以上，同功能標籤）分類，再做搭配檢查；只看我方。
 // 清單可含目前資料還沒有的特性／招式（如薄霧製造者、沙暴），之後更新資料出現了就會算進去
@@ -250,7 +250,7 @@ function traitHTML(members) {
     + `<div class="x-line"><span class="x-msg">搭配檢查：</span>${warns.length ? '' : '<span class="none">（沒有問題）</span>'}</div>`
     + warns.map(w => `<div class="x-line"><span>⚠ ${text(w)}</span></div>`).join('')
     + `<details class="b-more" style="margin-top:10px" data-tfold="traitHow"${tFold.traitHow ? ' open' : ''}><summary>怎麼分類、怎麼檢查</summary><p class="note">`
-    + `依 OP.GG ${fz}統計的常用特性與招式（${MONS_DATE} 擷取），使用率 ${ROLE_PCT}% 以上才算；登錄了配招的隊員照登錄的算（不標使用率）。`
+    + `依 Showdown ${fz}統計的常用特性與招式（${USAGE_SRC.month}），使用率 ${ROLE_PCT}% 以上才算；登錄了配招的隊員照登錄的算（不標使用率）。`
     + '超級進化的隊員，特性分兩段：「出場時」是原型的常用特性（出場還沒超級進化），「超級進化後」是超級進化固定的特性。<br>'
     + TRAIT_CATS.map(c => `<b>${c.zh}</b>：${[c.abils && names(c.abils), c.moves && (c.abils ? '招式 ' : '') + names(c.moves)].filter(Boolean).join('；')}`).join('<br>')
     + `<br><b>搭配檢查</b>：${names(Object.keys(FIELD_NEED))}只在括號裡的天氣／場地有效果，隊上沒有隊友或招式會開就提醒`
@@ -285,7 +285,7 @@ function typeListHTML() {
 }
 // 目前格子挑了寶可夢時的配招登錄（team.sets，見 useOf）：4 招、特性、道具（超級進化的特性固定、道具固定是超級石，不能選；
 // 一般型態的道具不列超級石，要超級進化就在格子選超級進化型態）、6 項能力點數、性格。
-// 招式／特性／道具／性格選單先列這隻在 fmt 的 OP.GG 常用（依使用率），其他依中文名排（性格照能力順序）；資料只收得到任一隻寶可夢使用率 5% 以上的招式／特性／道具，
+// 招式／特性／道具／性格選單先列這隻在 fmt 的 Showdown 常用（依使用率），其他依中文名排（性格照能力順序）；資料只收得到任一隻寶可夢使用率 5% 以上的招式／特性／道具，
 // 也不檢查這隻學不學得會。能力點數可以從「常見配點」一次填好 6 格。性格是「↑哪項・↓哪項」（攻擊～速度，HP 沒有性格）
 const NATURES = [1, 2, 3, 4, 5].flatMap(u => [1, 2, 3, 4, 5].filter(d => d !== u).map(d => [u, d]));
 // 能力點數 [6 項] 寫成「HP 2・攻擊 32・速度 32」（0 的不寫）；性格 [↑, ↓] 寫成「速度 ↑・特攻 ↓」（隊伍分析、傷害計算共用）
@@ -303,12 +303,12 @@ function setEditorHTML() {
       + `<optgroup label="${top.length ? '其他' : '全部'}">${rest.map(k => opt(k, dict[k][0], cur)).join('')}</optgroup>`;
   };
   const sum = s.sp.reduce((a, v) => a + v, 0), nat = s.nat[0] ? s.nat.join('+') : '', top = !hasSpread(s) && topSpread(key, team.fmt);
-  // 常見配點：OP.GG 最常見的幾種點數（附使用率），選了就填好 6 格；和目前 6 格相同的那種顯示成選取
+  // 常見配點：Showdown 最常見的幾種點數（附使用率），選了就填好 6 格；和目前 6 格相同的那種顯示成選取
   const sps = use?.spreads || [], nats = (use?.natures || []).filter(([n]) => n[0]), natKeys = nats.map(([n]) => n.join('+'));
   const spPick = sps.length ? `<select class="sel" data-spq aria-label="常見配點">${opt('', `${fz}常見配點…`, '')}`
     + sps.map(([sp, p]) => opt(sp.join('+'), `${spText(sp)}（${p}%）`, s.sp.join('+'))).join('') + '</select>' : '';
-  return `<div class="set-ed"><div class="b-label">第 ${i + 1} 隻 ${m.zh} 的配招<span class="muted small">挑好寶可夢時先填好 OP.GG ${fz}使用率前 4 招、最常用的特性與道具、`
-    + `最常見的能力點數與性格，照自己的配招改；清空的欄位照 OP.GG 統計；各分頁都照這份判斷</span></div>`
+  return `<div class="set-ed"><div class="b-label">第 ${i + 1} 隻 ${m.zh} 的配招<span class="muted small">挑好寶可夢時先填好 Showdown ${fz}使用率前 4 招、最常用的特性與道具、`
+    + `最常見的能力點數＋性格組合，照自己的配招改；清空的欄位照 Showdown 統計；各分頁都照這份判斷</span></div>`
     + `<div class="c-f"><span class="c-l">招式</span>${s.moves.map((k, n) => `<select class="sel" data-mv="${n}" aria-label="招式 ${n + 1}">${opts(MOVES, use?.moves || [], k)}</select>`).join('')}</div>`
     + `<div class="c-f"><span class="c-l">特性</span>${m.base ? `<span>${m.megaAbils.map(abilZh).join('、')}<span class="meta">（超級進化後固定）</span></span>`
       : `<select class="sel" data-ab aria-label="特性">${opts(ABILS, use?.abils || [], s.ab)}</select>`}</div>`
@@ -320,11 +320,11 @@ function setEditorHTML() {
     + `<div class="c-f"><span class="c-l">性格</span><select class="sel" data-nat aria-label="性格">${opt('', '不加減', nat)}`
     + (nats.length ? `<optgroup label="${fz}常用">${nats.map(([n, p]) => opt(n.join('+'), `${natText(n)}（${p}%）`, nat)).join('')}</optgroup><optgroup label="其他">` : '')
     + NATURES.filter(n => !natKeys.includes(n.join('+'))).map(n => opt(n.join('+'), natText(n), nat)).join('') + (nats.length ? '</optgroup>' : '') + '</select></div>'
-    + (top ? `<p class="muted small b-intro">能力點數和性格都沒填：照 OP.GG ${fz}最常見的算（${spText(top.sp)}；${natText(top.nat)}）。</p>` : '')
+    + (top ? `<p class="muted small b-intro">能力點數和性格都沒填：照 Showdown ${fz}最常見的組合算（${spText(top.sp)}；${natText(top.nat)}）。</p>` : '')
     + `<div class="c-f"><button class="mini" data-setreset>恢復預設</button><span class="muted small">改回使用率前 4 招、最常用的特性與道具、最常見的能力點數與性格</span></div></div>`;
 }
-// 實戰：OP.GG 對手 m 的敗於／勝於名單裡有我方挑了寶可夢的隊員（named 是格子索引，同家族算）；
-// 兩份名單都有的不列（名單依次數排，兩隻都熱門時常常兩邊都上榜，看不出誰剋誰）。熱門威脅和出戰選角共用
+// 實戰：Showdown 對手 m 的敗於（剋星）／勝於名單裡有我方挑了寶可夢的隊員（named 是格子索引，同家族算）；
+// 兩份名單都有的不列（看不出誰剋誰）。熱門威脅和出戰選角共用
 function realHTML(m, named) {
   const u = useOf(m.key, team.fmt);
   const pick = (keys, other) => named.filter(i => keys.includes(family(MON[team.mons[i]])) && !other.includes(family(MON[team.mons[i]])))
@@ -334,7 +334,7 @@ function realHTML(m, named) {
 }
 // 對手的攻擊（monUnit 的 atk）寫成「地震、龍尾、流星群」；沒有統計看本系的寫「本系龍」
 const oppAtkText = u => u.atk.length ? u.atk.map(a => a.zh || `本系${T[a.ty].zh}`).join('、') : '（沒有常用攻擊招式）';
-// 對位（duel）替對手算的招式：OP.GG 使用率前 4 招（topMoves）裡的攻擊招式；沒有招式統計回傳 ''
+// 對位（duel）替對手算的招式：Showdown 使用率前 4 招（topMoves）裡的攻擊招式；沒有招式統計回傳 ''
 const top4Text = key => { const ks = topMoves(key, team.fmt); return ks.length ? ks.filter(k => MOVES[k][2] !== 'status').map(k => MOVES[k][0]).join('、') || '（前 4 招都是變化招式）' : ''; };
 // 聯防搭檔：每隻隊員怕的屬性（受到 ×2 以上），隊上誰抵抗或免疫（×½ 以下）可以換上來扛；只看屬性（同弱點總表，不含特性）。
 // 沒人扛的弱點集中列在最後
@@ -389,18 +389,18 @@ function threatHTML(members) {
     + `「正面打得贏」＝雙方 HP 全滿正面對打先打倒牠：單打用「模擬對戰」的引擎 1 對 1 帶亂數打 ${SIM_DUEL_N} 場、勝率過半才算（變化招式、強化、反作用力、道具回復、換招補刀都算；`
     + '換上能扛也是從吃過一下剩下的 HP 再打一樣多場；名字後面的 % 是勝率，算法與誤差見「出戰選角」對位表下方的說明），雙打照速度和連用同一招幾下打倒（取打倒機率一半以上的次數）；'
     + '「會被牠先手一擊」＝打不贏，而且牠一下就打得倒這隻、又比這隻先出手（速度較快、同速或先制招式）。擊掌奇襲、迎頭一擊只有上場第一回合能用，只算一下打倒的。'
-    + '有解＝有人換上能扛，半解＝只有人正面打得贏，沒解＝都打不贏。我方照登錄的配招，牠照 OP.GG 最常見的配招（使用率前 4 招，同挑寶可夢時預填的）、道具、能力點數與性格；'
+    + '有解＝有人換上能扛，半解＝只有人正面打得贏，沒解＝都打不贏。我方照登錄的配招，牠照 Showdown 最常見的配招（使用率前 4 招，同挑寶可夢時預填的）、道具、能力點數與性格；'
     + `威嚇有算（同「出戰選角」：正面對打雙方的都算、換上來只算我方的）；特性是變身者的百變怪照變成對面那隻算（HP、道具照自己的；抄到的威嚇也會發動）；謎擬Ｑ的畫皮有算（雙方剛出場畫皮還在：第一下沒有傷害、改扣 1/8，換上來吃的那一下也被畫皮擋下）；出場特性開的天氣、場地有算（正面對打速度慢的蓋掉快的、換上來的蓋掉牠的；單打的模擬另外算天氣場地招式與各種效果）；不含其他出場特性（雙打另外不含能力變化）。只選屬性沒挑寶可夢、或沒有招式統計的改看屬性：不怕牠${FMT_ZH[team.fmt]}常帶的攻擊又招式剋得到算換上能扛，`
     + `招式剋得到算正面打得贏（同屬性招式使用率加總 ${ROLE_PCT}% 以上才算，輔助用、固定傷害、反擊類招式不算）。`
-    + `「可能超級進化」＝OP.GG 道具統計有 ${ROLE_PCT}% 以上帶這顆超級石的型態（沒有道具統計的每種都算），要對進化前後每種型態都成立才算（⚠ 任一種成立就標）。`
-    + `排名與常用招式為 OP.GG 統計（${MONS_DATE} 擷取）。`
-    + '「實戰」＝OP.GG 這隻的「敗於」「勝於」前 10 名裡有我方隊員（超級進化看原型）；名單依次數排，熱門寶可夢容易上榜，'
-    + '兩份名單都有的不列，只供參考，不影響有解／沒解。</p>';
+    + `「可能超級進化」＝Showdown 統計佔全家族 ${ROLE_PCT}% 以上的超級進化型態（沒有統計的每種都算），要對進化前後每種型態都成立才算（⚠ 任一種成立就標）。`
+    + `排名與常用招式為 Showdown 統計（${USAGE_SRC.month}）。`
+    + '「實戰」＝Showdown 這隻的剋星（遇到時常被打倒或逼換下的，「牠常敗給」）、或牠常打倒或逼換下的（「牠常打倒」）前 10 名裡有我方隊員'
+    + '（原型看家族裡最常見的型態）；兩份名單都有的不列，只供參考，不影響有解／沒解。</p>';
 }
 // 速度線：我方（挑了寶可夢的才有速度）和熱門寶可夢依實際速度由快到慢排，同速時我方排前面；算法同熱門威脅檢查（battler＋speedOf）：
-// 我方照登錄的配招，熱門寶可夢照 OP.GG 最常見的能力點數＋性格、最常帶的道具。
-// 熱門寶可夢常帶超級石的（megaInfo 算進去的），超級進化型態另列一行；比幾隻快／慢時取進化前後較快的
-// 帶講究圍巾的比例（OP.GG 道具統計；set＝我方登錄的配招，登錄了道具就看登錄的）；超級進化要帶超級石，不標
+// 我方照登錄的配招，熱門寶可夢照 Showdown 最常見的能力點數＋性格、最常帶的道具。
+// 熱門寶可夢常超級進化的（megaInfo 算進去的），超級進化型態另列一行；比幾隻快／慢時取進化前後較快的
+// 帶講究圍巾的比例（Showdown 道具統計；set＝我方登錄的配招，登錄了道具就看登錄的）；超級進化要帶超級石，不標
 const scarf = (m, set) => {
   const u = m.base ? null : useOf(m.key, team.fmt, set), p = u?.items.find(([k]) => k === 'choice-scarf')?.[1];
   return p ? `・講究圍巾${u.reg?.items ? '（登錄）' : ` ${p}%`}` : '';
@@ -425,12 +425,12 @@ function speedHTML(members) {
     + tFoldHTML('speed', `速度排行（我方＋熱門前 ${THREAT_N}，共 ${rows.length} 行，點開看）`,
       rows.map(x => `<div class="spd${x.i != null ? ' me' : ''}"><b class="v">${x.v}</b><b>${x.mon.zh}</b>${chips(x.mon.types)}`
       + `<span class="meta">${x.i != null ? `我方第 ${x.i + 1} 隻` : `#${x.mon.rank[fmt]}`}・種族 ${x.mon.spe}`
-      + `${x.mega ? `・超級進化${x.p != null ? `（帶超級石 ${x.p}%）` : ''}` : ''}${scarfText(x)}</span></div>`).join(''))
+      + `${x.mega ? `・超級進化${x.p != null ? `（佔 ${x.p}%）` : ''}` : ''}${scarfText(x)}</span></div>`).join(''))
     + '<p class="note">※ 實際速度（Lv50），算法同熱門威脅檢查：我方照登錄的配招（能力點數、性格、道具、特性），'
-    + `熱門寶可夢照 OP.GG ${FMT_ZH[fmt]}最常見的能力點數＋性格、最常帶的道具；不含能力變化、順風、戲法空間、天氣與場地加速特性。`
+    + `熱門寶可夢照 Showdown ${FMT_ZH[fmt]}最常見的能力點數＋性格、最常帶的道具；不含能力變化、順風、戲法空間、天氣與場地加速特性。`
     + '速度相同時實際誰先動各 50%，算同速。我方超級進化看超級進化後的速度；'
-    + `熱門寶可夢 OP.GG 道具統計有 ${ROLE_PCT}% 以上帶超級石的，超級進化型態另列一行（標「超級進化」），上方「比幾隻快／慢」取進化前後較快的那個。`
-    + `「講究圍巾 N%」＝OP.GG 統計有 N% 的人帶講究圍巾（速度 ×1.5），帶的話實際會更快（照最常帶的道具已經是講究圍巾的標「已算」）；超級進化要帶超級石，不標。</p>`;
+    + `熱門寶可夢 Showdown 統計有 ${ROLE_PCT}% 以上是超級進化的，超級進化型態另列一行（標「超級進化」，% 是佔全家族的比例），上方「比幾隻快／慢」取進化前後較快的那個。`
+    + `「講究圍巾 N%」＝Showdown 統計有 N% 的人帶講究圍巾（速度 ×1.5），帶的話實際會更快（照最常帶的道具已經是講究圍巾的標「已算」）；超級進化要帶超級石，不標。</p>`;
 }
 // 不在隊伍分析分頁時只記下要重畫（切過來時 showTab 再畫；開網頁、在別的分頁切單打／雙打或載入隊伍時不白算），網址照樣存
 let teamDirty = false;
@@ -450,9 +450,9 @@ function renderTeam() {
   $('#tSum').innerHTML = members.length ? summaryHTML(members)
     : '<p class="empty">選好隊員後，這裡會集中列出隊伍的問題（搭配、沒解的熱門威脅、屬性弱點）。</p>';
   $('#tRole').innerHTML = members.length ? roleHTML(members)
-    : '<p class="empty">挑好隊員的寶可夢後，這裡會依 OP.GG 常用招式判斷每隻是物攻、特攻輸出還是輔助，列出常用招式與效果，並標出隊伍還缺哪些角色。</p>';
+    : '<p class="empty">挑好隊員的寶可夢後，這裡會依 Showdown 常用招式判斷每隻是物攻、特攻輸出還是輔助，列出常用招式與效果，並標出隊伍還缺哪些角色。</p>';
   $('#tTrait').innerHTML = members.length ? traitHTML(members)
-    : '<p class="empty">挑好隊員的寶可夢後，這裡會依 OP.GG 常用特性與招式標出誰會開天氣、開場地、順風、戲法空間、反先制、抗威嚇等，並做搭配檢查。</p>';
+    : '<p class="empty">挑好隊員的寶可夢後，這裡會依 Showdown 常用特性與招式標出誰會開天氣、開場地、順風、戲法空間、反先制、抗威嚇等，並做搭配檢查。</p>';
   if (!members.length) {
     $('#tResult').innerHTML = '<p class="empty">選好隊員後，這裡會列出整隊被各屬性打的倍率，標出共同弱點與缺口，並建議下一隻補什麼屬性。</p>';
     $('#tThreat').innerHTML = `<p class="empty">選好隊員後，這裡會檢查${FMT_ZH[team.fmt]}排名前 ${THREAT_N} 的熱門寶可夢，看隊伍誰換上來扛得住、誰正面打得贏。</p>`;
@@ -508,6 +508,7 @@ function pickTeamMon(key) {
   renderTeam();
 }
 $('#monsDate').textContent = MONS_DATE + ' 擷取';
+$('#usageSrc').textContent = `${USAGE_SRC.month}，分數 ${USAGE_SRC.cutoff} 以上；單打 ${USAGE_SRC.s[0]} ${USAGE_SRC.s[1].toLocaleString()} 場、雙打 ${USAGE_SRC.d[0]} ${USAGE_SRC.d[1].toLocaleString()} 場`;
 // 單打／雙打：隊伍分析的排名依據、出戰選角的帶幾隻、對戰中場上幾隻和傷害計算的常用招式、範圍招式共用。
 // 配招還是原本形式的預設（挑寶可夢時填的 defaultSet，沒改過）就換成新形式的預設；自己改過的保留
 function setFmt(e) {
@@ -555,7 +556,7 @@ $('#tList').addEventListener('change', e => {
     s.sp[+d.sp] = Number.isFinite(v) ? Math.max(0, Math.min(32, v)) : 0;
     team.sets[i] = setFilled(s) ? s : null;
     // 點數欄只更新這格、合計、常見配點與網址，不整區重畫（打完數字直接點旁邊的選單或按鈕時，點的東西才不會被換掉；點數不影響其他卡片）；
-    // 登錄有無、或點數＋性格有沒有填改變（要顯示／收起「照 OP.GG 最常見的算」）時才重畫
+    // 登錄有無、或點數＋性格有沒有填改變（要顯示／收起「照 Showdown 最常見的組合算」）時才重畫
     if (!prev || !team.sets[i] || !hasSpread(prev) || !hasSpread(s)) { renderTeam(); return; }
     const sum = s.sp.reduce((a, x) => a + x, 0), box = el.closest('.c-sts'), tot = box.lastElementChild, q = box.querySelector('[data-spq]');
     el.value = s.sp[+d.sp];

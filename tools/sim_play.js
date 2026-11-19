@@ -3,7 +3,7 @@
 // 選角時看得到對手的 6 隻、看不到對手帶誰；帶出場後雙方看得到對方帶的 3 隻的完整配置（同 tools/sim_ai.js 預設：AI 看得到對手的招式道具特性）。不需要 Showdown。
 // 用法（在 repo 根目錄；檔案＝這一局的紀錄 JSON，建議放 AgentData\temp\sim_play\）：
 //   node tools/sim_play.js new 檔案 [種子 20261118] [AI tree:400] [排名前幾名 60] [隊伍 6]
-//     隨機兩隊（同 sim_ai.js：單打前幾名、同家族不重複、超級進化最多 1 隻、配招 OP.GG 預設、道具同一隊不重複）。
+//     隨機兩隊（同 sim_ai.js：單打前幾名、同家族不重複、超級進化最多 1 隻、配招 Showdown 預設、道具同一隊不重複）。
 //     隊伍 6（預設）＝各 6 隻：AI 照出戰選角（bringPlan 第 1 名的帶法與先發）帶 3 隻，印出雙方 6 隻給玩家選（見 bring）；
 //     隊伍 3＝直接各 3 隻、先發第一隻（2026-11-19 以前的做法），印出第一個要選的局面
 //   node tools/sim_play.js bring 檔案 先發編號 編號 編號 [理由…]   隊伍 6 的局：第 0 方帶哪 3 隻（[0]～[5]，第一個先發）
@@ -58,7 +58,7 @@ function team2(seed, top, size) {
   };
   return [one(), one()];
 }
-// 出戰選角（bringPlan）第 1 名的帶法：keys（6 隻）對上對手 opp（6 隻；看不到對手帶誰，雙方配招都照 OP.GG 常見）帶哪幾隻
+// 出戰選角（bringPlan）第 1 名的帶法：keys（6 隻）對上對手 opp（6 隻；看不到對手帶誰，雙方配招都照 Showdown 常見）帶哪幾隻
 // （隊伍索引，先發排第一；同 simMyPlan）。隊伍裡超級進化最多 1 隻，不會遇到「只能進化一隻」
 function bringIdx(E, keys, opp) {
   const plan = E.bringPlan(keys.map(k => ({ defs: E.MON[k].types, key: k })), opp.map(k => E.MON[k]), 's'), lead = plan.pick.js[0];

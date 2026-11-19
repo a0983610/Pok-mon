@@ -85,7 +85,7 @@ const FLAG = Object.fromEntries(Object.entries({
   priority: 'accelerock aqua-jet bullet-punch extreme-speed fake-out feint first-impression ice-shard jet-punch mach-punch quick-attack shadow-sneak '
     + 'sucker-punch upper-hand vacuum-wave water-shuriken',
 }).map(([f, s]) => [f, new Set(s.split(' '))]));
-// 特性，效果與倍率照 Smogon champions.ts。超級進化專屬、ABILS（一般寶可夢的 OP.GG 詳細頁）裡沒有的中文名依神奇寶貝百科「特性列表」
+// 特性，效果與倍率照 Smogon champions.ts。ABILS（OP.GG 特性清單，現在已含超級進化專屬的）裡沒有時才用的中文名，依神奇寶貝百科「特性列表」
 // （辣椒噴發、飛出的內在物依 Bulbapedia 各特性頁的中文名；超級龍頭地鼠的 piercing-drill 查不到中文名，不列）
 const ABIL_ZH = { aerilate: '飛行皮膚', dragonize: '龍皮膚', eelevate: '鰻鰻高升', 'mega-sol': '超級日光', 'fire-mane': '火焰鬃毛',
   'aura-guard': '波導防護', 'parental-bond': '親子愛', 'fairy-aura': '妖精氣場', 'spicy-spray': '辣椒噴發', 'innards-out': '飛出的內在物',
@@ -145,7 +145,7 @@ function ssaCat(a, d, A, D) {
 // 天氣（算法在 damageCalc）：晴天火 ×1.5、水 ×½；下雨水 ×1.5、火 ×½；沙暴岩石屬性特防 ×1.5；下雪冰屬性防禦 ×1.5；
 // 氣象球有天氣時變成對應屬性、威力 ×2；日光束／日光刃在下雨、沙暴、下雪時威力 ×½
 const WB_TYPE = { sun: 'fire', rain: 'water', sand: 'rock', snow: 'ice' };
-// 影響傷害的道具（只收 ITEMS 裡有的，也就是 OP.GG 有人帶的），從說明文字判斷效果，倍率照 Smogon 冠軍版：
+// 影響傷害的道具（只收 ITEMS 裡有的，也就是 Showdown 統計有人常帶的），從說明文字判斷效果，倍率照 Smogon 冠軍版：
 // 攻擊方 side a：屬性強化道具該屬性威力 ×1.2（4915）、力量頭帶／博識眼鏡物理／特殊威力 ×1.1（4505）、寶石該屬性威力 ×1.3（5325）、
 //   生命寶珠 ×1.3（5324）、達人帶效果絕佳時 ×1.2（4915）、電氣球皮卡丘攻擊特攻 ×2；
 // 防守方 side d：抗性樹果受到效果絕佳的該屬性招式傷害減半（只擋第一下）、氣勢披帶 HP 全滿時撐住會倒下的一擊（剩 1 HP）、
@@ -464,7 +464,7 @@ function koText(ko) {
   return { n: n + 1, text: `亂數${NUM_ZH[n]}擊（${Math.min(99.9, Math.max(0.1, Math.round(ko[n] * 1000) / 10))}%）` };
 }
 // 攻擊方 a 打防守方 d（damageCalc 的格式）：a 在 o.fmt 的常用攻擊招式（a.set 有登錄招式就用登錄的，見 useOf；再加 extra）逐招算，
-// o.top＝沒登錄招式時只算 OP.GG 使用率前幾招（含變化招式一起排，同預填的配招 defaultSet；對位 duel 給 4，傷害計算分頁不給＝全部常用招式）；
+// o.top＝沒登錄招式時只算 Showdown 使用率前幾招（含變化招式一起排，同預填的配招 defaultSet；對位 duel 給 4，傷害計算分頁不給＝全部常用招式）；
 // ok 依最大傷害排序（同分再比之後連用的最大傷害：畫皮讓單發招式第一下都是 1/8）、why 是不算的招式依原因分組；kos 會被一擊打倒的招式、top 最痛的一招
 function dmgRows(a, d, o, extra) {
   const use = useOf(a.key, o.fmt, a.set)?.moves || [];
@@ -478,9 +478,9 @@ function dmgRows(a, d, o, extra) {
   return { use, ok, why, kos: ok.filter(x => x.r.ko?.[0] > 1e-9), top: ok.find(x => x.r.ko) };
 }
 // 對位的一方（出招表、對戰中共用）：寶可夢 key、fmt；set＝我方登錄的配招（對手不傳）。
-// 能力點數與性格：登錄了就用登錄的，沒有就用 OP.GG 最常見的（topSpread，同傷害計算的預設），沒有統計才照傷害計算的固定投資（CALC0：
+// 能力點數與性格：登錄了就用登錄的，沒有就用 Showdown 最常見的（topSpread，同傷害計算的預設），沒有統計才照傷害計算的固定投資（CALC0：
 // 攻擊／特攻 32＋性格、速度 32＋性格、HP／防禦／特防 0）；特性：登錄的，沒有用 defAbOf；
-// 道具：登錄了就用登錄的，沒有就帶 OP.GG 最常帶的（topItem，同傷害計算的預設）
+// 道具：登錄了就用登錄的，沒有就帶 Showdown 最常帶的（topItem，同傷害計算的預設）
 function battler(key, fmt, set) {
   const sp = set && hasSpread(set) ? { sp: set.sp, nat: set.nat } : topSpread(key, fmt) || {};
   return { key, set, ab: set?.ab || defAbOf(key, fmt), item: set?.item || topItem(key, fmt), ...sp, atkInv: [32, 11], hp: [0, 10], defInv: [0, 10], speInv: [32, 11] };
@@ -500,7 +500,7 @@ function imposterVs(x, y, keepSt = false) {
 const entrySpe = b => b.tfSpe ?? speedOf({ key: b.key, inv: b.speInv, sp: b.sp, nat: b.nat, st: 0, item: b.item, ab: b.ab }, { weather: '', terrain: '' }).v;
 // 一對一對位：x、y 是 battler，對戰中另外帶 st { atk, def, spa, spd, spe } 能力變化、cur 目前剩下的 HP、tw 順風（沒給的當沒有、全滿）、
 // noItem 確定沒有道具、field 這一方場上還站著幾隻（見 damageCalc）、status 異常狀態（'brn' 灼傷：物理招式減半，毅力不減反而攻擊 ×1.5；
-// 'par' 麻痺：速度 ×½，飛毛腿不減反而 ×1.5）、walls 這一方的牆（反射壁、光牆、極光幕）；沒登錄招式的一方只算 OP.GG 使用率前 4 招（dmgRows 的 o.top，同預填的配招）；
+// 'par' 麻痺：速度 ×½，飛毛腿不減反而 ×1.5）、walls 這一方的牆（反射壁、光牆、極光幕）；沒登錄招式的一方只算 Showdown 使用率前 4 招（dmgRows 的 o.top，同預填的配招）；
 // f：{ fmt, weather, terrain, tr, crit 雙方都急所（對戰中反推傷害用）, hh 幫助（兩個方向都 ×1.5，對戰中的對手組合用）}（沒給的當沒有）；
 // 開場特性不在這裡算（出場開的天氣場地由呼叫端用 entryField 放進 f）。
 // live＝對戰中：算看場上狀況的特性（LIVE_ABILS：猛火類看 cur、大將看 fallen 這一方倒下幾隻），沒給的（出戰選角、隊伍分析）不算；

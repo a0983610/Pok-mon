@@ -14,7 +14,7 @@
 //   node tools/sim_check.js cover [每組場數 200] [種子 7] [move／ability／item]   全面覆蓋：單打有使用率的每一招、特性、道具都找會帶的寶可夢（雙打才有人帶的招式照雙打的配招）
 //     對幾隻對手打（見 cover），列出有差異的項目與模擬不會出的招（上面的隨機組合只抽前幾名的預設 4 招，覆蓋不到的靠這個）
 //   node tools/sim_check.js team [組數 200] [每組場數 200] [種子 7]   3 對 3：換人相關的（撒菱類、出場特性、急速折返、紅牌、吼叫、接棒…）要有後排才比得到（見 team）
-// 雙方的配招、點數、性格、特性、道具都照模擬用的（OP.GG 預設：simMon），Showdown 用「[Gen 9 Champions] Custom Game」（Lv50、不驗隊伍）。
+// 雙方的配招、點數、性格、特性、道具都照模擬用的（Showdown 統計的預設：simMon），Showdown 用「[Gen 9 Champions] Custom Game」（Lv50、不驗隊伍）。
 // 想出的招不能選（PP 用完、被挑釁、定身、巨力錘連用、再來一次或講究圍巾鎖在別招、珍藏還有其他招沒用過）時兩邊都改出招式欄第一個能選的；擊掌奇襲類上場第一回合以後不當備用。
 // 注意：Showdown 不一定跟得上遊戲改版，查到的這類招式資料比對前先改成冠軍版的（SD_FIX）；moves 模式比的是沒改的原始資料。
 const fs = require('fs'), vm = require('vm'), path = require('path');
@@ -92,14 +92,14 @@ function speciesOf(key) {
 }
 const STAT_ID = ['hp', 'atk', 'def', 'spa', 'spd', 'spe'];
 const natureOf = ([u, d] = []) => !u || !d || u === d ? 'Serious' : dex.natures.all().find(n => n.plus === STAT_ID[u] && n.minus === STAT_ID[d]).name;
-// 模擬用的一隻（simMon；our＝配招，沒給照 OP.GG 預設）→ Showdown 的配招；對不起來的回傳 { err }。超級進化帶自己的超級石（模擬裡超級進化沒有道具，Showdown 要有石頭）
+// 模擬用的一隻（simMon；our＝配招，沒給照 Showdown 統計的預設）→ Showdown 的配招；對不起來的回傳 { err }。超級進化帶自己的超級石（模擬裡超級進化沒有道具，Showdown 要有石頭）
 function sdSet(key, our) {
   const M = E.simMon(key, our, undefined, 0, 's'), b = M.b, m = E.MON[key];
   if (!b.sp) return { err: '沒有點數統計' };
   const species = speciesOf(key);
   if (!species) return { err: '找不到寶可夢' };
-  // 超級進化一定帶著自己的超級石：資料裡找不到（OP.GG 沒有統計的，如一般的烈咬陸鯊進化石）就用 Showdown 的 requiredItem
-  const item = m.base ? E.stoneOf(m) || dex.species.get(species).requiredItem : M.item, errs = [];
+  // 超級進化一定帶著自己的超級石：用 Showdown 的 requiredItem（OP.GG 有些超級石的 key 拼法和 Showdown 不同，如 staraptorite／staraptite），沒有才用 stoneOf
+  const item = m.base ? dex.species.get(species).requiredItem || E.stoneOf(m) : M.item, errs = [];
   if (item && !dex.items.get(item).exists) errs.push('道具 ' + item);
   if (b.ab && !dex.abilities.get(b.ab).exists) errs.push('特性 ' + b.ab);
   M.moves.forEach(k => { if (!dex.moves.get(k).exists) errs.push('招式 ' + k); });
@@ -192,7 +192,7 @@ function compare(o, s) {
 }
 
 // ---------- 全面覆蓋（cover）：單打有使用率的每一招、每個特性、每個道具都和 Showdown 對打過 ----------
-// 每一項找會帶它的寶可夢（OP.GG 單打有排名的，照這項的使用率高到低、同家族只取一隻，取 HOLD 隻；超級進化的固定特性用超級進化型態），
+// 每一項找會帶它的寶可夢（Showdown 單打有排名的，照這項的使用率高到低、同家族只取一隻，取 HOLD 隻；超級進化的固定特性用超級進化型態），
 // 配招照預設、把這項換進去（招式不在前 4 招就換掉第 4 招、特性、道具），對 OPP 隻單打前 100 名的對手（預設配招）：
 // 招式就固定出這招，特性、道具隨機挑一招能出的；對手隨機挑一招（兩邊都是輔助招就重挑）。各打 n 場，同 compare 比較。
 // 模擬不會出的招（simCanUse 不收）、Showdown 沒有的直接列出來。組合分給 worker_threads 一起跑。

@@ -1,14 +1,15 @@
 // 計算引擎：資料與純邏輯，不碰 DOM（畫面在 js/ui/）
-// ---------- 角色：依 OP.GG 常用招式與特性判斷 ----------
+// ---------- 角色：依 Showdown 常用招式與特性判斷 ----------
 // USAGE[寶可夢 key][s 單打／d 雙打] = { moves／abils／items: [[招式／特性／道具 key, 使用率%]...],
-//   mates 隊友、win 勝於、lose 敗於: [寶可夢 key...]（OP.GG 的順序，前幾名），
-//   spreads: [[[HP, 攻擊, 防禦, 特攻, 特防, 速度 的能力點數], 使用率%]...]、natures: [[[↑能力索引, ↓能力索引]（不加減是 [0, 0]）, 使用率%]...] }
+//   mates 隊友、win 勝於、lose 敗於: [家族 key...]（前幾名，見 mons-data.js 的說明），
+//   spreads: [[[HP, 攻擊, 防禦, 特攻, 特防, 速度 的能力點數], 使用率%]...]、natures: [[[↑能力索引, ↓能力索引]（不加減是 [0, 0]）, 使用率%]...]、
+//   sets: [[[6 項能力點數…, ↑能力索引, ↓能力索引], 使用率%]...]（點數＋性格的組合）、megas: [[超級進化 key, 佔全家族使用率%]...]（只有原型有） }
 const parseUse = s => s ? s.split(' ').map(x => { const [k, p] = x.split(':'); return [k, +p]; }) : [];
 const parseKeys = s => s ? s.split(' ') : [];
 const parseNums = s => parseUse(s).map(([k, p]) => [k.split('.').map(Number), p]);
-const USAGE = Object.fromEntries(Object.entries(USAGE_RAW).map(([k, [sm, dm, sa, da, si, di, st, dt, sw, dw, sl, dl, ss, ds, sn, dn]]) =>
-  [k, { s: { moves: parseUse(sm), abils: parseUse(sa), items: parseUse(si), mates: parseKeys(st), win: parseKeys(sw), lose: parseKeys(sl), spreads: parseNums(ss), natures: parseNums(sn) },
-        d: { moves: parseUse(dm), abils: parseUse(da), items: parseUse(di), mates: parseKeys(dt), win: parseKeys(dw), lose: parseKeys(dl), spreads: parseNums(ds), natures: parseNums(dn) } }]));
+const USAGE = Object.fromEntries(Object.entries(USAGE_RAW).map(([k, [sm, dm, sa, da, si, di, st, dt, sw, dw, sl, dl, ss, ds, sn, dn, sx, dx, sg, dg]]) =>
+  [k, { s: { moves: parseUse(sm), abils: parseUse(sa), items: parseUse(si), mates: parseKeys(st), win: parseKeys(sw), lose: parseKeys(sl), spreads: parseNums(ss), natures: parseNums(sn), sets: parseNums(sx), megas: parseUse(sg) },
+        d: { moves: parseUse(dm), abils: parseUse(da), items: parseUse(di), mates: parseKeys(dt), win: parseKeys(dw), lose: parseKeys(dl), spreads: parseNums(ds), natures: parseNums(dn), sets: parseNums(dx), megas: parseUse(dg) } }]));
 // 功能標籤：清單裡的招式或特性使用率達 ROLE_PCT% 就標上。sup＝輔助類：這類招式（含擊掌奇襲、冰凍之風這種
 // 威力低、主要拿來輔助的攻擊招式）和特性都算「輔助招」，用來判斷這隻偏輸出還是偏輔助；守住、替身等不算任何一類
 const ROLE_PCT = 30;
@@ -31,7 +32,7 @@ const ROLES = [
 const ROLE = Object.fromEntries(ROLES.map(r => [r.id, r]));
 const SUP_MOVES = new Set(ROLES.filter(r => r.sup).flatMap(r => r.moves));
 const SUP_ABILS = new Set(ROLES.filter(r => r.sup).flatMap(r => r.abils || []));
-// 寶可夢 key（超級進化沿用原型的統計）在 fmt 的角色；沒有統計資料回傳 null。
+// 寶可夢 key（超級進化用自己的統計，沒有才沿用原型的，見 useOf）在 fmt 的角色；沒有統計資料回傳 null。
 // 超級進化另外加上超級進化後的固定特性（mega，算 100%；和原型常用特性相同的只算一次，沒有中文說明的略過）。
 // phys／spec／sup＝平均帶幾招物攻、特攻、輔助招（使用率加總 ÷ 100），main＝三者最多的那類（輔助同分算輔助），
 // tags＝有的功能標籤，by 是撐起標籤的招式／特性 [中文名, 使用率, 是登錄的]。set：我方登錄的配招（見 useOf）
@@ -58,13 +59,14 @@ function roleOf(key, fmt, set) {
 // 如烈咬陸鯊龍尾、流星群各 28%；輔助用的攻擊招式、固定傷害和反擊類不吃相剋，都不算）；只選屬性或沒有統計的看本系
 const FIXED_DMG = new Set(['counter', 'mirror-coat', 'metal-burst', 'comeuppance', 'endeavor', 'super-fang', 'ruination',
   'natures-madness', 'seismic-toss', 'night-shade', 'final-gambit', 'psywave']);
-// 寶可夢 key 在 fmt 的 OP.GG 統計（超級進化沿用原型）；沒有統計回傳 undefined。
+// 寶可夢 key 在 fmt 的 Showdown 統計（超級進化用自己的；沒有招式統計時沿用原型的）；沒有統計回傳 undefined。
 // set：我方登錄的配招 { moves: [招式 key ×4], item, ab, sp: [HP, 攻擊, 防禦, 特攻, 特防, 速度 的能力點數], nat: [↑能力索引, ↓能力索引] }
 // （沒填的是空字串／0）。有填的招式／特性／道具當成使用率 100% 蓋過統計的同一欄，沒填的照舊看統計；
 // 只有我方隊員會傳，對手一律看統計（鏡像對戰也不會混用）。有蓋過時多回傳 reg { moves, abils, items }＝哪幾欄是登錄的（畫面上登錄的不標使用率）
 // 超級進化型態的道具固定是自己的超級石（stoneOf；資料裡沒有就是空的），不沿用原型的道具統計，多回傳 fixedItem 給畫面標「超級進化固定」
 function useOf(key, fmt, set) {
-  let use = USAGE[family(MON[key])]?.[fmt];
+  let use = USAGE[key]?.[fmt];
+  if (MON[key].base && !use?.moves.length) use = USAGE[family(MON[key])]?.[fmt];
   if (use && MON[key].base) { const st = stoneOf(MON[key]); use = { ...use, items: st ? [[st, 100]] : [], fixedItem: true }; }
   const moves = set ? set.moves.filter(Boolean) : [];
   if (!moves.length && !set?.ab && !set?.item) return use;
@@ -72,28 +74,23 @@ function useOf(key, fmt, set) {
     ...(moves.length && { moves: moves.map(k => [k, 100]) }), ...(set.ab && { abils: [[set.ab, 100]] }), ...(set.item && { items: [[set.item, 100]] }),
     reg: { moves: moves.length > 0, abils: !!set.ab, items: !!set.item } };
 }
+// 超級進化型態 key 在 fmt 沒有自己的招式統計、useOf 沿用原型的（畫面標「沿用原型的統計」）
+const sharedUse = (key, fmt) => !!MON[key].base && !USAGE[key]?.[fmt]?.moves.length;
 // 空的配招；setFilled＝有沒有填任何一欄（什麼都沒填就當沒登錄，存 null）
 const emptySet = () => ({ moves: ['', '', '', ''], item: '', ab: '', sp: [0, 0, 0, 0, 0, 0], nat: [0, 0] });
 const setFilled = s => s.moves.some(Boolean) || !!s.item || !!s.ab || s.sp.some(Boolean) || !!s.nat[0];
-// 配招有填能力點數或性格才用登錄的投資，不然用 OP.GG 最常見的（topSpread），沒有統計才照預設（傷害計算分頁是那頁的投資檔位）
+// 配招有填能力點數或性格才用登錄的投資，不然用 Showdown 最常見的（topSpread），沒有統計才照預設（傷害計算分頁是那頁的投資檔位）
 const hasSpread = set => set.sp.some(Boolean) || !!set.nat[0];
 // 統計清單依使用率由高到低（同使用率照原本順序）
 const byUse = list => list.slice().sort((x, y) => y[1] - x[1]);
 // 寶可夢 key 在 fmt 最常帶的道具（不算超級石：一般型態不帶超級石，超級進化型態固定帶自己的超級石，回傳 ''）；沒有統計回傳 ''
 const topItem = (key, fmt) => !MON[key] || MON[key].base ? '' : byUse(useOf(key, fmt)?.items || []).find(([k]) => !isStone(k))?.[0] || '';
-// 寶可夢 key 在 fmt 最常見的能力點數＋性格 { sp, nat }（超級進化沿用原型的統計）。OP.GG 的點數和性格分開統計，各取第一可能對不上
-// （例如點數投攻擊、性格卻降攻擊），所以在對得上的組合（性格降的那項沒投點數，不加減的都對得上）裡挑兩者使用率相乘最高的；
-// 同分取點數使用率高的。沒有性格統計時性格不加減；沒有點數統計回傳 null
+// 寶可夢 key 在 fmt 最常見的能力點數＋性格組合 { sp, nat }（Showdown 的點數和性格是一起統計的，見 useOf 的 sets）；沒有統計回傳 null
 function topSpread(key, fmt) {
-  const use = MON[key] && useOf(key, fmt);
-  if (!use?.spreads?.length) return null;
-  let best = null, top = -1;
-  byUse(use.spreads).forEach(([sp, p]) => [...byUse(use.natures), [[0, 0], 0]].forEach(([nat, q]) => {
-    if ((!nat[1] || !sp[nat[1]]) && p * q > top) { top = p * q; best = { sp: sp.slice(), nat: nat.slice() }; }
-  }));
-  return best;
+  const top = MON[key] && byUse(useOf(key, fmt)?.sets || [])[0];
+  return top ? { sp: top[0].slice(0, 6), nat: top[0].slice(6, 8) } : null;
 }
-// 挑好寶可夢時預填的配招：OP.GG fmt 使用率前 4 招、最常用的特性、最常帶的道具（超級進化的特性、道具是固定的，不填）、
+// 挑好寶可夢時預填的配招：Showdown fmt 使用率前 4 招、最常用的特性、最常帶的道具（超級進化的特性、道具是固定的，不填）、
 // 最常見的能力點數＋性格（topSpread）。沒有統計回傳 null（沒登錄）
 function defaultSet(key, fmt) {
   const use = useOf(key, fmt);
@@ -120,24 +117,22 @@ const monUnit = (m, fmt) => ({ defs: m.types, atk: attacksOf(m.key, m.types, fmt
 // 超級石＝說明寫「…超級進化的持有物」的道具；一個家族有多種超級進化時，說明的括號寫明是哪一種（如「（超級噴火龍Ｘ）」）
 const isStone = k => (ITEMS[k]?.[1] || '').includes('超級進化的持有物');
 // 超級進化型態 x 固定帶的超級石 key：說明寫「能讓<原型名>…超級進化」的那顆（原型名去掉後面的括號，如「超能妙喵 (雄性的樣子)」），
-// 原型有多種超級進化時再看括號寫的型態；資料只收使用率 5% 以上的道具，沒收到的回傳 undefined（如超級阿勃梭魯，大家都帶 Z 的）
+// 原型有多種超級進化時再看括號寫的型態；資料收了全部超級石，OP.GG 道具清單沒有的回傳 undefined
 const stoneOf = x => {
   const b = MON[x.base], one = megasOf(b).length === 1, name = b.zh.replace(/\s*[（(].*$/, '');
   return Object.keys(ITEMS).find(k => isStone(k) && ITEMS[k][1].includes(`能讓${name}`) && (one || ITEMS[k][1].includes(`（${x.zh}）`)));
 };
-// 一般寶可夢 m 在 fmt 可能超級進化成的型態：[{ mon, p 帶這顆超級石的使用率, counted 算進對位判斷 }]。
-// 使用率 ROLE_PCT% 以上才算（同常帶攻擊的門檻）；這隻沒有道具統計時 p 是 null、每種都算
+// 一般寶可夢 m 在 fmt 可能超級進化成的型態：[{ mon, p 這種超級進化佔全家族使用率%（Showdown 統計）, counted 算進對位判斷 }]。
+// 比例 ROLE_PCT% 以上才算（同常帶攻擊的門檻）；這個家族沒有統計時 p 是 null、每種都算
 function megaInfo(m, fmt) {
-  const forms = megasOf(m), items = useOf(m.key, fmt)?.items || [];
-  if (!items.length) return forms.map(x => ({ mon: x, p: null, counted: true }));
-  return forms.map(x => {
-    const p = items.filter(([k]) => isStone(k) && (forms.length === 1 || ITEMS[k][1].includes(`（${x.zh}）`))).reduce((s, [, q]) => s + q, 0);
-    return { mon: x, p, counted: p >= ROLE_PCT };
-  });
+  const forms = megasOf(m), use = useOf(m.key, fmt);
+  if (!use?.moves.length && !use?.megas.length) return forms.map(x => ({ mon: x, p: null, counted: true }));
+  const share = Object.fromEntries(use.megas);
+  return forms.map(x => { const p = share[x.key] || 0; return { mon: x, p, counted: p >= ROLE_PCT }; });
 }
-// 對手 m 當成的型態：某顆超級石使用率過半的當成那個超級進化型態，不然就是 m（猜對手帶誰、對戰中對手的預設型態共用，對戰模擬的對手也照這個）
+// 對手 m 當成的型態：某種超級進化佔過半的當成那個超級進化型態，不然就是 m（猜對手帶誰、對戰中對手的預設型態共用，對戰模擬的對手也照這個）
 const likelyForm = (m, fmt) => megaInfo(m, fmt).filter(x => x.p >= 50).sort((x, y) => y.p - x.p)[0]?.mon || m;
-// 寶可夢 key 在 fmt 的 OP.GG 使用率前 4 招（含變化招式；同預填的配招 defaultSet，也是對位 duel 替沒登錄招式的一方算的招式）
+// 寶可夢 key 在 fmt 的 Showdown 使用率前 4 招（含變化招式；同預填的配招 defaultSet，也是對位 duel 替沒登錄招式的一方算的招式）
 const topMoves = (key, fmt) => byUse(useOf(key, fmt)?.moves || []).slice(0, 4).map(([k]) => k);
 // 對手 m 的 unit，加上算進判斷的超級進化型態（answerOf 的 megas）
 const oppUnit = (m, fmt) => ({ ...monUnit(m, fmt), megas: megaInfo(m, fmt).filter(x => x.counted).map(x => monUnit(x.mon, fmt)) });
@@ -165,9 +160,9 @@ const lackNeeds = (roles, fmt) => roles.length ? NEEDS[fmt].filter(n => !roles.s
 //      隊上有戲法空間時，慢的攻擊手（比熱門前 THREAT_N 的一半以上慢，看速度種族值）也算 fix 一項
 //   2. 補上幾個隊伍缺的角色（fills；onTeam 依 fmt 常用招式／特性判斷）＋讓幾隻熱門威脅從沒解變成有對策（threats；
 //      units 是其他隊員，格式同 unitOf；候選要排名前 COUNTER_RANK、在屬性上擋得住或剋得到、又正面打得贏才算，打得贏同熱門威脅檢查的 teamVs）
-//   3. 常見隊友：候選和隊上成員出現在對方的 OP.GG 隊友名單裡（mates，隊上成員的 key）
+//   3. 常見隊友：候選和隊上成員出現在對方的 Showdown 隊友名單裡（mates，隊上成員的 key）
 //   4. recommendMember 的屬性評分，最後看排名（沒排名的排最後）
-// 搭配、角色、隊友只在隊上已有挑了寶可夢的隊員、候選有排名時比（候選在 fmt 沒排名時，OP.GG 仍可能有零星統計，樣本太少不採用）。
+// 搭配、角色、隊友只在隊上已有挑了寶可夢的隊員、候選有排名時比（候選在 fmt 沒排名＝沒有統計）。
 // 超級進化和原型屬性一樣、比較結果也一樣時只留原型。fix 每項是 { w 解決的提醒, by 候選撐起它的特性／招式（traitScan 的 has 項目）}
 // sets：隊上成員 key → 登錄的配招（見 useOf）；候選照挑了以後會登錄的預設配招（defaultSet）評估角色、搭配與對策，加入後說的才對得上。
 // 隊伍分析的推薦（teamsim.js）：雙打照這個排；單打的候選改照聯防挑（tRecCands）、排名交給 3 對 3 模擬，不用這個
@@ -206,7 +201,7 @@ function stabGaps(members) {
   const stab = [...new Set(members.flat())];
   return IDS.filter(d => bestEff(stab, [d]) < 2);
 }
-// 排名前 n 的熱門寶可夢（不含超級進化，超級進化沿用原型排名），依排名排序
+// 排名前 n 的熱門寶可夢（不含超級進化，排名是家族合計、和原型同一個），依排名排序
 const topMons = (fmt, n) => MONS.filter(m => !m.base && m.rank[fmt] && m.rank[fmt] <= n).sort((x, y) => x.rank[fmt] - y.rank[fmt]);
 // 隊員 members（每隻 { defs 屬性, atk attacksOf 的攻擊屬性 }）對一隻對手 opp（同格式，monUnit）：safe＝對手的攻擊招式打這隻都 ×1 以下、
 // hit＝這隻的攻擊招式能剋對手（都是 members 的索引）；同一隻兩者兼具＝有解(2)，只有其一＝半解(1)，都沒有＝沒解(0)。
@@ -256,7 +251,7 @@ function duelP(fmt, x, yk, left) {
   return null;
 }
 // 我方寶可夢 key（配招 set；base＝超級進化這場不進化、以原型 key 上場，帶著超級石等於沒道具）對上對手寶可夢 m：
-// 看速度與傷害（matchup，同出招表的算法；雙方出場的威嚇、開的天氣場地都算，見 matchup 的 intim、entryField），對手常帶超級石的進化前後每種型態都要成立（ohko 任一種成立就算），
+// 看速度與傷害（matchup，同出招表的算法；雙方出場的威嚇、開的天氣場地都算，見 matchup 的 intim、entryField），對手常超級進化的進化前後每種型態都要成立（ohko 任一種成立就算），
 // 單打的正面打得贏、換上能扛改用對戰模擬 1 對 1 的勝率判斷（duelP：帶亂數打 30 場，變化招式、反作用力、道具回復、換招補刀都算，過半算贏；
 // 還沒算好的先用 simDuel 不帶亂數打一場的勝負，算好再重畫），ohko 照模擬的勝負重算，幾下打倒、速度等照 matchup
 // （forms 的 p＝{ head, sw } 兩種情況的勝率，沒算好或沒打換上來那場是 null；sim＝還沒有勝率時 simDuel 的結果）；雙打照 matchup。
@@ -307,7 +302,7 @@ function teamVs(members, m, fmt) {
   });
   return { safe, hit, ohko, p, level: safe.length ? 2 : hit.length ? 1 : 0 };
 }
-// 熱門寶可夢逐隻檢查隊員 members（teamVs，連常帶超級石的超級進化型態一起看）
+// 熱門寶可夢逐隻檢查隊員 members（teamVs，連常超級進化的超級進化型態一起看）
 const threatCheck = (members, fmt, n) => topMons(fmt, n).map(m => ({ mon: m, ...teamVs(members, m, fmt) }));
 // 從 n 隻隊員挑 k 隻對上 oppN 隻對手：列出所有組合（idx 是隊員索引），每隻對手看組合裡的對位（pairOf，見 bringPlan）：
 // 有人換上來吃一下還打得贏（sw）＝有解(2)、有人正面打得贏（head）＝半解(1)、都沒有＝沒解(0)。
@@ -397,7 +392,7 @@ function leadSyn(a, b, fmt) {
 //   3. 同分時 danger 少的、syn 多的優先
 //   4. loose：壓不住的對手強化手（setups 裡的對手索引；正面都打不贏、也都沒有 antiSetupOf 的招式／特性）（少→多）
 //   5. weak：共同弱點＝對手常帶的攻擊屬性（含算進去的超級進化型態）裡兩隻都受到 ×2 以上的（少→多；雙打才看）
-//   6. sup：有沒有先發輔助（LEAD_SUP，看 fmt 的 OP.GG 常用招式／特性，寫成「順風 57%」；雙打才看，只選屬性的隊員沒有）
+//   6. sup：有沒有先發輔助（LEAD_SUP，看 fmt 的 Showdown 常用招式／特性，寫成「順風 57%」；雙打才看，只選屬性的隊員沒有）
 //   7. 速度種族值加總（高→低）
 // uOf、sOf、kOf、setOf：members 索引 → unit（不進化的超級進化用原型）、速度、寶可夢 key（不進化的超級進化用原型）、登錄的配招（見 useOf）；
 // opps 是對手的 unit（oppUnit）
@@ -431,7 +426,7 @@ const BRING_N = { s: 3, d: 4 }, LEAD_N = { s: 1, d: 2 };
 function bringPlan(mems, opps, fmt) {
   const k = Math.min(BRING_N[fmt], mems.length), lead = Math.min(LEAD_N[fmt], k);
   const units = mems.map(x => ({ defs: x.defs, atk: attacksOf(x.key, x.defs, fmt, x.set) })), monOf = j => MON[mems[j].key];
-  // 對手選一般型態、但常帶超級石的，進化前後都要看（oppUnit）
+  // 對手選一般型態、但常超級進化的，進化前後都要看（oppUnit）
   const oppMegas = opps.map(m => megaInfo(m, fmt).filter(x => x.counted).map(x => x.mon));
   const oppUnits = opps.map(m => oppUnit(m, fmt));
   // 我方超級進化不進化時的版本（原型；招式不因進化改變，登錄的配招照用），給 bringCombos 算「一場只能進化一隻」
@@ -461,7 +456,7 @@ function bringPlan(mems, opps, fmt) {
   return { k, lead, alt, oppMegas, setupBy, setups, combos, pick: leadOf(best), pairOf, leadOf };
 }
 // 猜對手帶誰、誰先發：把對手當成也用 bringPlan 選角，對手 oppKeys（6 格寶可夢 key，空字串＝沒填）對上我方 myKeys（隊伍格子的 key，只選屬性的不算）。
-// 對手看不到我方的配招，雙方都照 OP.GG 最常見的配置算（不傳 set）；對手選一般型態、但某顆超級石使用率過半的，當成那個超級進化型態
+// 對手看不到我方的配招，雙方都照 Showdown 最常見的配置算（不傳 set）；對手選一般型態、但某種超級進化佔過半的，當成那個超級進化型態
 // （一場只能超級進化一隻照 bringPlan）。回傳 bringPlan 的結果加上 at（bringPlan 的隊員索引 → oppKeys 的格子索引）、
 // mems（傳給 bringPlan 的隊員，key 是當成的型態；對戰模擬用）；有一方是空的回傳 null
 function oppBringPlan(oppKeys, myKeys, fmt) {

@@ -310,7 +310,7 @@ const SIM_HAZ_ZH = { sr: '隱形岩', spikes: '撒菱', tspikes: '毒菱', web: 
 const SIM_MAX_TURN = 100, SIM_LOOK = 3, SIM_LOOK_FULL = 40;
 const SIM_ST0 = () => ({ atk: 0, def: 0, spa: 0, spd: 0, spe: 0, acc: 0, eva: 0 });
 
-// 上場的一隻：key 這場的型態、set 配招（能算傷害的攻擊招式與 SIM_SUP 有的輔助招；沒有招式就用 OP.GG 前 4 招 defaultSet）、
+// 上場的一隻：key 這場的型態、set 配招（能算傷害的攻擊招式與 SIM_SUP 有的輔助招；沒有招式就用 Showdown 前 4 招 defaultSet）、
 // item 道具（沒給照 battler）、s 哪一方。能力點數、性格、特性同 battler；其餘是場上狀態：hp、item（會被打掉、用掉）、st 能力變化、
 // lock 講究圍巾鎖住的招式、chg 蓄力中的招式、hide 蓄力時打不到、rech 下一回合要休息、in 第幾回合上場（擊掌奇襲用）、kos 打倒幾隻、
 // out 有沒有上過場、status 異常狀態（tox 劇毒累積、slp 還要睡幾次、frz 冰凍還剩幾次出招機會）、v 換下場就清掉的狀態（sub 替身 HP、taunt、enc／encK 再來一次、seed、
@@ -368,7 +368,7 @@ function simBring(plan, mems, s, fmt, c, lead) {
     return simMon(down ? MON[x.key].base : x.key, x.set, down ? '' : x.item, s, fmt);
   });
 }
-// 對手一隊（寶可夢 key，超級進化不帶道具）照 OP.GG 使用率分配道具、同一隊不重複（同「對戰中」對手道具：使用率高的先拿）
+// 對手一隊（寶可夢 key，超級進化不帶道具）照 Showdown 使用率分配道具、同一隊不重複（同「對戰中」對手道具：使用率高的先拿）
 function simItems(keys, fmt) {
   const out = keys.map(() => ''), taken = new Set(), done = new Set();
   keys.flatMap((k, i) => MON[k].base ? [] : (useOf(k, fmt)?.items || []).filter(([it]) => !isStone(it)).map(([it, p]) => ({ i, it, p })))
@@ -391,8 +391,8 @@ function simMySide(mine, slots, evo, fmt) {
   const up = megas.includes(evo) ? evo : megas[0];
   return xs.map(x => { const down = !!MON[x.key].base && x.slot !== up; return simMon(down ? MON[x.key].base : x.key, x.set, down ? '' : undefined, 0, fmt); });
 }
-// 對手的每一種帶法：對手 oppKeys（6 格以內）當成也用出戰選角的方法選（oppBringPlan：看得到我方 6 隻 myKeys、看不到配招；超級石過半的當超級進化），
-// 每種帶法（6 選 3 是 20 種）的先發照它對這種帶法的挑法（leadOf）；配招照 OP.GG 常見（defaultSet）、道具同一隊不重複（simItems）。
+// 對手的每一種帶法：對手 oppKeys（6 格以內）當成也用出戰選角的方法選（oppBringPlan：看得到我方 6 隻 myKeys、看不到配招；超級進化佔過半的當超級進化），
+// 每種帶法（6 選 3 是 20 種）的先發照它對這種帶法的挑法（leadOf）；配招照 Showdown 常見（defaultSet）、道具同一隊不重複（simItems）。
 // 回傳 [{ rank 這種帶法在對手建議裡排第幾, mons 帶出場的（simMon，先發排第一）}...]（照 rank 排）；沒有對手回傳 []
 function simOppScenarios(oppKeys, myKeys, fmt) {
   const op = oppBringPlan(oppKeys, myKeys, fmt);
@@ -400,8 +400,8 @@ function simOppScenarios(oppKeys, myKeys, fmt) {
   const keys = op.mems.map(x => x.key), items = simItems(keys, fmt), mems = keys.map((k, j) => ({ key: k, set: defaultSet(k, fmt), item: items[j] }));
   return op.combos.map((c, r) => ({ rank: r + 1, mons: simBring(op, mems, 1, fmt, c, op.leadOf(c).js[0]) }));
 }
-// 熱門隊伍（隊伍分析推薦的模擬排序打的對手）：fmt 排名前 n 名（不含超級進化）各當核心，加上牠 OP.GG 隊友名單（mates）的前 5 隻，
-// 6 隻一樣的只留核心排名前的那隊、湊不滿 6 隻的不要（OP.GG 只有每隻的隊友名單，沒有整隊統計）。超級進化與否、配招、道具交給 simOppScenarios。
+// 熱門隊伍（隊伍分析推薦的模擬排序打的對手）：fmt 排名前 n 名（不含超級進化）各當核心，加上牠 Showdown 隊友名單（mates）的前 5 隻，
+// 6 隻一樣的只留核心排名前的那隊、湊不滿 6 隻的不要（統計只有每隻的隊友名單，沒有整隊統計）。超級進化與否、配招、道具交給 simOppScenarios。
 // 回傳 [{ core 核心 key, keys 6 隻（核心排第一）}]
 const SIM_META_N = 30;
 function simMetaTeams(fmt, n = SIM_META_N) {
@@ -2750,8 +2750,8 @@ function simDecide(ctx, st, phase, rnd, stats) {
   return out;
 }
 // ---------- 看不到對手招式 ----------
-// 實戰看不到對手的配招，只知道 OP.GG 的使用率和牠用過的招（M.seen，見 simMoveIn）。這一版只把招式當未知，道具、特性、點數、後排是誰仍當已知。
-// key 這隻的 4 招：seen 先放，其餘從 OP.GG 常用招式補——how 'top'＝補使用率最高的（網頁現在把對手當成 OP.GG 常見配置＝defaultSet 前 4 招的做法）、
+// 實戰看不到對手的配招，只知道 Showdown 的使用率和牠用過的招（M.seen，見 simMoveIn）。這一版只把招式當未知，道具、特性、點數、後排是誰仍當已知。
+// key 這隻的 4 招：seen 先放，其餘從 Showdown 常用招式補——how 'top'＝補使用率最高的（網頁現在把對手當成 Showdown 常見配置＝defaultSet 前 4 招的做法）、
 // 'prob'＝照使用率加權、不放回抽（rnd）；最後同 simMon 只留模擬算得了的（simCanUse）
 function simSampleMoves(key, fmt, seen, rnd, how) {
   const out = seen.slice(0, 4), pool = (useOf(key, fmt)?.moves || []).filter(([k]) => MOVES[k] && !out.includes(k));
@@ -2767,7 +2767,7 @@ function simSampleMoves(key, fmt, seen, rnd, how) {
 // 第 s 方看不到對手招式時的選擇：對手（1−s 方）每隻還站著、沒變身的招式換成 simSampleMoves 的（PP：用過的照實際剩下、沒用過的全滿），
 // 各組用 algo（'ply1' simDecide；'tree' simSearch，iters 平均分給各組，總次數不變）算。
 // how 'prob'＝照使用率抽 n 組，第 s 方每個選項對「那組裡對手的出法比例」的分數平均，取平均最高的；
-// how 'top'＝當成使用率最高的 4 招（用過的換進去）只算 1 組，照算出的出法比例抽（網頁現在把對手當成 OP.GG 常見配置的做法；沒給 rnd 取最高）。
+// how 'top'＝當成使用率最高的 4 招（用過的換進去）只算 1 組，照算出的出法比例抽（網頁現在把對手當成 Showdown 常見配置的做法；沒給 rnd 取最高）。
 // 2026-11-17 tools/sim_ai.js（快速、實際招式照使用率抽、500 組）：看得到 vs top 51.5%；prob vs top 52.4%；同樣取最高分時 prob 贏 top 54.1%；
 // 改成平均各組的出法比例再抽則輸 top（44.5%），所以 prob 平均的是分數。抽招式用 rnd，沒給用固定種子（同局面每次一樣）。回傳第 s 方的選擇
 const SIM_HID_N = 4;
@@ -2851,7 +2851,7 @@ function simPlay(ctx, sides, rnd, log, opt = {}) {
   return { res, turns: st.turn, mons: st.sd.map(x => x.mons), log: st.log };
 }
 // 單打一對一（隊伍分析、出戰選角的對位 duelVs 用）：x 我方 { key, set 登錄的配招, item（沒給照 battler；超級進化這場不進化、以原型上場的給 ''）}、
-// 對手寶可夢 key yk（配招照 OP.GG 常見，同 battler）。不靠亂數打一場：雙方每回合照 simDecide 取機率最高的選擇，
+// 對手寶可夢 key yk（配招照 Showdown 常見，同 battler）。不靠亂數打一場：雙方每回合照 simDecide 取機率最高的選擇，
 // 傷害、命中、追加效果用期望值（同樹搜尋往下推演）；每次重開 simCtx（共用的話 ctx.flip 會讓結果跟著前面算過的變）。
 // left＝換上來吃過牠最痛的一招後剩下的 HP（matchup 的 left）：我方從這個 HP 開打、畫皮已揭穿，只有我方的威嚇發動，
 // 對手早就在場上（不能用擊掌奇襲這類上場第一回合的招式）；沒給＝雙方剛出場、HP 全滿。

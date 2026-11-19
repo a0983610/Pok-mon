@@ -1,11 +1,11 @@
 // 單打對位勝率的事先計算：產生 repo 根目錄的 sim-matrix.js（網頁「隊伍分析」「出戰選角」的單打對位直接查，不用打開頁面再在背景算）。
 // 用法（在 repo 根目錄）：
-//   node tools/sim_matrix.js [排名前幾名 100]   單打排名前幾名（含超級進化）照 OP.GG 最常見的配招互打，重寫 sim-matrix.js（28 執行緒約幾分鐘）
+//   node tools/sim_matrix.js [排名前幾名 100]   單打排名前幾名（含超級進化）照 Showdown 最常見的配招互打，重寫 sim-matrix.js（28 執行緒約幾分鐘）
 //   node tools/sim_matrix.js check [組數 200]   從 sim-matrix.js 隨機挑幾組，用現在的引擎重算比對（同一組的亂數種子固定，引擎沒改應該完全一樣）
 // mons-data.js 更新（MONS_DATE 變了）就要重跑：日期不一樣網頁不用這份，全部改在背景算。模擬引擎改過也要重跑（check 會抓到不一樣的）。
 // 算法和網頁一樣：直接呼叫 roles.js 的 duelVs，它要的勝率（duelP 排進 SIM_P_WANT 的）交給 worker_threads 跑 simDuelP（同網頁的背景計算）。
 // 第一輪先算正面對打（這輪把不帶亂數模擬一場的 simDuel 換成直接回傳輸，免得每組白打一場），算好後第二輪 duelVs 才知道哪些要算換上來那場，
-// 第三輪確認沒有漏的。對手常帶超級石的，duelVs 會連超級進化型態一起要，不在前幾名的也照收（keys 排在後面，只有用到的格子有值）。
+// 第三輪確認沒有漏的。對手常超級進化的，duelVs 會連超級進化型態一起要，不在前幾名的也照收（keys 排在後面，只有用到的格子有值）。
 const fs = require('fs'), vm = require('vm'), path = require('path'), os = require('os');
 const { Worker, isMainThread, parentPort } = require('worker_threads');
 const R = path.resolve(__dirname, '..'), OUT = path.join(R, 'sim-matrix.js');
@@ -98,7 +98,7 @@ async function main() {
     (left == null ? head : sw)[c] = enc(p);
   }
   const body = { date: E.MONS_DATE, n: E.SIM_DUEL_N, top: TOP, keys, head: head.join(''), sw: sw.join('') };
-  fs.writeFileSync(OUT, '// 自動產生（node tools/sim_matrix.js），不要手改。單打排名前 ' + TOP + ' 名（含超級進化）照 OP.GG 最常見的配招互打的勝率'
+  fs.writeFileSync(OUT, '// 自動產生（node tools/sim_matrix.js），不要手改。單打排名前 ' + TOP + ' 名（含超級進化）照 Showdown 最常見的配招互打的勝率'
     + '（roles.js 的 duelVs 要的 simDuelP，每組 n 場）。\n'
     + '// 第 i 隻（我方）對第 j 隻（對手）在 head（正面對打）／sw（換上來）的第 i × keys.length + j 個字：\'0\' 起算 0～60（勝率 × 60），\'~\' 是沒算；'
     + 'date＝用的 mons-data.js 的 MONS_DATE（不一樣網頁就不用）\n'

@@ -4,17 +4,17 @@
 // weather：天氣；crit：急所；extra：加算的招式；terrain：場地；hh：隊友用了幫助（只在雙打算）；walls：防守方的牆（WALLS 的 key）；burn：攻擊方灼傷；
 // sa、sd：攻擊方、防守方速度投資；tw：有順風的一方、par：麻痺的一方（'a' 攻擊方／'d' 防守方）；tr：戲法空間；
 // noSet：關掉「套用登錄配招」的一方（預設有登錄就套用；從「對手」帶進來的鏡像對手自動關掉，也可以自己關）；
-// noTop：關掉「能力點數用 OP.GG 最常見的」的一方（換寶可夢時打開；關掉就照這頁的投資檔位）
+// noTop：關掉「能力點數用 Showdown 最常見的」的一方（換寶可夢時打開；關掉就照這頁的投資檔位）
 const CALC0 = { atk: '', def: '', ai: [32, 11], hi: [0, 10], di: [0, 10], st: [0, 0, 0, 0, 0, 0], aItem: '', dItem: '', aAb: '', dAb: '', weather: '', crit: false, extra: '',
   terrain: '', hh: false, walls: [], burn: false, sa: [32, 11], sd: [32, 11], tw: [], par: [], tr: false, noSet: [], noTop: [] };
 // 我方隊伍裡寶可夢 key 登錄的配招（見 useOf；沒在隊上或沒登錄是 null）；calcSet＝這一方（'a'／'d'）實際套用的配招（關掉了就是 null）
 const teamSetOf = key => { const i = key ? team.mons.indexOf(key) : -1; return i >= 0 ? team.sets[i] : null; };
 const calcSet = s => calc.noSet.includes(s) ? null : teamSetOf(calc[s === 'a' ? 'atk' : 'def']);
-// 這一方實際用的能力點數＋性格 { sp, nat }（見 invAt）：套用的登錄配招有填就用登錄的，不然用 OP.GG 最常見的（topSpread）；
+// 這一方實際用的能力點數＋性格 { sp, nat }（見 invAt）：套用的登錄配招有填就用登錄的，不然用 Showdown 最常見的（topSpread）；
 // 關掉了或沒有統計是 {}，照這頁的投資檔位。spName＝來源的名稱
 const setSpread = s => { const set = calcSet(s); return set && hasSpread(set) ? set : null; };
 const calcSpread = s => { const set = setSpread(s); return set ? { sp: set.sp, nat: set.nat } : !calc.noTop.includes(s) && topSpread(calc[s === 'a' ? 'atk' : 'def'], team.fmt) || {}; };
-const spName = s => setSpread(s) ? '登錄配招' : 'OP.GG 最常見';
+const spName = s => setSpread(s) ? '登錄配招' : 'Showdown 最常見';
 // 套用配招時這一方的道具：登錄了就用登錄的（這一方帶不了、或不影響傷害／速度的算沒帶），沒登錄照這頁選的 cur
 const itemFor = (side, set, key, cur) => set?.item ? (itemOK(side, key, set.item) ? set.item : '') : cur;
 const WALLS = ['reflect', 'light-screen', 'aurora-veil'], SIDES = ['a', 'd'];
@@ -54,11 +54,11 @@ function itemNote(v) {
 const itemRank = v => v.type || v.berry ? 1 + IDS.indexOf(v.type || v.berry) : 0;
 // 這一方（side a 攻擊方／d 防守方）的寶可夢 key 能不能帶道具 item：超級進化要帶超級石，電氣球限皮卡丘
 const itemOK = (side, key, item) => { const v = DMG_ITEMS[item], m = MON[key]; return !!v?.side.includes(side) && !m?.base && (!v.mon || (m && family(m) === v.mon)); };
-// 這一方的寶可夢 key 預設的道具：OP.GG 最常帶的（topItem）；這一方帶了沒作用（不影響傷害或速度）的算不帶
+// 這一方的寶可夢 key 預設的道具：Showdown 最常帶的（topItem）；這一方帶了沒作用（不影響傷害或速度）的算不帶
 const defItem = (side, key) => { const k = topItem(key, team.fmt); return itemOK(side, key, k) ? k : ''; };
 // 換邊後的道具：原本那邊的道具換邊後還有作用就留著，不然用這一邊的預設
 const swapItem = (side, key, cur) => itemOK(side, key, cur) ? cur : defItem(side, key);
-// 道具選單：只列影響傷害或速度的道具，這隻 OP.GG 常帶的排前面
+// 道具選單：只列影響傷害或速度的道具，這隻 Showdown 常帶的排前面
 function itemOptions(side, key, cur) {
   if (MON[key]?.base) return '<option value="">超級進化（帶超級石）</option>';
   const use = Object.fromEntries((key && useOf(key, team.fmt)?.items) || []);
@@ -74,13 +74,13 @@ const abOf = (key, cur) => defAbOf(key, team.fmt, cur);
 // 特性選單上算「影響這裡的計算」的：傷害（ATK_ABILS／DEF_ABILS）加上速度（speedOf）
 const SPE_ABIL_KEYS = [...Object.keys(SPE_ABILS), 'quick-feet'];
 const ATK_REL = new Set([...ATK_ABILS, ...SPE_ABIL_KEYS]), DEF_REL = new Set([...DEF_ABILS, ...SPE_ABIL_KEYS]);
-// 特性選單：這隻的 OP.GG 常用特性（附使用率），rel 以外的標「不影響這裡的計算」；超級進化只列固定特性
+// 特性選單：這隻的 Showdown 常用特性（附使用率），rel 以外的標「不影響這裡的計算」；超級進化只列固定特性
 function abilOptions(rel, key, cur) {
   const m = MON[key], tag = k => rel.has(k) ? '' : '・不影響這裡的計算';
   if (!m) return '<option value="">（先選寶可夢）</option>';
   if (m.base) { const k = m.megaAbils[0] || ''; return `<option value="${k}">${abilZh(k) || '固定特性'}（超級進化${tag(k)}）</option>`; }
   const list = useOf(key, team.fmt)?.abils || [];
-  if (!list.length) return '<option value="">沒有 OP.GG 特性統計（不算特性）</option>';
+  if (!list.length) return '<option value="">沒有 Showdown 特性統計（不算特性）</option>';
   return list.map(([k, p]) => `<option value="${k}"${k === cur ? ' selected' : ''}>${abilZh(k) || k}（${p}%${tag(k)}）</option>`).join('');
 }
 // 出場就開天氣的特性（FIELD_SET 對應天氣）
@@ -89,12 +89,12 @@ const ENTRY_WEATHER = ['drought', 'drizzle', 'sand-stream', 'snow-warning'];
 const ENTRY_TERRAIN = ['electric-surge', 'grassy-surge', 'misty-surge', 'psychic-surge'];
 // 威嚇的效果見 intimidateOn（js/engine/damage.js，出戰選角的對位也用）
 // 快選：我方隊伍（隊伍分析）挑了的寶可夢和對手（出戰選角）
-// 對手後面接著列出牠常帶超級石的超級進化型態（megaInfo 算進去的，同出戰選角的對位判斷）
+// 對手後面接著列出牠常超級進化的超級進化型態（megaInfo 算進去的，同出戰選角的對位判斷）
 function quickHTML(side) {
   const btn = (k, tip = '', opp = false) => `<button class="mini" data-side="${side}" data-k="${k}"${opp ? ' data-opp' : ''} aria-pressed="${calc[side] === k}"${tip ? ` title="${tip}"` : ''}>${MON[k].zh}</button>`;
   const mine = team.mons.filter(Boolean), opp = bring.opp.filter(Boolean);
   const oppBtns = opp.flatMap(k => [btn(k, '', true), ...megaInfo(MON[k], team.fmt).filter(x => x.counted)
-    .map(x => btn(x.mon.key, `${MON[k].zh}${x.p != null ? `有 ${x.p}% 帶超級石` : '可能超級進化'}`, true))]);
+    .map(x => btn(x.mon.key, `${MON[k].zh}${x.p != null ? `有 ${x.p}% 是這種超級進化` : '可能超級進化'}`, true))]);
   return (mine.length ? `<span class="meta">我方</span>${mine.map(k => btn(k)).join('')}` : '') + (opp.length ? `<span class="meta">對手</span>${oppBtns.join('')}` : '');
 }
 // 攻擊方／防守方各自的屬性篩選（不存網址，選好寶可夢就清掉）；有選屬性才列出符合的寶可夢
@@ -141,7 +141,7 @@ function calcHTML() {
   const fw = dmgRows(a, d, { ...o, last: first !== 0 }, calc.extra), { use, ok, why } = fw;
   // 反擊＝防守方打攻擊方，和按「⇄ 對調」看到的一樣：特性跟著寶可夢、投資檔位不動（攻擊投資套在防守方、HP／防禦投資套在攻擊方），
   // 道具照對調後的（swapItem：原本的道具換邊後還有作用就留著，不然用那一邊的預設），能力變化、加算招式、灼傷、幫助、牆不算；天氣、場地、急所照舊。
-  // 套用登錄配招的一方道具照登錄的；能力點數與性格是登錄的或 OP.GG 最常見的（calcSpread）時跟著寶可夢走（那隻自己的，反過來打也一樣）
+  // 套用登錄配招的一方道具照登錄的；能力點數與性格是登錄的或 Showdown 最常見的（calcSpread）時跟著寶可夢走（那隻自己的，反過來打也一樣）
   const bk = dmgRows({ key: Y.key, inv: calc.ai, ...spD, st: { atk: 0, spa: 0 }, item: itemFor('a', sd, calc.def, swapItem('a', calc.def, calc.dItem)), ab: Y.ab, set: Y.set },
     { key: X.key, hp: calc.hi, inv: calc.di, ...spA, st: { def: 0, spd: 0 }, item: itemFor('d', sa, calc.atk, swapItem('d', calc.atk, calc.aItem)), ab: X.ab, maxHp: X.maxHp },
     { ...o, hh: false, walls: [], burn: false, last: first !== 1 }, '');
@@ -178,7 +178,7 @@ function calcHTML() {
     hints.push(`<div class="x-line"><span class="x-msg">${D.zh}的${abilZh(dab)}出場會讓${A.zh}${txt}</span><button class="mini" data-im="${im.join('.')}">套用${txt}</button></div>`);
   }
   // 能力點數合計超過 66（每隻六項合計的上限）：攻擊方算攻擊／特攻＋速度，防守方算 HP＋防禦／特防＋速度
-  // （用登錄點數的一方在隊伍分析提示，用 OP.GG 最常見的一方不會超過，這裡都不算）
+  // （用登錄點數的一方在隊伍分析提示，用 Showdown 最常見的一方不會超過，這裡都不算）
   [['攻擊方', A, [['攻擊／特攻', calc.ai], ['速度', calc.sa]], spA], ['防守方', D, [['HP', calc.hi], ['防禦／特防', calc.di], ['速度', calc.sd]], spD]].forEach(([side, m, parts, sp]) => {
     if (sp.sp) return;
     const sum = parts.reduce((s, [, v]) => s + v[0], 0);
@@ -199,16 +199,16 @@ function calcHTML() {
     + dmgSumHTML(A, D, fw)
     + (dmgSumHTML(D, A, bk, `反擊（${D.zh}打回來）：`)
       || `<div class="c-sum">反擊（${D.zh}打回來）：${bk.use.length ? '常用招式裡沒有能算傷害的攻擊招式。'
-        : `${D.zh}在${FMT_ZH[team.fmt]}沒有 OP.GG 常用招式統計，按「⇄ 對調」後用「加算招式」選一招來算。`}</div>`)
-    + (use.length ? '' : `<p class="muted small b-intro">${A.zh}在${FMT_ZH[team.fmt]}沒有 OP.GG 常用招式統計，用上面的「加算招式」選一招來算。</p>`)
+        : `${D.zh}在${FMT_ZH[team.fmt]}沒有 Showdown 常用招式統計，按「⇄ 對調」後用「加算招式」選一招來算。`}</div>`)
+    + (use.length ? '' : `<p class="muted small b-intro">${A.zh}在${FMT_ZH[team.fmt]}沒有 Showdown 常用招式統計，用上面的「加算招式」選一招來算。</p>`)
     + ok.map(row).join('')
     + Object.entries(why).map(([w, ns]) => `<div class="x-line"><span class="x-msg">不算（${w}）：</span>${ns.join('、')}</div>`).join('')
     + '<p class="note">※ 公式照 Smogon damage-calc 的寶可夢冠軍版：Lv50、個體值 31，算進能力值與投資、本系 ×1.5、屬性相剋、亂數 85～100%（16 段）、'
     + '雙打範圍招式 ×0.75、天氣、急所 ×1.5、能力變化、特性、道具。投資套在這招用到的那項能力：物理招看攻擊打防禦、特殊招看特攻打特防（精神衝擊打防禦、撲擊用自己的防禦）；'
     + '「滿投資」＝能力點數 32，「＋性格」再 ×1.1；也可以在檔位旁直接輸入能力點數（每項 0～32，六項合計最多 66）並選性格'
-    + '（＋性格 ×1.1、−性格 ×0.9；HP 沒有性格），超過 66 時結果上方會提示。上方能力值是投資後、能力變化前的數字。列出的招式是 OP.GG 常用招式裡的攻擊招式，依傷害由高到低排。'
-    + '道具預設這隻 OP.GG 最常帶的（帶在這一方沒作用、不影響傷害或速度的算不帶），可在選單改。'
-    + '特性：超級進化用固定特性，其他預設用 OP.GG 使用率最高的，可在選單改；要看場上狀況的不算（如猛火、引火的強化、正電／負電、分析、大將、鬥爭心、畫皮），'
+    + '（＋性格 ×1.1、−性格 ×0.9；HP 沒有性格），超過 66 時結果上方會提示。上方能力值是投資後、能力變化前的數字。列出的招式是 Showdown 常用招式裡的攻擊招式，依傷害由高到低排。'
+    + '道具預設這隻 Showdown 最常帶的（帶在這一方沒作用、不影響傷害或速度的算不帶），可在選單改。'
+    + '特性：超級進化用固定特性，其他預設用 Showdown 使用率最高的，可在選單改；要看場上狀況的不算（如猛火、引火的強化、正電／負電、分析、大將、鬥爭心、畫皮），'
     + '毅力在勾「灼傷」時算（攻擊 ×1.5、不減半）。開天氣、開場地的特性和威嚇不會自動套用，結果上方會提示。破格會無視防守方的特性。電光束出招前特攻 +1 已算進去。'
     + '特性是變身者的（百變怪）照變成對面那隻算：寶可夢、能力點數與性格（對面沒有的照這頁的投資檔位）、特性、招式照對面的，HP 與道具照自己的'
     + '（兩邊都是變身者時後變的失敗，同「出戰選角」）；能力變化照這頁設定的。'
@@ -221,13 +221,13 @@ function calcHTML() {
     + '速度也照 Smogon 冠軍版：速度投資（能力點數與性格，投資檔位預設 32＋性格，即最速）→ 能力變化 → 順風 ×2、葉綠素／悠游自如／撥沙／撥雪在對應天氣與衝浪之尾在電氣場地 ×2、'
     + '飛毛腿在麻痺或灼傷時 ×1.5、講究圍巾 ×1.5 → 麻痺 ×½（飛毛腿不減）；同速時誰先動各 50%。先制招式（標「先制」）不看速度；'
     + '勾「戲法空間」時速度慢的先動（同 Pokémon Showdown，同速仍各 50%、先制招式仍優先）；不含加速這類回合中的變化。'
-    + `快選的「對手」會接著列出牠 OP.GG 道具統計有 ${ROLE_PCT}% 以上帶超級石的超級進化型態（同出戰選角的判斷）。`
+    + `快選的「對手」會接著列出牠 Showdown 統計有 ${ROLE_PCT}% 以上是超級進化的超級進化型態（同出戰選角的判斷）。`
     + '「反擊」＝防守方打攻擊方最痛的一招，和按「⇄ 對調」看到的相同：投資檔位不動'
-    + '（上方的攻擊投資套在防守方、HP／防禦投資套在攻擊方；用登錄的或 OP.GG 最常見的能力點數時跟著寶可夢走），'
+    + '（上方的攻擊投資套在防守方、HP／防禦投資套在攻擊方；用登錄的或 Showdown 最常見的能力點數時跟著寶可夢走），'
     + '道具照對調後的（原本的道具換邊後沒作用就用那一邊的預設），能力變化、灼傷、幫助、牆不算。'
-    + '能力點數與性格預設用 OP.GG 這隻最常見的（點數和性格分開統計，取對得上的組合裡兩者使用率相乘最高的：性格不會降有投點數的那項），'
-    + '6 項各自套用（物理招看攻擊、特殊招看特攻），這時投資檔位收起來；取消勾選「用 OP.GG 最常見的」就改用投資檔位，沒有統計的寶可夢直接用投資檔位。'
-    + '選到「隊伍分析」登錄了配招的我方隊員時，預設套用登錄的招式、特性、道具、能力點數與性格（反擊也照登錄的投資與道具；沒填的欄位照這頁的設定，點數沒填用 OP.GG 最常見的），'
+    + '能力點數與性格預設用 Showdown 這隻最常見的點數＋性格組合，'
+    + '6 項各自套用（物理招看攻擊、特殊招看特攻），這時投資檔位收起來；取消勾選「用 Showdown 最常見的」就改用投資檔位，沒有統計的寶可夢直接用投資檔位。'
+    + '選到「隊伍分析」登錄了配招的我方隊員時，預設套用登錄的招式、特性、道具、能力點數與性格（反擊也照登錄的投資與道具；沒填的欄位照這頁的設定，點數沒填用 Showdown 最常見的），'
     + '列出的招式標「登錄」；從「對手」快選或出戰選角帶進來的對手剛好和我方隊員是同一隻（鏡像對戰）時，那一方自動關掉「套用」，其他情況可以自己關。</p>';
 }
 function renderCalc() {
@@ -253,10 +253,10 @@ function renderCalc() {
         $(sel).disabled = true;
       }
       if (set?.ab) { $(abSel).innerHTML = `<option value="">登錄：${abilZh(set.ab) || set.ab}</option>`; $(abSel).disabled = true; }
-      // 沒用登錄的點數、這隻有 OP.GG 點數統計：多一列「用 OP.GG 最常見的」開關；用登錄的或 OP.GG 的點數時收起投資檔位
+      // 沒用登錄的點數、這隻有 Showdown 點數統計：多一列「用 Showdown 最常見的」開關；用登錄的或 Showdown 的點數時收起投資檔位
       const top = !setSpread(s) && topSpread(calc[side], team.fmt), trow = $(s === 'a' ? '#cATop' : '#cDTop');
       trow.hidden = !top;
-      trow.innerHTML = top ? `<span class="c-l">能力點數</span><label class="check"><input type="checkbox" data-usetop="${s}"${calc.noTop.includes(s) ? '' : ' checked'}> 用 OP.GG 最常見的</label>`
+      trow.innerHTML = top ? `<span class="c-l">能力點數</span><label class="check"><input type="checkbox" data-usetop="${s}"${calc.noTop.includes(s) ? '' : ' checked'}> 用 Showdown 最常見的</label>`
         + `<span class="muted small">${spText(top.sp)}；${natText(top.nat)}</span>` : '';
       (s === 'a' ? ['cAi', 'cSa'] : ['cHi', 'cDi', 'cSd']).forEach(id => { $('#' + id).closest('.c-f').hidden = !!calcSpread(s).sp; });
     });
@@ -284,7 +284,7 @@ function renderCalc() {
     : '<p class="empty">選好攻擊方和防守方後，這裡會列出攻擊方常用攻擊招式打過去的傷害、佔防守方 HP 的比例，以及幾下會被打倒。</p>';
   saveState();
 }
-// 換寶可夢時那一方的道具改成這隻的預設（defItem）、能力點數改回用 OP.GG 最常見的，清掉選的特性和麻痺；換攻擊方也清掉加算招式和灼傷
+// 換寶可夢時那一方的道具改成這隻的預設（defItem）、能力點數改回用 Showdown 最常見的，清掉選的特性和麻痺；換攻擊方也清掉加算招式和灼傷
 // （灼傷、麻痺是那一隻的狀態；幫助、牆、順風、天氣、場地是場上的，留著）。
 // 選好就清掉那一方的屬性篩選，收起清單。opp＝從「對手」帶進來的：我方隊伍剛好也有這隻（鏡像）時，這一方不套我方登錄的配招
 function setCalcMon(side, key, opp = false) {
@@ -341,7 +341,7 @@ $('#p-calc').addEventListener('input', e => {
   renderCalc();
 });
 $('#cFmt').addEventListener('click', setFmt);
-// 對調：特性和速度相關的（速度投資、速度變化、麻痺、那一方的順風）、「用 OP.GG 最常見的點數」開關跟著寶可夢走；道具換邊後還有作用就留著（兩邊都有作用的只有講究圍巾），
+// 對調：特性和速度相關的（速度投資、速度變化、麻痺、那一方的順風）、「用 Showdown 最常見的點數」開關跟著寶可夢走；道具換邊後還有作用就留著（兩邊都有作用的只有講究圍巾），
 // 不然用那一邊的預設（swapItem）；攻擊／防禦類能力變化、加算招式和只屬於某一方的灼傷、幫助、牆清掉（天氣、場地、戲法空間留著）
 $('#cSwap').addEventListener('click', () => {
   const [ai, di] = [calc.aItem, calc.dItem], flip = list => SIDES.filter(s => list.includes(s === 'a' ? 'd' : 'a'));
