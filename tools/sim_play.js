@@ -4,7 +4,7 @@
 // 用法（在 repo 根目錄；檔案＝這一局的紀錄 JSON，建議放 AgentData\temp\sim_play\）：
 //   node tools/sim_play.js new 檔案 [種子 20261118] [AI tree:400] [排名前幾名 60] [隊伍 6]
 //     隨機兩隊（同 sim_ai.js：單打前幾名、同家族不重複、超級進化最多 1 隻、配招 Showdown 預設、道具同一隊不重複）。
-//     隊伍 6（預設）＝各 6 隻：AI 照出戰選角（bringPlan 第 1 名的帶法與先發）帶 3 隻，印出雙方 6 隻給玩家選（見 bring）；
+//     隊伍 6（預設）＝各 6 隻：AI 用模擬選帶法（bringSim，單執行緒約 1～3 分鐘）帶 3 隻，印出雙方 6 隻給玩家選（見 bring）；
 //     隊伍 3＝直接各 3 隻、先發第一隻（2026-11-19 以前的做法），印出第一個要選的局面
 //   node tools/sim_play.js bring 檔案 先發編號 編號 編號 [理由…]   隊伍 6 的局：第 0 方帶哪 3 隻（[0]～[5]，第一個先發）
 //   node tools/sim_play.js show 檔案                 印出目前要選的局面（還沒選角就印雙方 6 隻；打完了就印結果）
@@ -60,9 +60,45 @@ function team2(seed, top, size) {
 }
 // 出戰選角（bringPlan）第 1 名的帶法：keys（6 隻）對上對手 opp（6 隻；看不到對手帶誰，雙方配招都照 Showdown 常見）帶哪幾隻
 // （隊伍索引，先發排第一；同 simMyPlan）。隊伍裡超級進化最多 1 隻，不會遇到「只能進化一隻」
+const planOf = (E, keys, opp) => E.bringPlan(keys.map(k => ({ defs: E.MON[k].types, key: k })), opp.map(k => E.MON[k]), 's');
+const leadFirst = (c, lead) => [lead, ...c.idx.filter(j => j !== lead)];
 function bringIdx(E, keys, opp) {
-  const plan = E.bringPlan(keys.map(k => ({ defs: E.MON[k].types, key: k })), opp.map(k => E.MON[k]), 's'), lead = plan.pick.js[0];
-  return [lead, ...plan.combos[0].idx.filter(j => j !== lead)];
+  const plan = planOf(E, keys, opp);
+  return leadFirst(plan.combos[0], plan.pick.js[0]);
+}
+// AI 用模擬選帶法（同 tools/sim_ai.js 的 bringSim、網頁出戰選角的「用模擬比較帶法」；2026-11-19 sim_ai vs 量過：對「照第 1 名帶」得分率 58.8%±2.3
+// （猜的對手帶法故意不含對手實際帶的保守版））：第 s 方的候補＝出戰選角第 1 名組合換三種先發＋第 2～BSIM_C 名組合（先發照 leadOf）；
+// 對手的帶法＝把對手也當成用出戰選角選（看得到我方 6 隻）的前 BSIM_SC 種。每個候補對每種對手帶法打 BSIM_K 場（雙方快速 ply1、我方當第 0 方、
+// 同一場候補之間同一組亂數），挑得分率（贏 1、平手 0.5）最高的，同分取前面的。單執行緒約 1～3 分鐘。
+// 回傳 { js 隊伍索引（先發排第一）, at 第幾個候補（0＝和出戰選角第 1 名一樣）, sc 各候補得分率 }
+const BSIM_C = 4, BSIM_SC = 5, BSIM_K = 16;
+function bringSim(E, six, s, seed) {
+  const mine = six[s], opp = six[1 - s], items = six.map(keys => E.simItems(keys, 's'));
+  const mp = planOf(E, mine, opp), top = mp.combos[0], lead0 = mp.pick.js[0], op = planOf(E, opp, mine);
+  const cands = [lead0, ...top.idx.filter(j => j !== lead0)].map(l => leadFirst(top, l)).concat(mp.combos.slice(1, BSIM_C).map(c => leadFirst(c, mp.leadOf(c).js[0])));
+  const scs = op.combos.slice(0, BSIM_SC).map(c => leadFirst(c, op.leadOf(c).js[0]));
+  // 這次選角的場次共用計算快取（我方固定第 0 方、每隻的配招道具固定）；每場複製一份 ctx 物件，推演的同速輪流（ctx.flip）不帶到下一場
+  const shared = E.simCtx('s');
+  const sc = cands.map(js => {
+    let t = 0;
+    scs.forEach((oj, r) => {
+      for (let i = 0; i < BSIM_K; i++) {
+        const ctx = { ...shared }, rnd = E.simRng(E.simHash(`bring:${seed}:${s}:${r}:${i}`)), pick = (c, x, hit) => E.simGreedyPick(ctx, c, x, hit);
+        const st = E.simStart([[js, mine, items[s]], [oj, opp, items[1 - s]]].map(([idx, keys, its], x) => ({ mons: idx.map(j => E.simMon(keys[j], undefined, its[j], x, 's')) })), false);
+        for (;;) {
+          const ph = E.simPhase(st);
+          if (ph === 'over') break;
+          const a = E.simDecide(ctx, st, ph, rnd);
+          if (ph === 'turn') E.simTurn(ctx, st, a, rnd, 0, pick); else E.simReplace(st, a, rnd);
+        }
+        const w = E.simWinner(st);
+        t += w === 0 ? 1 : w === 1 ? 0 : 0.5;
+      }
+    });
+    return t / (scs.length * BSIM_K);
+  });
+  const at = sc.indexOf(Math.max(...sc));
+  return { js: cands[at], at, sc: sc.map(r3) };
 }
 // 雙方帶出場的 { keys 寶可夢 key（先發排第一）, items 道具 }：隊伍 6 的局照 G.pick（G.six 的索引），道具照 6 隻分配（同一隊不重複）再取帶的；
 // 隊伍 3 的局是 G.T，道具照 3 隻分配
@@ -318,7 +354,7 @@ function preview(G, file) {
   st.sd.forEach((x, s) => { x.mons = mons[s]; });
   st.wx = st.ter = null;
   const out = ['===== 選角：雙方各 6 隻，選 3 隻帶出場（第一隻先發） =====',
-    '（看得到對手的 6 隻、看不到對手帶哪 3 隻；AI 照出戰選角的建議帶，也看不到你帶誰。帶出場後雙方都看得到對方帶的 3 隻）',
+    `（看得到對手的 6 隻、看不到對手帶哪 3 隻；AI ${G.bsim ? '用模擬比較出戰選角前幾名的帶法再挑' : '照出戰選角的建議帶'}，也看不到你帶誰。帶出場後雙方都看得到對方帶的 3 隻）`,
     DMG_NOTE, '（選角的傷害都是滿 HP、沒有能力變化、沒有天氣場地；出場特性（威嚇、開天氣場地等）沒算）'];
   // 出場會開天氣／場地的（simEntryField 的 WX_AB、TER_AB）：上面的傷害沒算，另外列
   const field = mons.flatMap((ms, s) => ms.map(M => [s, M, E.WX_AB[M.b.ab] || E.TER_AB[M.b.ab]]).filter(x => x[2]))
@@ -344,8 +380,10 @@ function review(G) {
   if (G.six) {
     const sug = bringIdx(E, G.six[0], G.six[1]).map(j => G.six[0][j]);
     console.log(`選角：雙方 6 隻 我方 ${zh(G.six[0])}｜AI ${zh(G.six[1])}`);
-    console.log(`  你帶 ${zh(L[0].keys)}；出戰選角會建議你帶 ${zh(sug)}${sug.join() === L[0].keys.join() ? '（一樣）' : '　★不同'}`);
+    console.log(`  你帶 ${zh(L[0].keys)}；出戰選角第 1 名會建議你帶 ${zh(sug)}${sug.join() === L[0].keys.join() ? '（一樣）' : '　★不同'}`);
     if (G.bwhy) console.log(`  理由：${G.bwhy}`);
+    if (G.bsim) console.log(`  AI 用模擬選：${G.bsim.at ? `第 ${G.bsim.at + 1} 個候補（和出戰選角第 1 名不同）` : '和出戰選角第 1 名一樣'}；` +
+      `各候補得分率 ${G.bsim.sc.map(x => (x * 100).toFixed(0) + '%').join('、')}（前 3 個＝第 1 名組合換先發，之後＝第 2～${BSIM_C} 名組合）`);
   }
   // 標籤要局面才知道換成誰：重播一次，每個局面記下選項名稱
   const names = [];
@@ -493,8 +531,13 @@ async function main() {
     if (![3, 6].includes(size)) throw new Error(`隊伍寫 6（各 6 隻選 3 隻）或 3（直接 3 對 3），收到「${a[3]}」`);
     fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
     const T = team2(seed, top, size);
-    // 隊伍 6：six＝雙方 6 隻，pick＝雙方帶的（six 的索引，先發排第一；AI 的現在就照出戰選角選好，第 0 方的等 bring）
-    const G = size === 6 ? { seed, ai, top, six: T, pick: [null, bringIdx(engine(), T[1], T[0])], d: [] } : { seed, ai, top, T, d: [] };
+    // 隊伍 6：six＝雙方 6 隻，pick＝雙方帶的（six 的索引，先發排第一；AI 的現在就用模擬選好（bsim 記選了第幾個候補與各候補得分率），第 0 方的等 bring）
+    let G;
+    if (size === 6) {
+      console.log('AI 用模擬選帶法中（約 1～3 分鐘）…');
+      const b = bringSim(engine(), T, 1, seed);
+      G = { seed, ai, top, six: T, pick: [null, b.js], bsim: { at: b.at, sc: b.sc }, d: [] };
+    } else G = { seed, ai, top, T, d: [] };
     save(file, G);
     advance(file, G);
   } else if (mode === 'bring') {
